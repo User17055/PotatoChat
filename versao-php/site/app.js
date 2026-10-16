@@ -121,9 +121,30 @@ function hue(name) {
   return [...String(name)].reduce((sum, char) => (sum * 31 + char.charCodeAt(0)) % 360, 7);
 }
 
+// Fotos de perfil (nome → endereço da imagem), atualizadas pela presença.
+const avatars = new Map();
+
+function setAvatar(name, path) {
+  if (path) avatars.set(name, new URL(path, document.baseURI).href);
+  else avatars.delete(name);
+}
+
 function paintAvatar(node, name) {
-  node.textContent = name ? name.trim()[0].toUpperCase() : "?";
+  const photo = name ? avatars.get(name) : "";
+  node.textContent = photo ? "" : name ? name.trim()[0].toUpperCase() : "?";
   node.style.setProperty("--hue", name ? hue(name) : 40);
+  node.style.backgroundImage = photo ? `url("${photo}")` : "";
+  node.classList.toggle("has-photo", Boolean(photo));
+}
+
+// Avatares fora da lista de pessoas (topo no celular, chamada, janela do perfil).
+function repaintAvatars() {
+  paintAvatar($("#me-avatar"), me);
+  paintAvatar($("#profile-face"), me);
+  if (!call) return;
+  paintAvatar($("#me-face"), me);
+  paintAvatar($("#call-avatar-face"), call.name || peerName);
+  paintAvatar($("#incoming-face"), call.name);
 }
 
 function uid() {
@@ -203,21 +224,58 @@ const rememberedName = store.get("localStorage", NAME_KEY) || "";
 $("#name").value = rememberedName;
 if (rememberedName) $(".login-panel .eyebrow").textContent = `Oi de novo, ${rememberedName}`;
 
+const passwordInputs = [$("#password"), $("#password-again")];
+
 $("#peek").addEventListener("click", () => {
-  const input = $("#password");
-  const show = input.type === "password";
-  input.type = show ? "text" : "password";
+  const show = $("#password").type === "password";
+  passwordInputs.forEach((input) => { input.type = show ? "text" : "password"; });
   $("#peek").classList.toggle("shown", show);
   $("#peek").setAttribute("aria-label", show ? "Esconder senha" : "Mostrar senha");
-  input.focus();
+  $("#password").focus();
 });
 
-for (const type of ["keydown", "keyup"]) {
-  $("#password").addEventListener(type, (event) => {
-    $("#caps").classList.toggle("hidden", !event.getModifierState?.("CapsLock"));
-  });
+for (const input of passwordInputs) {
+  for (const type of ["keydown", "keyup"]) {
+    input.addEventListener(type, (event) => {
+      $("#caps").classList.toggle("hidden", !event.getModifierState?.("CapsLock"));
+    });
+  }
+  input.addEventListener("blur", () => $("#caps").classList.add("hidden"));
 }
-$("#password").addEventListener("blur", () => $("#caps").classList.add("hidden"));
+
+// Primeiro acesso: as duas primeiras pessoas escolhem nome e senha, que ficam valendo para sempre.
+const loginHint = $("#login-hint");
+let openSeats = 0;
+let creating = false;
+
+function paintHint() {
+  const text = creating
+    ? `Primeiro acesso de ${creating}: repita a senha para criar sua conta. Depois disso, nome e senha não mudam mais.`
+    : openSeats >= 2 ? "Primeiro acesso: escolha seu nome e uma senha. Eles ficam guardados e valem para sempre."
+    : openSeats === 1 ? "Primeira vez aqui? Escolha seu nome e uma senha para criar sua conta."
+    : "";
+  loginHint.textContent = text;
+  loginHint.classList.toggle("hidden", !text);
+}
+
+function setCreating(name) {
+  creating = name;
+  $("#again-wrap").classList.toggle("hidden", !name);
+  $("#password-again").required = Boolean(name);
+  $("#password-again").value = "";
+  loginForm.querySelector(".primary .label").textContent = name ? "Criar minha conta" : "Entrar no nosso chat";
+  paintHint();
+}
+
+$("#name").addEventListener("input", () => { if (creating) setCreating(""); });
+
+async function loadWelcome() {
+  try {
+    const response = await fetch(apiUrl("welcome"), { cache: "no-store" });
+    if (response.ok) openSeats = (await response.json()).open || 0;
+  } catch {}
+  paintHint();
+}
 
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -226,17 +284,26 @@ loginForm.addEventListener("submit", async (event) => {
   submit.disabled = true;
   submit.classList.add("loading");
   try {
+    const body = { name: $("#name").value, password: $("#password").value };
+    if (creating) body.confirm = $("#password-again").value;
     const response = await fetch(apiUrl("login"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: $("#name").value, password: $("#password").value })
+      body: JSON.stringify(body)
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.error || "Não foi possível entrar.");
+    if (result.confirm) {
+      setCreating(result.name);
+      $("#password-again").focus();
+      return;
+    }
     store.set("localStorage", NAME_KEY, result.name);
-    $("#password").value = "";
+    passwordInputs.forEach((input) => { input.value = ""; });
     startSession(result, { animate: true });
+    if (result.created) setTimeout(() => toast("Conta criada! Toque no seu avatar para escolher uma foto.", "ok"), 900);
   } catch (error) {
+    if (creating) $("#password-again").value = "";
     loginError.textContent = error.message === "Failed to fetch" ? "Servidor fora do ar. Tente de novo." : error.message;
     fx.shake($(".login-panel"));
     sound.play("error");
@@ -850,7 +917,7 @@ function notify(message) {
   document.title = `(${unreadTitle}) Potato Chat`;
   if (!notificationsOn()) return;
   try {
-    const notification = new Notification(message.sender, { body: message.deleted ? "" : message.text.slice(0, 160), tag: "potato-chat", renotify: true, silent: true });
+    const notification = new Notification(message.sender, { body: message.deleted ? "" : message.text.slice(0, 160), icon: avatars.get(message.sender), tag: "potato-chat", renotify: true, silent: true });
     notification.onclick = () => { window.focus(); notification.close(); };
   } catch {}
 }
@@ -892,10 +959,107 @@ document.querySelectorAll("#toggle-sound, #toggle-sound-side").forEach((button) 
   fx.press(button);
 }));
 
+// ---------- foto de perfil ----------
+
+const profile = $("#profile");
+const PHOTO_SIZE = 320;
+
+function onProfileKey(event) {
+  if (event.key !== "Escape") return;
+  event.stopPropagation();
+  closeProfile();
+}
+
+function openProfile() {
+  if (!me) return;
+  $("#profile-name").textContent = me;
+  $("#photo-remove").classList.toggle("hidden", !avatars.has(me));
+  repaintAvatars();
+  profile.classList.remove("hidden");
+  fx.incoming(profile.querySelector(".modal-card"));
+  document.addEventListener("keydown", onProfileKey, true);
+}
+
+function closeProfile() {
+  profile.classList.add("hidden");
+  document.removeEventListener("keydown", onProfileKey, true);
+}
+
+function readImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => { URL.revokeObjectURL(url); resolve(image); };
+    image.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Não deu para abrir essa imagem. Tente uma foto JPG ou PNG.")); };
+    image.src = url;
+  });
+}
+
+// Recorta o centro num quadrado e reduz: a foto sobe leve (uns 30 KB) e já no formato do avatar.
+async function squarePhoto(file) {
+  if (!file.type.startsWith("image/")) throw new Error("Escolha um arquivo de imagem.");
+  if (file.size > 25e6) throw new Error("Essa imagem é grande demais.");
+  const image = await readImage(file);
+  const side = Math.min(image.naturalWidth, image.naturalHeight);
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = PHOTO_SIZE;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#24201a";
+  context.fillRect(0, 0, PHOTO_SIZE, PHOTO_SIZE);
+  context.imageSmoothingQuality = "high";
+  context.drawImage(image, (image.naturalWidth - side) / 2, (image.naturalHeight - side) / 2, side, side, 0, 0, PHOTO_SIZE, PHOTO_SIZE);
+  return canvas.toDataURL("image/jpeg", 0.86);
+}
+
+function savePhoto(image) {
+  if (!socket?.connected) return toast("Sem conexão agora. Tente de novo em instantes.", "error");
+  const card = profile.querySelector(".modal-card");
+  card.classList.add("busy");
+  socket.timeout(20000).emit("avatar", { image }, (error, result) => {
+    card.classList.remove("busy");
+    if (error || !result?.ok) {
+      toast(result?.error || "Não foi possível salvar a foto.", "error");
+      sound.play("error");
+      return;
+    }
+    presenceList = presenceList.map((user) => (user.name === me ? { ...user, avatar: result.avatar } : user));
+    updatePresence(presenceList);
+    $("#photo-remove").classList.toggle("hidden", !image);
+    fx.pop($("#profile-face"));
+    sound.play(image ? "sparkle" : "tap");
+    toast(image ? "Foto atualizada" : "Foto removida", "ok");
+  });
+}
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest("[data-profile]")) openProfile();
+});
+
+profile.addEventListener("click", (event) => {
+  if (event.target === profile || event.target.closest("#profile-close")) closeProfile();
+  else if (event.target.closest("#profile-photo, #photo-pick")) $("#photo-input").click();
+  else if (event.target.closest("#photo-remove")) savePhoto(null);
+});
+
+$("#photo-input").addEventListener("change", async () => {
+  const [file] = $("#photo-input").files;
+  $("#photo-input").value = "";
+  if (!file) return;
+  try {
+    savePhoto(await squarePhoto(file));
+  } catch (error) {
+    toast(error.message, "error");
+    sound.play("error");
+  }
+});
+
 // ---------- presença e digitação ----------
 
 function updatePresence(users) {
   presenceList = users;
+  avatars.clear();
+  users.forEach((user) => setAvatar(user.name, user.avatar));
+  repaintAvatars();
   const others = users.filter((user) => user.name !== me);
   const peer = others.find((user) => user.online)
     || others.sort((a, b) => String(b.lastSeen).localeCompare(String(a.lastSeen)))[0];
@@ -921,7 +1085,8 @@ function updatePresence(users) {
   peopleEl.replaceChildren();
   const self = users.find((user) => user.name === me) || { name: me, online: true };
   for (const person of [self, peer].filter(Boolean)) {
-    const row = el("div", `person${person.online ? " online" : ""}`);
+    // A própria linha é um botão: abre a janela para trocar a foto.
+    const row = el(person === self ? "button" : "div", `person${person.online ? " online" : ""}`);
     const avatar = el("div", "avatar");
     paintAvatar(avatar, person.name);
     avatar.classList.toggle("online", person.online);
@@ -929,6 +1094,12 @@ function updatePresence(users) {
     text.append(el("strong", "", person.name === me ? `${person.name} (você)` : person.name),
       el("small", "", person.online ? (person.active ? "Ativo agora" : "Online") : lastSeenLabel(person.lastSeen)));
     row.append(avatar, text);
+    if (person === self) {
+      row.type = "button";
+      row.title = "Trocar sua foto";
+      row.dataset.profile = "";
+      row.append(icon("camera", "icon person-edit"));
+    }
     peopleEl.append(row);
   }
 }
@@ -941,7 +1112,7 @@ function paintPeerStatus() {
   const peer = presenceList.find((user) => user.name === peerName);
   peerStatus.classList.toggle("live", Boolean(peerTyping || peer?.online));
   if (peerTyping) peerStatus.textContent = "digitando…";
-  else if (!peer) peerStatus.textContent = "Compartilhe o link e a senha para a outra pessoa entrar";
+  else if (!peer) peerStatus.textContent = "Mande o link para a outra pessoa criar a conta dela";
   else if (peer.online) peerStatus.textContent = peer.active ? "online agora" : "online";
   else peerStatus.textContent = lastSeenLabel(peer.lastSeen);
 }
@@ -1498,6 +1669,7 @@ if (saved?.token) {
   startSession(saved, { animate: false });
 } else {
   fx.intro();
+  loadWelcome();
   tellParent({ type: "potato:ready" });
   // Cursor já no campo certo (no celular não, para o teclado não pular na cara).
   if (!matchMedia("(pointer: coarse)").matches) (rememberedName ? $("#password") : $("#name")).focus({ preventScroll: true });

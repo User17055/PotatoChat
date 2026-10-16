@@ -1,5 +1,5 @@
 <?php
-// Núcleo do Potato Chat em PHP + MySQL: banco de dados, sessão, presença e fila de eventos.
+// Núcleo do Potato Chat em PHP + MySQL: banco de dados, contas, sessão, presença e fila de eventos.
 // As tabelas são criadas sozinhas no primeiro acesso (ou importe banco.sql pelo phpMyAdmin).
 
 declare(strict_types=1);
@@ -11,7 +11,9 @@ const PAGE_SIZE = 60;
 const REACTIONS = ['❤️', '😂', '😮', '😢', '👍', '🔥'];
 const MAX_BODY = 1000000;
 const EVENT_KEEP_MS = 120000;
-const SCHEMA_VERSION = '1';
+const SCHEMA_VERSION = '2';
+const MIN_PASSWORD = 4;
+const AVATAR_MAX = 400000;
 
 final class HttpError extends RuntimeException
 {
@@ -34,9 +36,7 @@ function config(): array
         $custom = is_file($file) ? require $file : [];
         $custom = is_array($custom) ? $custom : [];
         $config = array_merge([
-            'password' => 'batata123',
             'token_secret' => '',
-            'users' => [],
             'poll_wait' => 20,
         ], $custom);
         $config['db'] = array_merge([
@@ -65,14 +65,6 @@ function client_ttl_ms(): int
 {
     $wait = poll_wait();
     return ($wait > 0 ? $wait + 30 : 90) * 1000;
-}
-
-function fixed_users(): array
-{
-    $users = config()['users'];
-    if (is_string($users)) $users = explode(',', $users);
-    $users = array_values(array_filter(array_map(fn($name) => trim((string) $name), (array) $users), 'strlen'));
-    return array_slice($users, 0, MAX_USERS);
 }
 
 // ---------- utilidades ----------
@@ -169,7 +161,8 @@ function schema(): array
         'CREATE TABLE IF NOT EXISTS ' . t('users') . " (
   position INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(64) $exact NOT NULL,
-  created_at VARCHAR(32) $ascii NOT NULL
+  created_at VARCHAR(32) $ascii NOT NULL,
+  " . implode(",\n  ", user_columns()) . "
 ) $table",
         'CREATE TABLE IF NOT EXISTS ' . t('messages') . " (
   n BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -223,6 +216,46 @@ function schema(): array
     ];
 }
 
+// Senha (hash) e foto de cada conta. Ficam separadas para atualizar a tabela da versão 1.
+function user_columns(): array
+{
+    $ascii = 'CHARACTER SET ascii COLLATE ascii_bin';
+    return [
+        'pass_hash' => "pass_hash VARCHAR(255) $ascii NULL",
+        'avatar' => "avatar MEDIUMTEXT $ascii NULL",
+        'avatar_type' => "avatar_type VARCHAR(16) $ascii NULL",
+        'avatar_key' => "avatar_key CHAR(32) $ascii NULL",
+    ];
+}
+
+// Cria as tabelas que faltam e acrescenta as colunas novas. Uma requisição por vez.
+function migrate(PDO $pdo): void
+{
+    $c = config()['db'];
+    $lock = 'potato_schema_' . md5($c['name'] . '|' . $c['prefix']);
+    $pdo->query('SELECT GET_LOCK(' . $pdo->quote($lock) . ', 20)')->fetchColumn();
+    try {
+        try {
+            // Outra requisição pode ter atualizado enquanto esta esperava a vez.
+            if ($pdo->query('SELECT value FROM ' . t('settings') . " WHERE name = 'schema'")->fetchColumn() === SCHEMA_VERSION) return;
+        } catch (PDOException $error) {
+            // Banco vazio: a tabela settings ainda não existe.
+        }
+        foreach (schema() as $sql) $pdo->exec($sql);
+        $columns = $pdo->query('SHOW COLUMNS FROM ' . t('users'))->fetchAll(PDO::FETCH_COLUMN);
+        $missing = array_diff_key(user_columns(), array_flip($columns));
+        if ($missing) {
+            $changes = array_map(fn($column) => "ADD COLUMN $column", array_values($missing));
+            if (isset($missing['avatar_key'])) $changes[] = 'ADD KEY user_avatar (avatar_key)';
+            $pdo->exec('ALTER TABLE ' . t('users') . ' ' . implode(', ', $changes));
+        }
+        $pdo->prepare('INSERT INTO ' . t('settings') . ' (name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)')
+            ->execute(['schema', SCHEMA_VERSION]);
+    } finally {
+        $pdo->query('SELECT RELEASE_LOCK(' . $pdo->quote($lock) . ')')->fetchColumn();
+    }
+}
+
 function db(): PDO
 {
     static $pdo = null;
@@ -259,9 +292,7 @@ function settings(?PDO $pdo = null): array
         $settings = [];
     }
     if (($settings['schema'] ?? '') !== SCHEMA_VERSION) {
-        foreach (schema() as $sql) $pdo->exec($sql);
-        $pdo->prepare('INSERT INTO ' . t('settings') . ' (name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)')
-            ->execute(['schema', SCHEMA_VERSION]);
+        migrate($pdo);
         $settings = $pdo->query('SELECT name, value FROM ' . t('settings'))->fetchAll(PDO::FETCH_KEY_PAIR);
     }
     return $settings;
@@ -341,26 +372,38 @@ function issue_token(string $name): string
     return sign(['name' => $name, 'expiresAt' => now_ms() + SESSION_DAYS * DAY_MS, 'nonce' => uuid()]);
 }
 
-// Só duas pessoas: definidas em config.php ou as duas primeiras que entrarem (ficam na tabela users).
-function users(): array
+// Só duas contas: as duas primeiras pessoas que entram escolhem nome e senha, e eles valem para sempre.
+// (A foto não entra aqui: ela só é lida quando alguém abre a imagem.)
+function accounts(): array
 {
-    $fixed = fixed_users();
-    if ($fixed) return $fixed;
-    return query('SELECT name FROM ' . t('users') . ' ORDER BY position LIMIT ' . MAX_USERS)->fetchAll(PDO::FETCH_COLUMN);
+    return query('SELECT position, name, pass_hash, avatar_key FROM ' . t('users') . ' ORDER BY position LIMIT ' . MAX_USERS)->fetchAll();
 }
 
-function known_user(string $name): ?string
+function users(): array
 {
-    foreach (users() as $user) if (same_name($user, $name)) return $user;
+    return array_column(accounts(), 'name');
+}
+
+function find_account(string $name): ?array
+{
+    foreach (accounts() as $account) if (same_name($account['name'], $name)) return $account;
     return null;
 }
 
 function authenticate(array $input): array
 {
     $session = verify_token($input['token'] ?? null);
-    $account = $session ? known_user($session['name']) : null;
-    if (!$account) throw new HttpError(401, 'Sessão inválida. Entre novamente.');
-    return ['name' => $account, 'expiresAt' => (int) $session['expiresAt']];
+    $account = $session ? find_account($session['name']) : null;
+    // Conta sem senha (criada antes das senhas, ou senha apagada no phpMyAdmin): entra de novo e escolhe uma.
+    if (!$account || $account['pass_hash'] === null) throw new HttpError(401, 'Sessão inválida. Entre novamente.');
+    return ['name' => $account['name'], 'expiresAt' => (int) $session['expiresAt']];
+}
+
+// Para a tela de login: quantas contas ainda podem ser criadas.
+function welcome(): array
+{
+    $ready = array_filter(accounts(), fn($account) => $account['pass_hash'] !== null);
+    return ['open' => MAX_USERS - count($ready)];
 }
 
 // Limite simples contra abuso: no máximo $max registros na janela de tempo.
@@ -386,17 +429,69 @@ function login(array $input, string $ip): array
         $name = text_slice(trim(preg_replace('/\s+/u', ' ', str($input['name'] ?? '')) ?? ''), 24);
         $password = str($input['password'] ?? '');
         if (text_length($name) < 2) throw new HttpError(400, 'Digite um nome com pelo menos 2 caracteres.');
-        if (!hash_equals((string) config()['password'], $password)) throw new HttpError(401, 'Senha incorreta.');
+        if ($password === '') throw new HttpError(400, 'Digite sua senha.');
+        if (strlen($password) > 200 || strpos($password, "\0") !== false) throw new HttpError(400, 'Senha inválida.');
 
-        $account = known_user($name);
-        if (!$account) {
-            $users = users();
-            if (count($users) >= MAX_USERS) throw new HttpError(403, 'Nosso chat é só de ' . implode(' e ', $users) . '.');
-            query('INSERT INTO ' . t('users') . ' (name, created_at) VALUES (?, ?)', [$name, iso()]);
-            $account = $name;
+        $account = find_account($name);
+        if ($account && $account['pass_hash'] !== null) {
+            if (!password_verify($password, $account['pass_hash'])) throw new HttpError(401, 'Senha incorreta.');
+            if (password_needs_rehash($account['pass_hash'], PASSWORD_DEFAULT)) {
+                query('UPDATE ' . t('users') . ' SET pass_hash = ? WHERE position = ?', [password_hash($password, PASSWORD_DEFAULT), $account['position']]);
+            }
+            return ['token' => issue_token($account['name']), 'name' => $account['name']];
         }
-        return ['token' => issue_token($account), 'name' => $account];
+
+        // Primeiro acesso: cria a conta (ou só a senha, se a conta veio da versão sem senhas).
+        if (!$account && count(accounts()) >= MAX_USERS) throw new HttpError(403, 'Nosso chat é só de ' . implode(' e ', users()) . '.');
+        $name = $account['name'] ?? $name;
+        if (text_length($password) < MIN_PASSWORD) throw new HttpError(400, 'Escolha uma senha com pelo menos ' . MIN_PASSWORD . ' caracteres.');
+        // Nome e senha não mudam mais: o navegador pede a senha de novo antes de criar.
+        if (!array_key_exists('confirm', $input)) return ['confirm' => true, 'name' => $name];
+        if (!hash_equals($password, str($input['confirm']))) throw new HttpError(400, 'As senhas não são iguais. Digite de novo.');
+
+        $hash = password_hash($password, PASSWORD_DEFAULT);
+        if ($account) query('UPDATE ' . t('users') . ' SET pass_hash = ? WHERE position = ?', [$hash, $account['position']]);
+        else query('INSERT INTO ' . t('users') . ' (name, created_at, pass_hash) VALUES (?, ?, ?)', [$name, iso(), $hash]);
+        return ['token' => issue_token($name), 'name' => $name, 'created' => true];
     });
+}
+
+// ---------- foto de perfil ----------
+
+function avatar_url(?string $key): ?string
+{
+    return $key ? 'api.php?action=avatar&k=' . $key : null;
+}
+
+// Foto já recortada e reduzida no navegador (data URL). null remove a foto.
+function set_avatar(string $name, $image): array
+{
+    if ($image === null || $image === '') {
+        query('UPDATE ' . t('users') . ' SET avatar = NULL, avatar_type = NULL, avatar_key = NULL WHERE name = ?', [$name]);
+        emit('presence');
+        return ['ok' => true, 'avatar' => null];
+    }
+    if (!is_string($image) || !preg_match('#^data:image/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$#', $image, $match)) {
+        return ['ok' => false, 'error' => 'Formato de imagem não aceito.'];
+    }
+    $raw = base64_decode($match[2], true);
+    if ($raw === false || strlen($raw) > AVATAR_MAX) return ['ok' => false, 'error' => 'Imagem grande demais.'];
+    $info = @getimagesizefromstring($raw);
+    if (!$info || $info['mime'] !== 'image/' . $match[1] || $info[0] < 16 || $info[1] < 16 || $info[0] > 2048 || $info[1] > 2048) {
+        return ['ok' => false, 'error' => 'Imagem inválida.'];
+    }
+    // Chave nova a cada troca: o endereço da foto muda e ninguém fica com a antiga no cache.
+    $key = bin2hex(random_bytes(16));
+    query('UPDATE ' . t('users') . ' SET avatar = ?, avatar_type = ?, avatar_key = ? WHERE name = ?', [base64_encode($raw), $info['mime'], $key, $name]);
+    emit('presence');
+    return ['ok' => true, 'avatar' => avatar_url($key)];
+}
+
+function find_avatar(string $key): ?array
+{
+    if (!preg_match('/^[0-9a-f]{32}$/', $key)) return null;
+    $row = query('SELECT avatar, avatar_type FROM ' . t('users') . ' WHERE avatar_key = ?', [$key])->fetch();
+    return $row ? ['type' => $row['avatar_type'], 'data' => (string) base64_decode($row['avatar'])] : null;
 }
 
 // ---------- mensagens ----------
@@ -518,12 +613,13 @@ function presence(): array
         if ($client['visible']) $active[$client['name']] = true;
     }
     $lastSeen = query('SELECT name, last_seen FROM ' . t('status'))->fetchAll(PDO::FETCH_KEY_PAIR);
-    return array_map(fn($name) => [
-        'name' => $name,
-        'online' => isset($online[$name]),
-        'active' => isset($active[$name]),
-        'lastSeen' => $lastSeen[$name] ?? null,
-    ], users());
+    return array_map(fn($account) => [
+        'name' => $account['name'],
+        'online' => isset($online[$account['name']]),
+        'active' => isset($active[$account['name']]),
+        'lastSeen' => $lastSeen[$account['name']] ?? null,
+        'avatar' => avatar_url($account['avatar_key']),
+    ], accounts());
 }
 
 function conn_id(array $input): string
@@ -594,6 +690,9 @@ function act(array $me, string $event, $data)
 
         case 'history:before':
             return page(str($body['before'] ?? ''));
+
+        case 'avatar':
+            return set_avatar($name, $body['image'] ?? null);
 
         case 'react':
             $emoji = str($body['emoji'] ?? '');

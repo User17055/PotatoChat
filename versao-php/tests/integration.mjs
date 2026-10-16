@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import zlib from "node:zlib";
 
 // Teste de integração da versão PHP + MySQL: sobe o servidor embutido do PHP (php -S) e conversa
 // com ele usando o mesmo realtime.js do site, como o navegador faria.
@@ -24,7 +25,7 @@ const env = (name, fallback) => process.env[`POTATO_TEST_DB_${name}`] || fallbac
 const prefix = `teste${Date.now().toString(36)}_`;
 const db = { host: env("HOST", "127.0.0.1"), port: Number(env("PORT", 3399)), name: env("NAME", "potato_teste"), user: env("USER", "potato"), pass: env("PASS", "senha-teste"), prefix };
 
-await fs.writeFile(configFile, `<?php return ${phpValue({ password: "senha-de-teste", token_secret: secret, users: [], db, poll_wait: 3 })};`);
+await fs.writeFile(configFile, `<?php return ${phpValue({ token_secret: secret, db, poll_wait: 3 })};`);
 
 function phpValue(value) {
   if (typeof value === "string") return `'${value.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`;
@@ -40,6 +41,30 @@ const phpArgs = execFileSync("php", ["-r", "echo extension_loaded('pdo_mysql') ?
 function sql(statement) {
   const code = `require ${phpValue(path.join(site, "lib", "potato.php").replaceAll("\\", "/"))}; $s = query(str_replace('{p}', ${phpValue(prefix)}, ${phpValue(statement)})); echo json_encode($s->columnCount() ? $s->fetchAll() : [], JSON_UNESCAPED_UNICODE);`;
   return JSON.parse(execFileSync("php", [...phpArgs, "-r", code], { env: { ...process.env, POTATO_CONFIG: configFile } }).toString() || "[]");
+}
+
+// Consulta sem passar pelo site (que atualizaria as tabelas antes): para montar um banco da versão 1.
+function rawSql(statement) {
+  const code = `$c = (require getenv('POTATO_CONFIG'))['db']; $pdo = new PDO("mysql:host={$c['host']};port={$c['port']};dbname={$c['name']};charset=utf8mb4", $c['user'], $c['pass']); $pdo->exec(str_replace('{p}', ${phpValue(prefix)}, ${phpValue(statement)}));`;
+  execFileSync("php", [...phpArgs, "-r", code], { env: { ...process.env, POTATO_CONFIG: configFile } });
+}
+
+// PNG de verdade (cores lisas), para testar a foto de perfil.
+function makePng(width, height) {
+  const chunk = (type, data) => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(zlib.crc32(Buffer.concat([Buffer.from(type), data])));
+    return Buffer.concat([length, Buffer.from(type), data, crc]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header.set([8, 2, 0, 0, 0], 8);
+  const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(width * 3, 0xc8)]);
+  const pixels = zlib.deflateSync(Buffer.concat(Array.from({ length: height }, () => row)));
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", header), chunk("IDAT", pixels), chunk("IEND", Buffer.alloc(0))]);
 }
 
 function startServer(listen, env = {}) {
@@ -78,7 +103,8 @@ async function api(action, body, url = baseUrl) {
   return { status: response.status, body: await response.json() };
 }
 
-const login = (name, password = "senha-de-teste") => api("login", { name, password });
+const login = (name, password, confirm) => api("login", confirm === undefined ? { name, password } : { name, password, confirm });
+const welcome = async () => (await fetch(`${baseUrl}/api.php?action=welcome`)).json();
 
 function connect(token) {
   return new Promise((resolve, reject) => {
@@ -101,9 +127,26 @@ const silent = (socket, event, ms = 3500) => new Promise((resolve, reject) => {
   socket.on(event, fail);
   setTimeout(() => { socket.off(event, fail); resolve(); }, ms);
 });
+// Espera até o evento chegar com o conteúdo esperado (a presença chega várias vezes).
+const until = (socket, event, accept, ms = 8000) => new Promise((resolve, reject) => {
+  const check = (payload) => {
+    if (!accept(payload)) return;
+    clearTimeout(timer);
+    socket.off(event, check);
+    resolve(payload);
+  };
+  const timer = setTimeout(() => { socket.off(event, check); reject(new Error(`Evento não chegou: ${event}`)); }, ms);
+  socket.on(event, check);
+});
 const withAck = (socket, event, data) => new Promise((resolve, reject) => {
   socket.timeout(10000).emit(event, data, (error, result) => (error ? reject(error) : resolve(result)));
 });
+
+// Banco da versão 1 (sem senhas nem fotos), com uma conta antiga: o site precisa atualizar sozinho.
+rawSql(`CREATE TABLE {p}settings (name VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY, value TEXT NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE {p}users (position INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, name VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL, created_at VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+INSERT INTO {p}settings (name, value) VALUES ('schema', '1');
+INSERT INTO {p}users (name, created_at) VALUES ('Pessoa 1', '2026-01-01T00:00:00.000Z');`);
 
 const servers = [startServer(port), startServer(longPort, { POTATO_LONG_POLL: "1" })];
 
@@ -120,21 +163,35 @@ try {
     assert.equal((await fetch(`${baseUrl}/${file}`)).status, 200, file);
   }
 
-  const denied = await login("Pessoa 1", "senha-errada");
-  assert.equal(denied.status, 401);
+  // As tabelas da versão 1 ganharam as colunas novas, e a conta antiga continua lá (ainda sem senha).
+  const columns = sql("SHOW COLUMNS FROM {p}users").map((row) => row.Field);
+  for (const column of ["pass_hash", "avatar", "avatar_type", "avatar_key"]) assert.ok(columns.includes(column), column);
+  assert.equal(sql("SELECT value FROM {p}settings WHERE name = 'schema'")[0].value, "2");
+  assert.deepEqual(await welcome(), { open: 2 });
 
-  const firstLogin = await login("Pessoa 1");
-  const secondLogin = await login("Pessoa 2");
-  const thirdLogin = await login("Intrusa");
+  // Primeiro acesso: o servidor pede a senha de novo antes de guardar, e não aceita senha curta.
+  assert.deepEqual((await login("pessoa 1", "senha-1")).body, { confirm: true, name: "Pessoa 1" });
+  assert.equal((await login("Pessoa 1", "senha-1", "senha-um")).body.error, "As senhas não são iguais. Digite de novo.");
+  assert.equal((await login("Pessoa 1", "abc", "abc")).status, 400);
+  const firstLogin = await login("Pessoa 1", "senha-1", "senha-1");
   assert.equal(firstLogin.status, 200);
+  assert.equal(firstLogin.body.created, true);
+  assert.deepEqual(await welcome(), { open: 1 });
+  const secondLogin = await login("Pessoa 2", "senha-2", "senha-2");
   assert.equal(secondLogin.status, 200);
+  assert.deepEqual(await welcome(), { open: 0 });
 
-  // Só duas pessoas: a terceira nem consegue entrar, e a mesma pessoa entra com outra caixa de letra e sem acento.
+  // Depois disso, nome e senha valem para sempre: senha errada não entra, e a terceira pessoa nem cria conta.
+  assert.equal((await login("Pessoa 1", "senha-2")).status, 401);
+  const thirdLogin = await login("Intrusa", "qualquer", "qualquer");
   assert.equal(thirdLogin.status, 403);
   assert.equal(thirdLogin.body.error, "Nosso chat é só de Pessoa 1 e Pessoa 2.");
-  assert.equal((await login("pessoa 1")).body.name, "Pessoa 1");
-  assert.equal((await login("PESSÔA 2")).body.name, "Pessoa 2");
-  assert.deepEqual(sql("SELECT name FROM {p}users ORDER BY position").map((row) => row.name), ["Pessoa 1", "Pessoa 2"]);
+  // A mesma pessoa entra com outra caixa de letra e sem acento.
+  assert.equal((await login("pessoa 1", "senha-1")).body.name, "Pessoa 1");
+  assert.equal((await login("PESSÔA 2", "senha-2")).body.name, "Pessoa 2");
+  const accounts = sql("SELECT name, pass_hash FROM {p}users ORDER BY position");
+  assert.deepEqual(accounts.map((row) => row.name), ["Pessoa 1", "Pessoa 2"]);
+  assert.ok(accounts.every((row) => row.pass_hash.startsWith("$2y$")), "a senha fica só como hash");
 
   const first = await connect(firstLogin.body.token);
   const second = await connect(secondLogin.body.token);
@@ -190,6 +247,33 @@ try {
   // Página anterior do histórico.
   const older = await withAck(first, "history:before", { before: message.id });
   assert.deepEqual(older, { items: [], hasMore: false });
+
+  // Foto de perfil: fica no banco, aparece na presença da outra pessoa e é servida pela API.
+  const png = makePng(40, 40);
+  const photoOf = (list, name) => list.find((person) => person.name === name)?.avatar;
+  const photoArrived = until(second, "presence", (list) => Boolean(photoOf(list, "Pessoa 1")));
+  const saved = await withAck(first, "avatar", { image: `data:image/png;base64,${png.toString("base64")}` });
+  assert.equal(saved.ok, true);
+  assert.match(saved.avatar, /^api\.php\?action=avatar&k=[0-9a-f]{32}$/);
+  assert.equal(photoOf(await photoArrived, "Pessoa 1"), saved.avatar);
+  const photo = await fetch(`${baseUrl}/${saved.avatar}`);
+  assert.equal(photo.status, 200);
+  assert.equal(photo.headers.get("content-type"), "image/png");
+  assert.match(photo.headers.get("cache-control"), /immutable/);
+  assert.ok(Buffer.from(await photo.arrayBuffer()).equals(png));
+  assert.equal((await withAck(first, "avatar", { image: "data:image/png;base64,AAAA" })).error, "Imagem inválida.");
+  assert.equal((await withAck(first, "avatar", { image: `data:image/gif;base64,${png.toString("base64")}` })).error, "Formato de imagem não aceito.");
+  assert.equal((await withAck(first, "avatar", { image: `data:image/jpeg;base64,${png.toString("base64")}` })).error, "Imagem inválida.");
+  assert.equal((await fetch(`${baseUrl}/api.php?action=avatar&k=${"0".repeat(32)}`)).status, 404);
+  // Trocar a foto muda o endereço; remover apaga do banco.
+  const swapped = await withAck(second, "avatar", { image: `data:image/png;base64,${makePng(64, 48).toString("base64")}` });
+  assert.ok(swapped.ok);
+  assert.notEqual(swapped.avatar, saved.avatar);
+  const photoGone = until(second, "presence", (list) => photoOf(list, "Pessoa 1") === null);
+  assert.deepEqual(await withAck(first, "avatar", { image: null }), { ok: true, avatar: null });
+  await photoGone;
+  assert.equal((await fetch(`${baseUrl}/${saved.avatar}`)).status, 404);
+  assert.equal(sql("SELECT avatar FROM {p}users WHERE name = 'Pessoa 1'")[0].avatar, null);
 
   // Mensagem enviada pela extensão chega para os dois lados.
   const fromExtension = next(second, "message");
@@ -297,12 +381,23 @@ try {
   assert.equal(before.items[0].text, "Mensagem de integração");
   again.disconnect();
 
+  // Senha esquecida: apagar o pass_hash no phpMyAdmin derruba as sessões e libera escolher outra senha.
+  sql("DELETE FROM {p}logins");
+  sql("UPDATE {p}users SET pass_hash = NULL WHERE name = 'Pessoa 2'");
+  assert.equal((await api("connect", { token: secondLogin.body.token, conn: "sem-senha-1", client: "web" })).status, 401);
+  assert.deepEqual(await welcome(), { open: 1 });
+  assert.deepEqual((await login("Pessoa 2", "senha-nova")).body, { confirm: true, name: "Pessoa 2" });
+  assert.equal((await login("Pessoa 2", "senha-nova", "senha-nova")).status, 200);
+  assert.equal((await login("Pessoa 2", "senha-2")).status, 401);
+  assert.equal((await api("connect", { token: secondLogin.body.token, conn: "sem-senha-2", client: "web" })).status, 200);
+  await api("disconnect", { token: secondLogin.body.token, conn: "sem-senha-2" });
+
   // Muitas tentativas de senha: bloqueia.
   let blocked = 0;
   for (let i = 0; i < 14; i += 1) if ((await login("Pessoa 1", "errada")).status === 429) blocked += 1;
   assert.ok(blocked >= 1);
 
-  console.log("Integração PHP + MySQL aprovada: página, login, sala de duas pessoas, extensão, confirmação, deduplicação, respostas, reações, leitura, apagar, digitando, chamadas, long polling, sessões da versão Node, paginação e persistência.");
+  console.log("Integração PHP + MySQL aprovada: atualização do banco antigo, página, contas com senha própria, sala de duas pessoas, foto de perfil, extensão, confirmação, deduplicação, respostas, reações, leitura, apagar, digitando, chamadas, long polling, sessões da versão Node, paginação, senha esquecida e persistência.");
 } finally {
   servers.forEach((server) => server.kill());
   try {

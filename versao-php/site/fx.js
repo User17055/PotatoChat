@@ -141,8 +141,11 @@ export const fx = {
   incoming(card) {
     if (!motion()) return;
     gsap.fromTo(card, { y: 40, scale: 0.9, opacity: 0 }, { y: 0, scale: 1, opacity: 1, duration: 0.5, ease: "back.out(1.7)" });
-    gsap.fromTo(card.querySelectorAll(".ring"), { scale: 1, opacity: 0.6 }, { scale: 2.1, opacity: 0, duration: 1.8, ease: "power1.out", stagger: { each: 0.6, repeat: -1 } });
-    gsap.to(card.querySelector(".accept"), { scale: 1.06, duration: 0.6, yoyo: true, repeat: -1, ease: "sine.inOut" });
+    // Anéis e botão de atender só existem na janela de chamada.
+    const rings = card.querySelectorAll(".ring");
+    const accept = card.querySelector(".accept");
+    if (rings.length) gsap.fromTo(rings, { scale: 1, opacity: 0.6 }, { scale: 2.1, opacity: 0, duration: 1.8, ease: "power1.out", stagger: { each: 0.6, repeat: -1 } });
+    if (accept) gsap.to(accept, { scale: 1.06, duration: 0.6, yoyo: true, repeat: -1, ease: "sine.inOut" });
   },
 
   callRings(container) {

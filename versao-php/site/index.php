@@ -113,6 +113,7 @@ function asset(string $file): string
       <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></symbol>
       <symbol id="i-caps" viewBox="0 0 24 24"><path d="M9 18v-6H5l7-7 7 7h-4v6H9z"/></symbol>
       <symbol id="i-loader" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></symbol>
+      <symbol id="i-camera" viewBox="0 0 24 24"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></symbol>
     </svg>
     <div class="ambient" aria-hidden="true"><span></span><span></span><span></span></div>
     <div class="grain" aria-hidden="true"></div>
@@ -133,7 +134,7 @@ function asset(string $file): string
               <input id="name" name="name" minlength="2" maxlength="24" autocomplete="nickname" placeholder="Como você quer aparecer" required />
             </span>
           </label>
-          <label>Senha da sala
+          <label>Sua senha
             <span class="field">
               <svg class="icon"><use href="#i-lock" /></svg>
               <input id="password" name="password" type="password" autocomplete="current-password" placeholder="••••••••" required />
@@ -143,7 +144,15 @@ function asset(string $file): string
               </button>
             </span>
           </label>
+          <!-- Só no primeiro acesso: a senha é repetida antes de a conta ser criada. -->
+          <label id="again-wrap" class="hidden">Repita a senha
+            <span class="field">
+              <svg class="icon"><use href="#i-lock" /></svg>
+              <input id="password-again" name="password-again" type="password" autocomplete="new-password" placeholder="••••••••" />
+            </span>
+          </label>
           <p id="caps" class="caps hidden"><svg class="icon"><use href="#i-caps" /></svg>Caps Lock está ligado</p>
+          <p id="login-hint" class="hint hidden"></p>
           <p id="login-error" class="error" role="alert"></p>
           <button class="primary" type="submit">
             <span class="label">Entrar no nosso chat</span>
@@ -198,6 +207,9 @@ function asset(string $file): string
             </button>
             <button id="share-screen" class="icon-button" type="button" title="Transmitir tela" data-title="Transmitir tela" aria-label="Transmitir tela">
               <svg class="icon"><use href="#i-monitor-up" /></svg>
+            </button>
+            <button id="me-button" class="icon-button compact-only me-button" type="button" title="Sua foto" aria-label="Sua foto de perfil" data-profile>
+              <span id="me-avatar" class="avatar" aria-hidden="true">?</span>
             </button>
             <button id="toggle-sound" class="icon-button compact-only swap" type="button" title="Sons" aria-label="Ligar ou desligar sons">
               <svg class="icon when-on"><use href="#i-volume" /></svg>
@@ -336,6 +348,23 @@ function asset(string $file): string
           <button id="confirm-cancel" class="pill ghost" type="button">Cancelar</button>
           <button id="confirm-ok" class="pill danger" type="button">Apagar</button>
         </div>
+      </div>
+    </div>
+
+    <div id="profile" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="profile-name">
+      <div class="modal-card profile-card">
+        <button id="profile-photo" class="profile-photo" type="button" aria-label="Escolher foto" title="Escolher foto">
+          <span id="profile-face" class="avatar big">?</span>
+          <span class="photo-badge"><svg class="icon"><use href="#i-camera" /></svg></span>
+        </button>
+        <h3 id="profile-name">Você</h3>
+        <p class="muted">Sua foto aparece para a outra pessoa na conversa e nas chamadas.</p>
+        <input id="photo-input" type="file" accept="image/*" hidden />
+        <div class="modal-actions">
+          <button id="profile-close" class="pill ghost" type="button">Fechar</button>
+          <button id="photo-pick" class="pill gold" type="button"><svg class="icon"><use href="#i-camera" /></svg>Trocar foto</button>
+        </div>
+        <button id="photo-remove" class="text-button hidden" type="button">Remover foto</button>
       </div>
     </div>
 

@@ -1,5 +1,8 @@
 <?php
 // API do Potato Chat. No lugar do Socket.IO, o navegador usa HTTP:
+//   welcome → diz à tela de login se ainda dá para criar conta;
+//   login   → entra (ou cria a conta, nos dois primeiros acessos);
+//   avatar  → foto de perfil;
 //   connect → entra na sala e recebe o histórico;
 //   ops     → envia ações (mensagem, reação, leitura, digitando, sinalização da chamada…);
 //   poll    → espera por novidades (long polling) e recebe os eventos da conversa.
@@ -145,6 +148,18 @@ function poll(array $input): array
     return $reply($collect());
 }
 
+// Foto de perfil. O endereço só chega a quem está logado e muda a cada troca: pode ficar no cache.
+function avatar(string $key): void
+{
+    $photo = find_avatar($key);
+    if (!$photo) throw new HttpError(404, 'Foto não encontrada.');
+    header('Content-Type: ' . $photo['type']);
+    header('Content-Length: ' . strlen($photo['data']));
+    header('Cache-Control: private, max-age=31536000, immutable');
+    echo $photo['data'];
+    exit;
+}
+
 // Aviso de saída (aba fechada ou recarregada), enviado com navigator.sendBeacon.
 function disconnect(array $input): void
 {
@@ -160,6 +175,10 @@ try {
     switch ($_GET['action'] ?? '') {
         case 'health':
             respond(200, health());
+        case 'welcome':
+            respond(200, welcome());
+        case 'avatar':
+            avatar(str($_GET['k'] ?? ''));
         case 'login':
             respond(200, login(input(), (string) ($_SERVER['REMOTE_ADDR'] ?? '?')));
         case 'connect':

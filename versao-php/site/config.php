@@ -1,10 +1,8 @@
 <?php
-// Configurações do Potato Chat. Preencha antes de enviar por FTP e troque a senha!
+// Configurações do Potato Chat. Preencha os dados do banco antes de enviar por FTP.
+// Nomes, senhas e fotos ficam no banco: as duas primeiras pessoas que entrarem escolhem nome e senha.
 
 return [
-    // Senha para entrar no chat.
-    'password' => 'troque-esta-senha',
-
     // Banco MySQL criado no painel da hospedagem (cPanel, hPanel…). As tabelas são criadas sozinhas.
     'db' => [
         'host' => 'potato.mysql.dbaas.com.br',
@@ -15,10 +13,6 @@ return [
         // Prefixo das tabelas: permite usar um banco que já tem outras coisas.
         'prefix' => 'potato_',
     ],
-
-    // Os dois nomes que podem entrar, ex.: ['André', 'Batata'].
-    // Vazio = os dois primeiros que entrarem ficam registrados no banco.
-    'users' => [],
 
     // Chave que assina as sessões. Vazio = gerada automaticamente e guardada no banco.
     'token_secret' => '',

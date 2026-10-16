@@ -9,7 +9,9 @@ O mesmo site (mesmo HTML, CSS, animações, sons, chamadas e extensão), adaptad
 | Express serve a página | `index.php` serve o mesmo HTML |
 | Socket.IO (WebSocket) | `realtime.js` + `api.php`: HTTP com *long polling*. O `app.js` continua usando `socket.on` e `socket.emit`, como antes |
 | `data/messages.json` (500 mensagens) | Tabelas MySQL, com histórico completo e paginado de 60 em 60 |
-| `.env` | `site/config.php` |
+| `.env` | `site/config.php` (só os dados do banco) |
+| Uma senha da sala para os dois | Cada pessoa tem nome e senha próprios, guardados no banco |
+| Avatar com a inicial do nome | Foto de perfil, que cada um escolhe e troca quando quiser |
 
 As sessões têm o mesmo formato da versão Node. Se o chat continuar no mesmo endereço e com a mesma `token_secret`, ninguém precisa entrar de novo.
 
@@ -20,7 +22,7 @@ versao-php/
 ├── site/          ← envie o CONTEÚDO desta pasta por FTP para a pasta do subdomínio
 │   ├── index.php      página do chat
 │   ├── api.php        API (login, mensagens, presença, sinalização das chamadas)
-│   ├── config.php     senha + dados do MySQL  ← edite antes de enviar
+│   ├── config.php     dados do MySQL  ← edite antes de enviar
 │   ├── realtime.js    conexão em tempo real (substitui o Socket.IO)
 │   ├── app.js, fx.js, sound.js, styles.css, img/, vendor/
 │   ├── lib/           código do servidor (bloqueado para o navegador)
@@ -33,15 +35,22 @@ versao-php/
 ## Publicar (FTP + MySQL)
 
 1. **Crie o banco MySQL** no painel da hospedagem (cPanel → *Bancos de dados MySQL*, ou hPanel → *Bancos de Dados*). Anote o nome do banco, o usuário, a senha e o host (quase sempre `localhost`).
-2. **Edite `site/config.php`**: troque `password` (a senha para entrar no chat) e preencha o bloco `db`. Se quiser fixar quem pode entrar, preencha `users`, por exemplo `['André', 'Batata']`.
+2. **Edite `site/config.php`**: preencha o bloco `db`. Nomes e senhas não ficam aqui: cada pessoa escolhe os seus no primeiro acesso.
 3. **Crie o subdomínio** no painel (ex.: `chat.seudominio.com.br`). O painel mostra a pasta dele, por exemplo `public_html/chat`.
 4. **Envie por FTP** (FileZilla, por exemplo) o **conteúdo** de `site/` para essa pasta. `index.php` precisa ficar direto nela, não dentro de outra subpasta `site/`.
    - No FileZilla, ative *Servidor → Forçar exibição de arquivos ocultos* para ver e enviar o `.htaccess`.
    - O modo de transferência automático serve para tudo (o PNG vai em binário).
 5. **Ative o SSL (HTTPS)** do subdomínio no painel. Ele é obrigatório para microfone, câmera e transmissão de tela.
 6. **Abra o site.** No primeiro acesso as tabelas (prefixo `potato_`) são criadas sozinhas. Se preferir, importe antes o `banco.sql` pelo phpMyAdmin.
+7. **Criem as duas contas logo.** As duas primeiras pessoas que entrarem escolhem nome e senha (o site pede a senha duas vezes). Depois disso eles valem para sempre e ninguém mais cria conta. Enquanto sobrar uma vaga, quem abrir o link pode ficar com ela.
 
-Para atualizar o site depois, envie de novo só os arquivos alterados. Os navegadores pegam a versão nova sozinhos, sem precisar limpar o cache.
+Para atualizar o site depois, envie de novo só os arquivos alterados. Os navegadores pegam a versão nova sozinhos, sem precisar limpar o cache. Se o banco veio de uma versão anterior, as colunas novas (senha e foto) são acrescentadas sozinhas no primeiro acesso. Quem já estava registrado sem senha escolhe uma ao entrar de novo.
+
+## Contas e foto de perfil
+
+- **Senha:** fica no banco só como *hash* (`pass_hash` na tabela `potato_users`), nunca o texto da senha.
+- **Foto:** clique no seu nome na barra lateral (no celular, no seu avatar no topo) e escolha uma imagem. O navegador recorta o centro num quadrado, reduz e envia. A foto fica no banco e aparece para a outra pessoa na conversa, nas chamadas e nas notificações.
+- **Esqueceu a senha?** No phpMyAdmin, abra a tabela `potato_users`, edite a linha da pessoa e marque `pass_hash` como `NULL`. As sessões dela caem, e no próximo login ela escolhe uma senha nova com o mesmo nome. As mensagens não mudam.
 
 **Requisitos:** PHP 7.4 ou superior com a extensão `pdo_mysql` (vem ativa em praticamente todas as hospedagens), e MySQL 5.6+ ou MariaDB 10.1+.
 
@@ -56,9 +65,7 @@ Os atalhos continuam iguais: botão direito → *Enviar para o nosso chat*, `pc`
 
 | Chave | Para que serve |
 | --- | --- |
-| `password` | Senha para entrar no chat |
 | `db` | Host, porta, nome, usuário, senha e prefixo das tabelas do MySQL |
-| `users` | Os dois nomes permitidos. Vazio = os dois primeiros que entrarem |
 | `token_secret` | Chave das sessões. Vazio = gerada uma vez e guardada no banco |
 | `poll_wait` | Segundos que cada consulta espera por novidades (padrão 20). Use `0` se a hospedagem derrubar requisições demoradas: o chat passa a consultar a cada 1,5 s |
 

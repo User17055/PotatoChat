@@ -1,16 +1,24 @@
 -- Potato Chat: tabelas do banco MySQL (prefixo potato_).
 -- Opcional: o site cria tudo sozinho no primeiro acesso. Use este arquivo só se preferir importar pelo phpMyAdmin.
 -- Se mudar o prefixo em config.php, troque "potato_" aqui também.
+-- Já importou a versão anterior deste arquivo? Não precisa fazer nada: no primeiro acesso o site
+-- acrescenta sozinho as colunas novas (senha e foto) na tabela potato_users.
 
 CREATE TABLE IF NOT EXISTS `potato_settings` (
   name VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
   value TEXT NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- As duas contas: nome, senha (só o hash) e foto de perfil.
 CREATE TABLE IF NOT EXISTS `potato_users` (
   position INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
-  created_at VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL
+  created_at VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  pass_hash VARCHAR(255) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  avatar MEDIUMTEXT CHARACTER SET ascii COLLATE ascii_bin NULL,
+  avatar_type VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  avatar_key CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  KEY user_avatar (avatar_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `potato_messages` (
@@ -67,5 +75,3 @@ CREATE TABLE IF NOT EXISTS `potato_logins` (
   at BIGINT NOT NULL,
   KEY login_ip (ip, at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-INSERT INTO `potato_settings` (name, value) VALUES ('schema', '1') ON DUPLICATE KEY UPDATE value = VALUES(value);
