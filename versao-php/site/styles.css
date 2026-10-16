@@ -322,8 +322,9 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .tool:hover { background: var(--surface-3); color: var(--ink); }
 .danger-tool:hover { color: var(--danger); }
 .tool .icon { width: 16px; height: 16px; }
-@media (hover: hover) { .message:hover .tools { opacity: 1; transform: none; pointer-events: auto; } }
 .message.show-tools .tools { opacity: 1; transform: none; pointer-events: auto; }
+/* No toque, segurar a mensagem abre as ações: sem seleção de texto nem menu nativo do sistema. */
+@media (pointer: coarse) { .bubble, .bubble img { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; } }
 
 .reactions { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 4px; margin: -6px 8px 0; }
 .mine .reactions { justify-content: flex-end; }

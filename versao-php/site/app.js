@@ -623,6 +623,14 @@ function fill(article, message) {
     reply.title = "Responder";
     reply.append(icon("reply"));
     tools.append(reply);
+    if (message.text && !message.gif) {
+      const copy = el("button", "tool");
+      copy.type = "button";
+      copy.dataset.action = "copy";
+      copy.title = "Copiar texto";
+      copy.append(icon("copy"));
+      tools.append(copy);
+    }
     if (mine) {
       const remove = el("button", "tool danger-tool");
       remove.type = "button";
@@ -976,33 +984,114 @@ messagesEl.addEventListener("click", (event) => {
     socket?.emit("react", { id: message.id, emoji });
     sound.play("react");
     if (!message.reactions?.[emoji]?.includes(me)) fx.burst(event.clientX, event.clientY, [emoji], 7);
-    article.classList.remove("show-tools");
+    closeTools();
     return;
   }
 
   const action = event.target.closest("[data-action]")?.dataset.action;
-  if (action === "reply") return startReply(message);
-  if (action === "delete") {
-    article.classList.remove("show-tools");
-    confirmDialog({ title: "Apagar mensagem?", text: "Ela some para os dois. Não dá para desfazer.", confirm: "Apagar" })
-      .then((ok) => { if (ok) socket?.emit("delete", { id: message.id }); });
+  if (action === "reply") {
+    closeTools();
+    return startReply(message);
+  }
+  if (action === "copy") {
+    closeTools();
+    navigator.clipboard?.writeText(message.text)
+      .then(() => toast("Texto copiado", "ok"))
+      .catch(() => toast("Não foi possível copiar.", "error"));
     return;
   }
-
-  // Toque (celular) mostra/esconde a barra de ações.
-  if (event.target.closest(".bubble") && !event.target.closest("a") && message.id && !message.deleted) {
-    const open = article.classList.contains("show-tools");
-    messagesEl.querySelectorAll(".show-tools").forEach((node) => node.classList.remove("show-tools"));
-    article.classList.toggle("show-tools", !open);
+  if (action === "delete") {
+    closeTools();
+    confirmDialog({ title: "Apagar mensagem?", text: "Ela some para os dois. Não dá para desfazer.", confirm: "Apagar" })
+      .then((ok) => { if (ok) socket?.emit("delete", { id: message.id }); });
   }
 });
+
+// A barra de ações abre com o botão direito (PC) ou segurando a mensagem (celular).
+const LONG_PRESS_MS = 450;
+let pressTimer = 0;
+let pressStart = null;
+let pressFired = false;
+let pressReleasedAt = 0;
+
+function closeTools() {
+  messagesEl.querySelectorAll(".show-tools").forEach((node) => node.classList.remove("show-tools"));
+}
+
+// Devolve a mensagem que pode receber ações, ou null (links mantêm o menu do navegador).
+function actionableMessage(target) {
+  if (!target.closest(".bubble") || target.closest("a")) return null;
+  const article = target.closest(".message");
+  return article?.msg?.id && !article.msg.deleted ? article : null;
+}
+
+function openTools(article) {
+  if (article.classList.contains("show-tools")) return;
+  closeTools();
+  article.classList.add("show-tools");
+}
+
+messagesEl.addEventListener("contextmenu", (event) => {
+  const article = actionableMessage(event.target);
+  if (!article) return;
+  // Com texto selecionado na mensagem, deixa o menu do navegador (para copiar só um trecho).
+  const selection = window.getSelection();
+  if (selection?.toString().trim() && article.contains(selection.anchorNode)) return;
+  event.preventDefault();
+  openTools(article);
+});
+
+messagesEl.addEventListener("pointerdown", (event) => {
+  if (event.pointerType === "mouse") return;
+  const article = actionableMessage(event.target);
+  if (!article) return;
+  pressStart = { x: event.clientX, y: event.clientY };
+  pressFired = false;
+  clearTimeout(pressTimer);
+  pressTimer = setTimeout(() => {
+    pressStart = null;
+    pressFired = true;
+    openTools(article);
+    navigator.vibrate?.(12);
+  }, LONG_PRESS_MS);
+});
+
+messagesEl.addEventListener("pointermove", (event) => {
+  if (pressStart && Math.hypot(event.clientX - pressStart.x, event.clientY - pressStart.y) > 10) cancelPress();
+});
+
+function cancelPress() {
+  clearTimeout(pressTimer);
+  pressStart = null;
+}
+
+messagesEl.addEventListener("pointerup", () => {
+  cancelPress();
+  if (pressFired) pressReleasedAt = Date.now();
+  pressFired = false;
+});
+messagesEl.addEventListener("pointercancel", cancelPress);
+
+// Tocar/clicar fora fecha a barra; o clique que vem ao soltar o dedo depois de segurar é ignorado.
+document.addEventListener("click", (event) => {
+  if (Date.now() - pressReleasedAt < 400) return;
+  if (!event.target.closest(".tools")) closeTools();
+}, true);
+
+messagesEl.addEventListener("scroll", closeTools, { passive: true });
+
+window.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !messagesEl.querySelector(".show-tools")) return;
+  event.stopPropagation();
+  closeTools();
+}, true);
 
 messagesEl.addEventListener("dblclick", (event) => {
   const article = event.target.closest(".message");
   const message = article?.msg;
   if (!message?.id || message.deleted || !event.target.closest(".bubble")) return;
   window.getSelection()?.removeAllRanges();
-  messagesEl.querySelectorAll(".show-tools").forEach((node) => node.classList.remove("show-tools"));
+  closeTools();
   if (!message.reactions?.["❤️"]?.includes(me)) socket?.emit("react", { id: message.id, emoji: "❤️" });
   fx.burst(event.clientX, event.clientY, ["❤️", "💖", "💕"], 14);
   sound.play("react");
