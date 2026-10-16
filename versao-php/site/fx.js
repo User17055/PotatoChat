@@ -40,23 +40,6 @@ export const fx = {
     this.burst(box.left + box.width / 2, box.top + box.height / 2, ["🥔", "🍟", "✨"], 12);
   },
 
-  // Batatinha plantada: regar amassa e solta; colher faz a batata pular da terra.
-  water(plant) {
-    if (!motion()) return;
-    gsap.timeline()
-      .to(plant, { scaleY: 0.86, scaleX: 1.1, transformOrigin: "50% 100%", duration: 0.1 })
-      .to(plant, { scaleY: 1, scaleX: 1, duration: 0.7, ease: "elastic.out(1.2, 0.4)" });
-  },
-
-  // O pulo em si é uma animação CSS (.harvest em styles.css), que respeita a origem do desenho SVG.
-  harvest(plant) {
-    if (!motion()) return;
-    plant.classList.remove("harvest");
-    void plant.getBoundingClientRect();
-    plant.classList.add("harvest");
-    plant.addEventListener("animationend", () => plant.classList.remove("harvest"), { once: true });
-  },
-
   ambient() {
     if (!motion()) return;
     document.querySelectorAll(".ambient span").forEach((orb, i) => {

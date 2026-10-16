@@ -226,16 +226,18 @@ html.has-session #chat-view.hidden { display: grid !important; }
 .person.online small { color: var(--ok); }
 button.person { position: relative; width: 100%; border: 0; background: transparent; color: inherit; text-align: left; transition: background .2s, box-shadow .2s; }
 button.person:hover { background: var(--surface-2); }
-/* Aba aberta (conversa ou perfil): fundo e um risquinho na cor do tema. */
-button.person.active { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--accent); }
+/* Aba aberta (conversa ou perfil), enquanto estiver selecionada: um brilho na cor do tema que se move devagar,
+   um reflexo que passa de tempos em tempos e um anel girando em volta da foto. */
+button.person.active { background: linear-gradient(115deg, color-mix(in srgb, var(--accent) 17%, var(--surface-2)), var(--surface-2) 45%, color-mix(in srgb, var(--accent-3) 11%, var(--surface-2)) 80%, color-mix(in srgb, var(--accent) 17%, var(--surface-2))); background-size: 250% 100%; box-shadow: 0 8px 22px #0005; animation: row-in .45s cubic-bezier(.34, 1.56, .64, 1), row-glow 7s ease-in-out infinite alternate; }
+button.person.active::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: linear-gradient(105deg, transparent 40%, color-mix(in srgb, var(--ink) 9%, transparent) 50%, transparent 60%) no-repeat; background-size: 250% 100%; animation: shine 4.5s ease-in-out 1s infinite backwards; }
+button.person.active .avatar::before { content: ""; position: absolute; inset: -4px; border-radius: 50%; background: conic-gradient(var(--accent-2), var(--accent), var(--accent-3), var(--accent), var(--accent-2)); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px)); mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px)); animation: spin 2.4s linear infinite; }
+@keyframes row-in { from { scale: .96; } }
+@keyframes row-glow { from { background-position: 0% 0; } to { background-position: 100% 0; } }
 .person-edit { margin-left: auto; width: 16px; height: 16px; color: var(--faint); opacity: 0; transition: opacity .2s, transform .4s; }
 button.person:hover .person-edit, button.person:focus-visible .person-edit { opacity: 1; transform: rotate(60deg); }
 @media (hover: none) { .person-edit { opacity: .6; } }
 .sidebar-bottom { display: grid; gap: 6px; padding-top: 12px; border-top: 1px solid var(--line); }
 .side-profile .avatar::after, .tab .avatar::after { display: none; }
-/* A batatinha fica plantada em cima da linha que separa o seu perfil. */
-.sidebar-bottom { position: relative; }
-.sidebar-bottom .plant-slot { position: absolute; right: 14px; bottom: 100%; width: 104px; margin-bottom: -4px; }
 .side-profile strong { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- avatares ---------- */
@@ -569,34 +571,6 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .profile-stats div + div { border-left: 1px solid var(--line); }
 .profile-stats strong { background: var(--title); -webkit-background-clip: text; background-clip: text; color: transparent; font-size: 24px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 .profile-stats span { color: var(--muted); font-size: 11.5px; line-height: 1.3; }
-/* No celular a batatinha fica no fim do perfil, numa linha que faz de chão. */
-.profile-garden { display: none; margin-top: 30px; text-align: center; }
-.profile-garden .plant-slot { position: relative; width: 124px; margin: 0 auto; }
-.profile-garden .plant-slot::after { content: ""; position: absolute; left: -60px; right: -60px; bottom: 4px; height: 1px; background: linear-gradient(90deg, transparent, var(--line) 25%, var(--line) 75%, transparent); }
-.profile-garden .muted { margin-top: 10px; font-size: 12px; }
-
-/* ---------- batatinha plantada (cresce a cada rega: data-stage 0 a 3) ---------- */
-.planted { display: block; width: 100%; padding: 0; border: 0; background: none; }
-.planted svg { display: block; width: 100%; height: auto; overflow: visible; }
-.planted :is(.plant-sprout, .plant-body, .plant-eyes, .plant-flower, .leaf-extra) { transform-box: fill-box; }
-.plant-sprout { transform-origin: 50% 100%; scale: .55; transition: scale .6s cubic-bezier(.34, 1.56, .64, 1); animation: plant-sway 3.4s ease-in-out infinite; }
-.planted[data-stage="1"] .plant-sprout { scale: .75; }
-.planted[data-stage="2"] .plant-sprout { scale: .92; }
-.planted[data-stage="3"] .plant-sprout { scale: 1.06; }
-.leaf-extra, .plant-flower { opacity: 0; scale: 0; transition: opacity .3s, scale .5s cubic-bezier(.34, 1.56, .64, 1); }
-.leaf-extra { transform-origin: 100% 100%; }
-.plant-flower { transform-origin: 50% 50%; }
-.planted:is([data-stage="2"], [data-stage="3"]) .leaf-extra, .planted[data-stage="3"] .plant-flower { opacity: 1; scale: 1; }
-.plant-body { transform-origin: 50% 100%; animation: plant-breathe 3.4s ease-in-out infinite; }
-.plant-eyes { transform-origin: 50% 50%; animation: plant-blink 5s infinite; }
-.planted:hover .plant-body { filter: brightness(1.06); }
-@keyframes plant-sway { 0%, 100% { rotate: -5deg; } 50% { rotate: 5deg; } }
-@keyframes plant-breathe { 0%, 100% { scale: 1 1; } 50% { scale: 1.02 1.04; } }
-@keyframes plant-blink { 0%, 92%, 100% { scale: 1 1; } 95% { scale: 1 .1; } }
-/* Colheita: a batata pula da terra e cai quicando. */
-.planted.harvest .plant-body { animation: plant-pop .9s ease-out; }
-@keyframes plant-pop { 30% { translate: 0 -30px; rotate: 12deg; } 55% { translate: 0 0; rotate: 0deg; } 72% { translate: 0 -8px; } 86% { translate: 0 0; } }
-
 .profile-card { margin-top: 14px; padding: 16px; border: 1px solid var(--line); border-radius: 20px; background: color-mix(in srgb, var(--surface) 80%, transparent); }
 .profile-card.settings-list { padding: 6px; }
 .settings-list { display: grid; gap: 2px; }
@@ -653,7 +627,6 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
   .conversation, .profile-view { height: auto; min-height: 0; }
   .tabbar { position: relative; display: grid; grid-template-columns: 1fr 1fr; padding: 6px 12px calc(6px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: color-mix(in srgb, var(--bg-2) 92%, transparent); backdrop-filter: blur(14px); }
   .in-call .tabbar { display: none; }
-  .profile-garden { display: block; }
   .profile-top { min-height: 64px; padding: 10px 16px; }
   .profile-scroll { padding: 26px 16px 28px; }
   .topbar { min-height: 64px; padding: 10px 12px; }
@@ -699,5 +672,6 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
   /* Animações que repetem para sempre ficariam piscando: aqui elas param de vez. */
-  .planted *, .message.show-tools .bubble, .message.show-tools .bubble::after { animation: none !important; }
+  .message.show-tools .bubble, .message.show-tools .bubble::after,
+  button.person.active, button.person.active::before, button.person.active .avatar::before { animation: none !important; }
 }
