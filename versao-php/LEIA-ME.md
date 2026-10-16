@@ -1,0 +1,88 @@
+# Potato Chat — versão PHP + MySQL
+
+O mesmo site (mesmo HTML, CSS, animações, sons, chamadas e extensão), adaptado para hospedagem PHP comum, com as mensagens num banco MySQL e envio por FTP para a pasta de um subdomínio.
+
+## O que mudou em relação à versão Node
+
+| Antes (Node) | Agora (PHP) |
+| --- | --- |
+| Express serve a página | `index.php` serve o mesmo HTML |
+| Socket.IO (WebSocket) | `realtime.js` + `api.php`: HTTP com *long polling*. O `app.js` continua usando `socket.on` e `socket.emit`, como antes |
+| `data/messages.json` (500 mensagens) | Tabelas MySQL, com histórico completo e paginado de 60 em 60 |
+| `.env` | `site/config.php` |
+
+As sessões têm o mesmo formato da versão Node. Se o chat continuar no mesmo endereço e com a mesma `token_secret`, ninguém precisa entrar de novo.
+
+## Pastas
+
+```
+versao-php/
+├── site/          ← envie o CONTEÚDO desta pasta por FTP para a pasta do subdomínio
+│   ├── index.php      página do chat
+│   ├── api.php        API (login, mensagens, presença, sinalização das chamadas)
+│   ├── config.php     senha + dados do MySQL  ← edite antes de enviar
+│   ├── realtime.js    conexão em tempo real (substitui o Socket.IO)
+│   ├── app.js, fx.js, sound.js, styles.css, img/, vendor/
+│   ├── lib/           código do servidor (bloqueado para o navegador)
+│   └── .htaccess      protege config.php e lib/ (arquivo oculto: não esqueça de enviar)
+├── extensao/      ← extensão do Chrome adaptada (carregue no Chrome, não vai para o servidor)
+├── banco.sql      ← opcional: tabelas para importar pelo phpMyAdmin
+└── tests/         ← teste automático (só para o seu computador)
+```
+
+## Publicar (FTP + MySQL)
+
+1. **Crie o banco MySQL** no painel da hospedagem (cPanel → *Bancos de dados MySQL*, ou hPanel → *Bancos de Dados*). Anote o nome do banco, o usuário, a senha e o host (quase sempre `localhost`).
+2. **Edite `site/config.php`**: troque `password` (a senha para entrar no chat) e preencha o bloco `db`. Se quiser fixar quem pode entrar, preencha `users`, por exemplo `['André', 'Batata']`.
+3. **Crie o subdomínio** no painel (ex.: `chat.seudominio.com.br`). O painel mostra a pasta dele, por exemplo `public_html/chat`.
+4. **Envie por FTP** (FileZilla, por exemplo) o **conteúdo** de `site/` para essa pasta. `index.php` precisa ficar direto nela, não dentro de outra subpasta `site/`.
+   - No FileZilla, ative *Servidor → Forçar exibição de arquivos ocultos* para ver e enviar o `.htaccess`.
+   - O modo de transferência automático serve para tudo (o PNG vai em binário).
+5. **Ative o SSL (HTTPS)** do subdomínio no painel. Ele é obrigatório para microfone, câmera e transmissão de tela.
+6. **Abra o site.** No primeiro acesso as tabelas (prefixo `potato_`) são criadas sozinhas. Se preferir, importe antes o `banco.sql` pelo phpMyAdmin.
+
+Para atualizar o site depois, envie de novo só os arquivos alterados. Os navegadores pegam a versão nova sozinhos, sem precisar limpar o cache.
+
+**Requisitos:** PHP 7.4 ou superior com a extensão `pdo_mysql` (vem ativa em praticamente todas as hospedagens), e MySQL 5.6+ ou MariaDB 10.1+.
+
+## Extensão do Chrome
+
+1. Em `chrome://extensions`, ative o **Modo do desenvolvedor** e clique em **Carregar sem compactação**. Escolha a pasta `extensao/`. Se a versão antiga estiver instalada, remova-a antes.
+2. Nas opções da extensão, coloque o endereço do site (ex.: `https://chat.seudominio.com.br`) e clique em **Testar conexão**.
+
+Os atalhos continuam iguais: botão direito → *Enviar para o nosso chat*, `pc` + Espaço na barra de endereço, e `Alt+Shift+O`.
+
+## Configurações (`config.php`)
+
+| Chave | Para que serve |
+| --- | --- |
+| `password` | Senha para entrar no chat |
+| `db` | Host, porta, nome, usuário, senha e prefixo das tabelas do MySQL |
+| `users` | Os dois nomes permitidos. Vazio = os dois primeiros que entrarem |
+| `token_secret` | Chave das sessões. Vazio = gerada uma vez e guardada no banco |
+| `poll_wait` | Segundos que cada consulta espera por novidades (padrão 20). Use `0` se a hospedagem derrubar requisições demoradas: o chat passa a consultar a cada 1,5 s |
+
+## Problemas comuns
+
+- **"Não foi possível conectar ao banco de dados"**: confira os dados de `db` no `config.php`. Em algumas hospedagens o nome do banco e o do usuário têm um prefixo, como `u123456_potato`.
+- **"A extensão pdo_mysql do PHP não está ativada"**: ative-a no painel (*Selecionar versão do PHP → Extensões*).
+- **Mensagens demorando ou caindo a conexão**: diminua `poll_wait` (por exemplo para `10`) ou use `0`.
+- **Servidor Nginx sem `.htaccess`**: bloqueie o acesso à pasta `lib/` na configuração do Nginx. O `config.php` já não mostra nada quando aberto no navegador.
+
+## Testar no seu computador
+
+Com o MySQL do XAMPP ligado, crie um banco, ajuste o `config.php` e rode:
+
+```powershell
+php -S localhost:8000 -t site
+```
+
+Depois abra `http://localhost:8000`. O servidor embutido do PHP atende uma requisição por vez, então nele o chat usa consultas curtas automaticamente. Na hospedagem, ele usa *long polling*.
+
+Teste automático (Node 20+ e PHP no PATH): `npm test`. Por padrão ele usa o MySQL em `127.0.0.1:3399`, banco `potato_teste`, usuário `potato`, senha `senha-teste`. Para usar outro, defina `POTATO_TEST_DB_HOST`, `_PORT`, `_NAME`, `_USER` e `_PASS`. Ele cria tabelas com um prefixo próprio e as apaga no fim.
+
+## Limites
+
+- Uma sala, só duas pessoas. Cada pessoa pode ter várias abas, aparelhos e a extensão conectados.
+- Cada aba aberta mantém uma requisição PHP esperando por até `poll_wait` segundos. Para duas pessoas isso é pouco, mas planos muito limitados podem pedir um `poll_wait` menor.
+- As chamadas usam WebRTC com servidores STUN públicos. Redes muito restritas podem precisar de um servidor TURN.

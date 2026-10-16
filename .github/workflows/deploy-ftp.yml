@@ -1,0 +1,37 @@
+name: Deploy Potato via FTP
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "versao-php/site/**"
+      - ".github/workflows/deploy-ftp.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-potato-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Publicar em /public_html/potato
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar o repositório
+        uses: actions/checkout@v6
+
+      - name: Enviar o site por FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.4.0
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ${{ vars.FTP_PROTOCOL || 'ftp' }}
+          port: ${{ vars.FTP_PORT || 21 }}
+          local-dir: ./versao-php/site/
+          server-dir: /public_html/potato/

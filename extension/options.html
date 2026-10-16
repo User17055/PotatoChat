@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Configurar nosso chat</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap" />
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main>
+      <img src="icons/icon128.png" alt="" width="96" height="96" />
+      <h1>Potato Chat</h1>
+      <p>Informe o endereço em que nosso chat está publicado.</p>
+      <form id="form">
+        <label>Endereço do site<input id="site-url" type="url" placeholder="https://chat.seudominio.com" required /></label>
+        <label class="check"><input id="notify" type="checkbox" /> Mostrar notificação quando chegar mensagem com o painel fechado</label>
+        <div class="row">
+          <button type="submit">Salvar</button>
+          <button id="test" type="button" class="ghost">Testar conexão</button>
+          <button id="disconnect" type="button" class="ghost">Desconectar</button>
+        </div>
+        <output id="status"></output>
+      </form>
+
+      <section>
+        <h2>Como enviar mensagens pela extensão</h2>
+        <ul>
+          <li><b>Clique com o botão direito</b> num texto selecionado, link, imagem ou página → <i>Enviar para o nosso chat</i>.</li>
+          <li>Na <b>barra de endereço</b>, digite <kbd>pc</kbd>, aperte <kbd>Espaço</kbd>, escreva a mensagem e dê <kbd>Enter</kbd>.</li>
+          <li><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> abre o painel lateral com nosso chat — aperte de novo para <b>esconder na hora</b>. Com o painel em foco, <kbd>Esc</kbd> também esconde.</li>
+        </ul>
+        <div class="shortcut">
+          <span>Atalho para mostrar/esconder: <b id="shortcut-key">…</b></span>
+          <button id="change-shortcut" type="button" class="ghost">Mudar atalho</button>
+        </div>
+        <p class="hint">Você precisa ter entrado na conversa pelo painel pelo menos uma vez nesta sessão do navegador. Mensagens enviadas antes disso ficam na fila e saem assim que você entrar.</p>
+      </section>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>

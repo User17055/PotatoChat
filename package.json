@@ -1,0 +1,23 @@
+{
+  "name": "potato-chat",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Chat privado para duas pessoas com chamada, compartilhamento de tela e extensão Chrome.",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch server/index.js",
+    "start": "node server/index.js",
+    "check": "node --check server/index.js && node --check public/app.js && node --check public/fx.js && node --check public/sound.js && node --check extension/background.js && node --check extension/sidepanel.js && node --check extension/options.js",
+    "test": "node tests/integration.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "gsap": "^3.15.0",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1"
+  }
+}

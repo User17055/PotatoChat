@@ -1,0 +1,1504 @@
+import { sound } from "./sound.js";
+import { fx, effectFor, motion } from "./fx.js";
+import { io, apiUrl } from "./realtime.js";
+
+const $ = (selector) => document.querySelector(selector);
+const loginView = $("#login-view");
+const chatView = $("#chat-view");
+const loginForm = $("#login-form");
+const loginError = $("#login-error");
+const messagesEl = $("#messages");
+const messageForm = $("#message-form");
+const messageInput = $("#message-input");
+const roomTitle = $("#room-title");
+const peerStatus = $("#peer-status");
+const peerAvatar = $("#peer-avatar");
+const peopleEl = $("#people");
+const typingEl = $("#typing");
+const typingText = $("#typing-text");
+const loadMore = $("#load-more");
+const jump = $("#jump");
+const jumpCount = $("#jump-count");
+const replyBar = $("#reply-bar");
+const netBanner = $("#net-banner");
+const netText = $("#net-text");
+const callPanel = $("#call-panel");
+const callStatus = $("#call-status");
+const callTimer = $("#call-timer");
+const incoming = $("#incoming");
+
+const SESSION_KEY = "potato.session";
+const NAME_KEY = "potato.name";
+const NOTIFY_KEY = "potato.notify";
+const REACTIONS = ["❤️", "😂", "😮", "😢", "👍", "🔥"];
+const rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }] };
+
+// Quando o site roda dentro do painel lateral da extensão, conversa com ela via postMessage.
+const parentOrigin = window.parent !== window ? (location.ancestorOrigins?.[0] || "") : "";
+const inExtension = parentOrigin.startsWith("chrome-extension://");
+
+let socket = null;
+let me = "";
+let list = [];
+const byId = new Map();
+const pending = new Map();
+let reads = {};
+let presenceList = [];
+let peerName = "";
+let peerWasOnline = null;
+let peerTyping = false;
+let replyTo = null;
+let hasMore = false;
+let loadingOlder = false;
+let unseenBelow = 0;
+let unreadTitle = 0;
+let typingActive = false;
+let typingTimer;
+let peerTypingTimer;
+let chatShown = false;
+
+let call = null;
+let peerConnection = null;
+let pendingCandidates = [];
+
+// ---------- utilidades ----------
+
+const store = {
+  get(area, key) { try { return JSON.parse(window[area].getItem(key)); } catch { return null; } },
+  set(area, key, value) { try { window[area].setItem(key, JSON.stringify(value)); } catch {} },
+  remove(area, key) { try { window[area].removeItem(key); } catch {} }
+};
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+// Ícone do sprite definido no index.html (<symbol id="i-...">).
+function icon(name, className = "icon") {
+  const node = document.createElementNS(SVG_NS, "svg");
+  node.setAttribute("class", className);
+  node.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS(SVG_NS, "use");
+  use.setAttribute("href", `#i-${name}`);
+  node.append(use);
+  return node;
+}
+
+function potatoArt() {
+  const node = document.createElementNS(SVG_NS, "svg");
+  node.setAttribute("viewBox", "0 0 142 100");
+  node.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS(SVG_NS, "use");
+  use.setAttribute("href", "#potato");
+  node.append(use);
+  return node;
+}
+
+const time = (iso) => new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+const dayKey = (iso) => new Date(iso).toDateString();
+
+function dayLabel(iso) {
+  const date = new Date(iso);
+  const today = new Date();
+  const yesterday = new Date(Date.now() - 864e5);
+  if (date.toDateString() === today.toDateString()) return "Hoje";
+  if (date.toDateString() === yesterday.toDateString()) return "Ontem";
+  return new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "long", year: date.getFullYear() === today.getFullYear() ? undefined : "numeric" }).format(date);
+}
+
+function lastSeenLabel(iso) {
+  if (!iso) return "Offline";
+  const label = dayLabel(iso).toLowerCase();
+  return `Visto por último ${label === "hoje" || label === "ontem" ? label : `em ${label}`} às ${time(iso)}`;
+}
+
+function hue(name) {
+  return [...String(name)].reduce((sum, char) => (sum * 31 + char.charCodeAt(0)) % 360, 7);
+}
+
+function paintAvatar(node, name) {
+  node.textContent = name ? name.trim()[0].toUpperCase() : "?";
+  node.style.setProperty("--hue", name ? hue(name) : 40);
+}
+
+function uid() {
+  return crypto.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function isJumbo(text) {
+  if (!/^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|‍|️|\s)+$/u.test(text)) return false;
+  const compact = text.replace(/\s/g, "");
+  const count = window.Intl?.Segmenter ? [...new Intl.Segmenter("pt", { granularity: "grapheme" }).segment(compact)].length : [...compact].length;
+  return count <= 3;
+}
+
+function richText(text) {
+  const fragment = document.createDocumentFragment();
+  const pattern = /\bhttps?:\/\/[^\s<]+[^\s<.,;:!?'")\]]/gi;
+  let last = 0;
+  for (const match of text.matchAll(pattern)) {
+    fragment.append(text.slice(last, match.index));
+    const link = el("a", "", match[0]);
+    link.href = match[0];
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    fragment.append(link);
+    last = match.index + match[0].length;
+  }
+  fragment.append(text.slice(last));
+  return fragment;
+}
+
+const TOAST_ICON = { ok: "check-circle", error: "x-circle", live: "radio", info: "info" };
+
+function toast(text, kind = "info") {
+  const node = el("div", `toast ${kind}`);
+  node.append(icon(TOAST_ICON[kind] || "info"), el("span", "", text));
+  $("#toasts").append(node);
+  fx.toast(node);
+}
+
+// Janela de confirmação própria (no lugar do confirm() do navegador).
+function confirmDialog({ title, text, confirm }) {
+  const modal = $("#confirm");
+  $("#confirm-title").textContent = title;
+  $("#confirm-text").textContent = text;
+  $("#confirm-ok").textContent = confirm;
+  modal.classList.remove("hidden");
+  fx.incoming(modal.querySelector(".modal-card"));
+  $("#confirm-ok").focus();
+  return new Promise((resolve) => {
+    const close = (answer) => {
+      modal.classList.add("hidden");
+      modal.removeEventListener("click", onClick);
+      document.removeEventListener("keydown", onKey, true);
+      resolve(answer);
+    };
+    const onClick = (event) => {
+      if (event.target.closest("#confirm-ok")) close(true);
+      else if (event.target.closest("#confirm-cancel") || event.target === modal) close(false);
+    };
+    const onKey = (event) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      close(false);
+    };
+    modal.addEventListener("click", onClick);
+    document.addEventListener("keydown", onKey, true);
+  });
+}
+
+function tellParent(message) {
+  if (inExtension) window.parent.postMessage({ source: "potato-site", ...message }, parentOrigin);
+}
+
+// ---------- sessão ----------
+
+const rememberedName = store.get("localStorage", NAME_KEY) || "";
+$("#name").value = rememberedName;
+if (rememberedName) $(".login-panel .eyebrow").textContent = `Oi de novo, ${rememberedName}`;
+
+$("#peek").addEventListener("click", () => {
+  const input = $("#password");
+  const show = input.type === "password";
+  input.type = show ? "text" : "password";
+  $("#peek").classList.toggle("shown", show);
+  $("#peek").setAttribute("aria-label", show ? "Esconder senha" : "Mostrar senha");
+  input.focus();
+});
+
+for (const type of ["keydown", "keyup"]) {
+  $("#password").addEventListener(type, (event) => {
+    $("#caps").classList.toggle("hidden", !event.getModifierState?.("CapsLock"));
+  });
+}
+$("#password").addEventListener("blur", () => $("#caps").classList.add("hidden"));
+
+loginForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  loginError.textContent = "";
+  const submit = loginForm.querySelector(".primary");
+  submit.disabled = true;
+  submit.classList.add("loading");
+  try {
+    const response = await fetch(apiUrl("login"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: $("#name").value, password: $("#password").value })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "Não foi possível entrar.");
+    store.set("localStorage", NAME_KEY, result.name);
+    $("#password").value = "";
+    startSession(result, { animate: true });
+  } catch (error) {
+    loginError.textContent = error.message === "Failed to fetch" ? "Servidor fora do ar. Tente de novo." : error.message;
+    fx.shake($(".login-panel"));
+    sound.play("error");
+  } finally {
+    submit.disabled = false;
+    submit.classList.remove("loading");
+  }
+});
+
+function startSession({ token, name }, { animate }) {
+  me = name;
+  store.set("localStorage", SESSION_KEY, { token, name });
+  tellParent({ type: "potato:session", token, name });
+  connect(token, animate);
+}
+
+function logout() {
+  socket?.disconnect();
+  store.remove("localStorage", SESSION_KEY);
+  store.remove("sessionStorage", SESSION_KEY);
+  tellParent({ type: "potato:logout" });
+  location.reload();
+}
+
+document.querySelectorAll("[data-logout]").forEach((button) => button.addEventListener("click", () => {
+  if (call) teardown(true);
+  logout();
+}));
+
+function showChat(animate) {
+  chatShown = true;
+  const swap = () => {
+    loginView.classList.add("hidden");
+    chatView.classList.remove("hidden");
+    scrollToLatest();
+    if (matchMedia("(pointer: fine)").matches) messageInput.focus();
+  };
+  if (animate) fx.enterChat(swap);
+  else swap();
+}
+
+// ---------- tempo real ----------
+
+function connect(token, animate) {
+  socket?.disconnect();
+  socket = io({ auth: { token, client: "web" }, reconnectionDelayMax: 8000 });
+
+  socket.on("connect", () => {
+    if (!chatShown) showChat(animate);
+    else if (!netBanner.classList.contains("hidden")) toast("Conectado de novo", "ok");
+    fx.hide(netBanner, { y: -10 });
+    socket.emit("visibility", !document.hidden);
+    for (const message of pending.values()) deliver(message);
+  });
+
+  socket.on("disconnect", (reason) => {
+    if (reason === "io client disconnect") return;
+    netText.textContent = "Sem conexão. Reconectando…";
+    fx.show(netBanner, { y: -10 });
+    setPeerTyping(false);
+  });
+
+  socket.io.on("reconnect_attempt", (attempt) => { netText.textContent = `Reconectando… (tentativa ${attempt})`; });
+
+  socket.on("connect_error", (error) => {
+    if (/Sessão inválida/.test(error.message)) {
+      store.remove("localStorage", SESSION_KEY);
+  store.remove("sessionStorage", SESSION_KEY);
+      tellParent({ type: "potato:logout" });
+      if (chatShown) return location.reload();
+      loginError.textContent = "Sua sessão expirou. Entre novamente.";
+      return;
+    }
+    if (!chatShown) loginError.textContent = "Não foi possível conectar ao servidor.";
+    else {
+      netText.textContent = "Sem conexão com o servidor. Tentando de novo…";
+      fx.show(netBanner, { y: -10 });
+    }
+  });
+
+  socket.on("session", ({ token, name }) => {
+    if (!token) return;
+    store.set("localStorage", SESSION_KEY, { token, name });
+    tellParent({ type: "potato:session", token, name });
+  });
+
+  socket.on("room-full", () => {
+    toast("Nosso chat já está com as duas pessoas.", "error");
+    sound.play("error");
+    setTimeout(logout, 2200);
+  });
+
+  socket.on("history", (payload) => {
+    list = payload.items;
+    byId.clear();
+    list.forEach((message) => byId.set(message.id, message));
+    for (const clientId of pending.keys()) if (list.some((message) => message.clientId === clientId)) pending.delete(clientId);
+    reads = payload.reads || {};
+    hasMore = payload.hasMore;
+    renderAll();
+    scrollToLatest();
+    markSeen();
+  });
+
+  socket.on("message", (message) => receive(message, true));
+  socket.on("message:update", updateMessage);
+  socket.on("seen", ({ name, id, at }) => { reads[name] = { id, at }; refreshStatuses(); });
+  socket.on("presence", updatePresence);
+  socket.on("typing", ({ active }) => setPeerTyping(active));
+
+  socket.on("webrtc-offer", receiveOffer);
+  socket.on("webrtc-answer", receiveAnswer);
+  socket.on("webrtc-ice", receiveIce);
+  socket.on("call-state", receiveCallState);
+  socket.on("call-declined", ({ name }) => {
+    if (call?.role !== "caller" || call.connected) return;
+    toast(`${name} recusou a chamada.`);
+    sound.play("hangup");
+    teardown(false);
+  });
+  socket.on("call-ended", () => {
+    if (!call) return;
+    if (call.role === "callee" && !call.accepted) toast(`Chamada perdida de ${call.name}.`);
+    else toast("Chamada encerrada.");
+    sound.play("hangup");
+    teardown(false);
+  });
+  socket.on("call-handled", () => {
+    if (call?.role === "callee" && !call.accepted) teardown(false);
+  });
+  socket.on("peer-left", ({ id }) => {
+    if (call && (call.peerId === id || !call.peerId)) {
+      toast("A outra pessoa saiu da chamada.");
+      sound.play("hangup");
+      teardown(false);
+    }
+  });
+}
+
+// ---------- mensagens ----------
+
+function receive(message, live) {
+  if (byId.has(message.id)) return;
+  list.push(message);
+  byId.set(message.id, message);
+  const local = message.clientId && pending.get(message.clientId);
+  const mine = message.sender === me;
+  messagesEl.querySelector(".empty")?.remove();
+
+  if (local) {
+    pending.delete(message.clientId);
+    const node = messagesEl.querySelector(`[data-client-id="${message.clientId}"]`);
+    if (node) {
+      fill(node, message);
+      fx.sent(node);
+    } else appendNode(message, true);
+  } else {
+    appendNode(message, live);
+  }
+  refreshStatuses();
+  if (!live) return;
+
+  if (!mine) {
+    setPeerTyping(false);
+    sound.play("receive");
+    notify(message);
+  } else if (!local) {
+    sound.play("tap");
+  }
+
+  if (mine || nearBottom()) scrollToLatest(true);
+  else {
+    unseenBelow += 1;
+    jumpCount.textContent = unseenBelow;
+    jumpCount.classList.remove("hidden");
+    fx.show(jump, { scale: 0.6 });
+    fx.pop(jumpCount);
+  }
+  markSeen();
+
+  const effect = !message.deleted && effectFor(message.text);
+  if (effect) setTimeout(() => { effect.run(); sound.play("sparkle"); }, 180);
+}
+
+function updateMessage(message) {
+  const previous = byId.get(message.id);
+  if (!previous) return;
+  const index = list.indexOf(previous);
+  list[index] = message;
+  byId.set(message.id, message);
+  const node = messagesEl.querySelector(`[data-id="${message.id}"]`);
+  if (!node) return;
+  const before = Object.fromEntries(Object.entries(previous.reactions || {}).map(([emoji, names]) => [emoji, names.length]));
+  if (message.deleted && !previous.deleted) return fx.remove(node, () => fill(node, message));
+  fill(node, message);
+  node.querySelectorAll(".chip").forEach((chip) => {
+    if ((message.reactions[chip.dataset.emoji]?.length || 0) > (before[chip.dataset.emoji] || 0)) fx.pop(chip);
+  });
+}
+
+function needsDay(previous, message) {
+  return !previous || dayKey(previous.createdAt) !== dayKey(message.createdAt);
+}
+
+function isGrouped(previous, message) {
+  return Boolean(previous) && previous.sender === message.sender && !needsDay(previous, message)
+    && new Date(message.createdAt) - new Date(previous.createdAt) < 5 * 60 * 1000;
+}
+
+function lastRendered() {
+  const nodes = messagesEl.querySelectorAll(".message");
+  return nodes[nodes.length - 1]?.msg || null;
+}
+
+function buildNode(message, previous) {
+  const article = el("article", "message");
+  article.classList.toggle("grouped", isGrouped(previous, message));
+  fill(article, message);
+  return article;
+}
+
+function appendNode(message, animate) {
+  const previous = lastRendered();
+  if (needsDay(previous, message)) messagesEl.append(el("div", "day", dayLabel(message.createdAt)));
+  const node = buildNode(message, previous);
+  messagesEl.append(node);
+  if (animate) fx.message(node, message.sender === me);
+  return node;
+}
+
+function renderAll() {
+  messagesEl.querySelectorAll(".message, .day, .empty").forEach((node) => node.remove());
+  const fragment = document.createDocumentFragment();
+  let previous = null;
+  for (const message of [...list, ...pending.values()]) {
+    if (needsDay(previous, message)) fragment.append(el("div", "day", dayLabel(message.createdAt)));
+    fragment.append(buildNode(message, previous));
+    previous = message;
+  }
+  messagesEl.append(fragment);
+  if (!list.length && !pending.size) {
+    const empty = el("div", "empty");
+    empty.append(potatoArt(), el("span", "", "Nosso chat começa aqui. Manda um oi!"));
+    messagesEl.append(empty);
+  }
+  loadMore.classList.toggle("hidden", !hasMore);
+  refreshStatuses();
+}
+
+function fill(article, message) {
+  const mine = message.sender === me;
+  article.msg = message;
+  article.className = article.className.replace(/\b(mine|deleted|pending)\b/g, "").trim();
+  article.classList.add("message");
+  article.classList.toggle("mine", mine);
+  article.classList.toggle("deleted", message.deleted);
+  article.classList.toggle("pending", !message.id);
+  if (message.id) article.dataset.id = message.id;
+  if (message.clientId) article.dataset.clientId = message.clientId;
+  article.replaceChildren();
+
+  const row = el("div", "bubble-row");
+  const bubble = el("div", "bubble");
+  if (!message.deleted && isJumbo(message.text)) bubble.classList.add("jumbo");
+
+  if (message.replyTo && !message.deleted) {
+    const quote = el("button", "reply-quote");
+    quote.type = "button";
+    quote.dataset.target = message.replyTo.id;
+    quote.append(el("strong", "", message.replyTo.sender === me ? "Você" : message.replyTo.sender), el("span", "", message.replyTo.text || "Mensagem apagada"));
+    bubble.append(quote);
+  }
+
+  const text = el("div", "text");
+  if (message.deleted) text.textContent = "Mensagem apagada";
+  else text.append(richText(message.text));
+  bubble.append(text);
+
+  const foot = el("span", "foot");
+  if (message.source === "extension") foot.append(el("span", "via", "via extensão"));
+  const stamp = el("time", "", time(message.createdAt));
+  stamp.dateTime = message.createdAt;
+  foot.append(stamp);
+  if (mine) foot.append(el("span", "status"));
+  bubble.append(foot);
+  row.append(bubble);
+
+  if (message.id && !message.deleted) {
+    const tools = el("div", "tools");
+    for (const emoji of REACTIONS) {
+      const button = el("button", "tool-emoji", emoji);
+      button.type = "button";
+      button.dataset.react = emoji;
+      button.setAttribute("aria-label", `Reagir com ${emoji}`);
+      tools.append(button);
+    }
+    const reply = el("button", "tool");
+    reply.type = "button";
+    reply.dataset.action = "reply";
+    reply.title = "Responder";
+    reply.append(icon("reply"));
+    tools.append(reply);
+    if (mine) {
+      const remove = el("button", "tool danger-tool");
+      remove.type = "button";
+      remove.dataset.action = "delete";
+      remove.title = "Apagar para todos";
+      remove.append(icon("trash"));
+      tools.append(remove);
+    }
+    row.append(tools);
+  }
+  article.append(row);
+
+  const entries = Object.entries(message.reactions || {});
+  if (entries.length) {
+    const reactions = el("div", "reactions");
+    for (const [emoji, names] of entries) {
+      const chip = el("button", `chip${names.includes(me) ? " mine" : ""}`);
+      chip.type = "button";
+      chip.dataset.emoji = emoji;
+      chip.title = names.map((name) => (name === me ? "Você" : name)).join(", ");
+      chip.append(emoji, names.length > 1 ? el("span", "", String(names.length)) : "");
+      reactions.append(chip);
+    }
+    article.append(reactions);
+  }
+  if (mine) paintStatus(article);
+}
+
+function peerReadIndex() {
+  let best = -1;
+  for (const [name, read] of Object.entries(reads)) {
+    if (name === me) continue;
+    best = Math.max(best, list.findIndex((message) => message.id === read.id));
+  }
+  return best;
+}
+
+function paintStatus(article, readIndex = peerReadIndex()) {
+  const holder = article.querySelector(".status");
+  const message = article.msg;
+  if (!holder || !message) return;
+  let state = "sent";
+  if (!message.id) state = message.status === "failed" ? "failed" : "pending";
+  else if (list.indexOf(message) <= readIndex) state = "read";
+  if (holder.dataset.state === state) return;
+  const wasSent = holder.dataset.state === "sent";
+  holder.dataset.state = state;
+  holder.title = { pending: "Enviando…", failed: "Não enviada — toque para tentar de novo", sent: "Entregue", read: "Lida" }[state];
+  holder.replaceChildren(icon({ pending: "clock", failed: "alert", sent: "check", read: "check-check" }[state]));
+  if (state === "read" && wasSent) fx.pop(holder);
+}
+
+function refreshStatuses() {
+  const readIndex = peerReadIndex();
+  messagesEl.querySelectorAll(".message.mine").forEach((article) => paintStatus(article, readIndex));
+}
+
+function send(text) {
+  const clean = text.trim();
+  if (!clean || !me) return;
+  const message = {
+    id: null,
+    clientId: uid(),
+    sender: me,
+    text: clean.slice(0, 2000),
+    createdAt: new Date().toISOString(),
+    replyTo: replyTo ? { id: replyTo.id, sender: replyTo.sender, text: replyTo.text.slice(0, 160) } : null,
+    reactions: {},
+    deleted: false,
+    status: "pending"
+  };
+  pending.set(message.clientId, message);
+  messagesEl.querySelector(".empty")?.remove();
+  appendNode(message, true);
+  scrollToLatest(true);
+  sound.play("send");
+  clearReply();
+  stopTyping();
+  deliver(message);
+}
+
+function deliver(message) {
+  if (!socket?.connected) return;
+  const node = () => messagesEl.querySelector(`[data-client-id="${message.clientId}"]`);
+  message.status = "pending";
+  if (node()) paintStatus(node());
+  socket.timeout(10000).emit("message", { text: message.text, clientId: message.clientId, replyTo: message.replyTo?.id }, (error, result) => {
+    if (!pending.has(message.clientId)) return;
+    if (!error && result?.ok) return receive(result.message, true);
+    message.status = "failed";
+    if (node()) paintStatus(node());
+    if (result?.error) toast(result.error, "error");
+    sound.play("error");
+  });
+}
+
+messageForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (!messageInput.value.trim()) return;
+  send(messageInput.value);
+  fx.sendButton(messageForm.querySelector(".send"));
+  messageInput.value = "";
+  messageInput.style.height = "auto";
+  messageInput.style.overflowY = "hidden";
+});
+
+messageInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    messageForm.requestSubmit();
+  }
+  if (event.key === "Escape" && !$("#reply-bar").classList.contains("hidden")) {
+    event.stopPropagation();
+    clearReply();
+  }
+});
+
+// No painel da extensão, Esc esconde o chat na hora.
+document.addEventListener("keydown", (event) => {
+  if (inExtension && event.key === "Escape" && !call) tellParent({ type: "potato:hide" });
+});
+
+messageInput.addEventListener("input", () => {
+  messageInput.style.height = "auto";
+  messageInput.style.height = `${Math.min(messageInput.scrollHeight, 140)}px`;
+  messageInput.style.overflowY = messageInput.scrollHeight > 140 ? "auto" : "hidden";
+  if (!messageInput.value.trim()) return stopTyping();
+  if (!typingActive) {
+    typingActive = true;
+    socket?.emit("typing", true);
+  }
+  clearTimeout(typingTimer);
+  typingTimer = setTimeout(stopTyping, 1800);
+});
+
+function stopTyping() {
+  clearTimeout(typingTimer);
+  if (!typingActive) return;
+  typingActive = false;
+  socket?.emit("typing", false);
+}
+
+document.querySelectorAll("[data-emoji]").forEach((button) => button.addEventListener("click", () => {
+  send(button.dataset.emoji);
+  const box = button.getBoundingClientRect();
+  fx.burst(box.left + box.width / 2, box.top, [button.dataset.emoji], 8);
+  fx.press(button);
+}));
+
+// Ações sobre as mensagens (delegação de eventos).
+messagesEl.addEventListener("click", (event) => {
+  const article = event.target.closest(".message");
+  const message = article?.msg;
+
+  if (event.target.closest("#load-more")) return loadOlder();
+  if (!message) return;
+
+  const status = event.target.closest(".status");
+  if (status?.dataset.state === "failed") return deliver(message);
+
+  const quote = event.target.closest(".reply-quote");
+  if (quote) return focusMessage(quote.dataset.target);
+
+  const reactButton = event.target.closest("[data-react], .chip");
+  if (reactButton && message.id) {
+    const emoji = reactButton.dataset.react || reactButton.dataset.emoji;
+    socket?.emit("react", { id: message.id, emoji });
+    sound.play("react");
+    if (!message.reactions?.[emoji]?.includes(me)) fx.burst(event.clientX, event.clientY, [emoji], 7);
+    article.classList.remove("show-tools");
+    return;
+  }
+
+  const action = event.target.closest("[data-action]")?.dataset.action;
+  if (action === "reply") return startReply(message);
+  if (action === "delete") {
+    article.classList.remove("show-tools");
+    confirmDialog({ title: "Apagar mensagem?", text: "Ela some para os dois. Não dá para desfazer.", confirm: "Apagar" })
+      .then((ok) => { if (ok) socket?.emit("delete", { id: message.id }); });
+    return;
+  }
+
+  // Toque (celular) mostra/esconde a barra de ações.
+  if (event.target.closest(".bubble") && !event.target.closest("a") && message.id && !message.deleted) {
+    const open = article.classList.contains("show-tools");
+    messagesEl.querySelectorAll(".show-tools").forEach((node) => node.classList.remove("show-tools"));
+    article.classList.toggle("show-tools", !open);
+  }
+});
+
+messagesEl.addEventListener("dblclick", (event) => {
+  const article = event.target.closest(".message");
+  const message = article?.msg;
+  if (!message?.id || message.deleted || !event.target.closest(".bubble")) return;
+  window.getSelection()?.removeAllRanges();
+  messagesEl.querySelectorAll(".show-tools").forEach((node) => node.classList.remove("show-tools"));
+  if (!message.reactions?.["❤️"]?.includes(me)) socket?.emit("react", { id: message.id, emoji: "❤️" });
+  fx.burst(event.clientX, event.clientY, ["❤️", "💖", "💕"], 14);
+  sound.play("react");
+});
+
+function startReply(message) {
+  replyTo = message;
+  $("#reply-name").textContent = message.sender === me ? "Respondendo a você" : `Respondendo a ${message.sender}`;
+  $("#reply-text").textContent = message.text;
+  fx.show(replyBar, { y: 16 });
+  messageInput.focus();
+}
+
+function clearReply() {
+  replyTo = null;
+  fx.hide(replyBar, { y: 16 });
+}
+
+$("#reply-cancel").addEventListener("click", clearReply);
+
+function focusMessage(id) {
+  const node = messagesEl.querySelector(`[data-id="${CSS.escape(id)}"]`);
+  if (!node) return toast("Essa mensagem é antiga demais para mostrar aqui.");
+  node.scrollIntoView({ behavior: "smooth", block: "center" });
+  node.classList.remove("flash");
+  void node.offsetWidth;
+  node.classList.add("flash");
+}
+
+function loadOlder() {
+  if (!hasMore || loadingOlder || !socket?.connected || !list.length) return;
+  loadingOlder = true;
+  loadMore.textContent = "Carregando…";
+  socket.timeout(8000).emit("history:before", { before: list[0].id }, (error, result) => {
+    loadingOlder = false;
+    loadMore.textContent = "Carregar mensagens anteriores";
+    if (error || !result) return;
+    const previousHeight = messagesEl.scrollHeight;
+    const fresh = result.items.filter((message) => !byId.has(message.id));
+    fresh.forEach((message) => byId.set(message.id, message));
+    list = [...fresh, ...list];
+    hasMore = result.hasMore;
+    renderAll();
+    messagesEl.scrollTop += messagesEl.scrollHeight - previousHeight;
+  });
+}
+
+// ---------- rolagem, leitura e avisos ----------
+
+function nearBottom() {
+  return messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 120;
+}
+
+function scrollToLatest(smooth = false) {
+  requestAnimationFrame(() => messagesEl.scrollTo({ top: messagesEl.scrollHeight, behavior: smooth && motion() ? "smooth" : "auto" }));
+}
+
+// Etiqueta de dia fixa no topo: mostra o dia do trecho que está na tela (como no WhatsApp).
+const dayFloat = $("#day-float");
+let dayFrame = 0;
+function paintDayFloat() {
+  dayFrame = 0;
+  const top = messagesEl.scrollTop;
+  const days = [...messagesEl.querySelectorAll(".day")];
+  const index = days.findLastIndex((node) => node.offsetTop <= top + 12);
+  const current = days[index];
+  const next = days[index + 1];
+  const show = Boolean(current) && current.offsetTop < top - 4 && !(next && next.offsetTop - top < 44);
+  dayFloat.classList.toggle("hidden", !show);
+  if (show) dayFloat.textContent = current.textContent;
+}
+messagesEl.addEventListener("scroll", () => { if (!dayFrame) dayFrame = requestAnimationFrame(paintDayFloat); }, { passive: true });
+
+messagesEl.addEventListener("scroll", () => {
+  if (nearBottom()) {
+    unseenBelow = 0;
+    jumpCount.classList.add("hidden");
+    fx.hide(jump, { scale: 0.6 });
+    markSeen();
+  } else if (messagesEl.scrollHeight - messagesEl.clientHeight > 400 && jump.classList.contains("hidden")) {
+    fx.show(jump, { scale: 0.6 });
+  }
+  if (messagesEl.scrollTop < 60) loadOlder();
+}, { passive: true });
+
+jump.addEventListener("click", () => scrollToLatest(true));
+
+function markSeen() {
+  if (!socket?.connected || document.hidden || !nearBottom()) return;
+  const last = list[list.length - 1];
+  if (last && reads[me]?.id !== last.id) {
+    reads[me] = { id: last.id, at: new Date().toISOString() };
+    socket.emit("seen", { id: last.id });
+  }
+}
+
+document.addEventListener("visibilitychange", () => {
+  socket?.emit("visibility", !document.hidden);
+  if (!document.hidden) {
+    unreadTitle = 0;
+    document.title = "Potato Chat";
+    markSeen();
+  }
+});
+
+function notificationsOn() {
+  return !inExtension && "Notification" in window && Notification.permission === "granted" && store.get("localStorage", NOTIFY_KEY) !== false;
+}
+
+function notify(message) {
+  if (!document.hidden) return;
+  unreadTitle += 1;
+  document.title = `(${unreadTitle}) Potato Chat`;
+  if (!notificationsOn()) return;
+  try {
+    const notification = new Notification(message.sender, { body: message.deleted ? "" : message.text.slice(0, 160), tag: "potato-chat", renotify: true, silent: true });
+    notification.onclick = () => { window.focus(); notification.close(); };
+  } catch {}
+}
+
+function paintNotifyButton() {
+  const label = $("#notify-state");
+  const button = $("#toggle-notify");
+  if (inExtension) {
+    label.textContent = "Pela extensão";
+    button.disabled = true;
+  } else if (!("Notification" in window)) {
+    label.textContent = "Não suportadas";
+    button.disabled = true;
+  } else if (Notification.permission === "denied") {
+    label.textContent = "Bloqueadas no navegador";
+  } else {
+    label.textContent = notificationsOn() ? "Ativadas" : "Desativadas";
+  }
+  button.classList.toggle("is-off", !notificationsOn());
+}
+
+$("#toggle-notify").addEventListener("click", async () => {
+  if (!("Notification" in window)) return;
+  if (Notification.permission === "default") await Notification.requestPermission();
+  else if (Notification.permission === "granted") store.set("localStorage", NOTIFY_KEY, !notificationsOn());
+  else toast("Libere as notificações nas configurações do navegador.");
+  paintNotifyButton();
+  fx.press($("#toggle-notify"));
+});
+
+function paintSound() {
+  document.querySelectorAll("#toggle-sound, #toggle-sound-side").forEach((button) => button.classList.toggle("is-off", !sound.enabled));
+  document.querySelectorAll(".sound-state").forEach((label) => { label.textContent = sound.enabled ? "Ligados" : "Mudos"; });
+}
+
+document.querySelectorAll("#toggle-sound, #toggle-sound-side").forEach((button) => button.addEventListener("click", () => {
+  sound.toggle();
+  paintSound();
+  fx.press(button);
+}));
+
+// ---------- presença e digitação ----------
+
+function updatePresence(users) {
+  presenceList = users;
+  const others = users.filter((user) => user.name !== me);
+  const peer = others.find((user) => user.online)
+    || others.sort((a, b) => String(b.lastSeen).localeCompare(String(a.lastSeen)))[0];
+  peerName = peer?.name || "";
+
+  if (peer && peerWasOnline !== null && peer.online !== peerWasOnline) {
+    sound.play(peer.online ? "join" : "leave");
+    toast(peer.online ? `${peer.name} está online` : `${peer.name} saiu do chat`, peer.online ? "ok" : "info");
+  }
+  peerWasOnline = peer ? peer.online : null;
+
+  roomTitle.textContent = peer ? peer.name : "Aguardando alguém";
+  paintAvatar(peerAvatar, peerName);
+  peerAvatar.classList.toggle("online", Boolean(peer?.online));
+  paintPeerStatus();
+
+  // Botões de chamada apagadinhos enquanto a outra pessoa está offline.
+  for (const button of document.querySelectorAll("#audio-call, #video-call, #share-screen")) {
+    button.classList.toggle("unavailable", !peer?.online);
+    button.title = peer?.online ? button.dataset.title : `${peer?.name || "A outra pessoa"} está offline`;
+  }
+
+  peopleEl.replaceChildren();
+  const self = users.find((user) => user.name === me) || { name: me, online: true };
+  for (const person of [self, peer].filter(Boolean)) {
+    const row = el("div", `person${person.online ? " online" : ""}`);
+    const avatar = el("div", "avatar");
+    paintAvatar(avatar, person.name);
+    avatar.classList.toggle("online", person.online);
+    const text = el("div");
+    text.append(el("strong", "", person.name === me ? `${person.name} (você)` : person.name),
+      el("small", "", person.online ? (person.active ? "Ativo agora" : "Online") : lastSeenLabel(person.lastSeen)));
+    row.append(avatar, text);
+    peopleEl.append(row);
+  }
+}
+
+function peerOnline() {
+  return presenceList.some((user) => user.name === peerName && user.online);
+}
+
+function paintPeerStatus() {
+  const peer = presenceList.find((user) => user.name === peerName);
+  peerStatus.classList.toggle("live", Boolean(peerTyping || peer?.online));
+  if (peerTyping) peerStatus.textContent = "digitando…";
+  else if (!peer) peerStatus.textContent = "Compartilhe o link e a senha para a outra pessoa entrar";
+  else if (peer.online) peerStatus.textContent = peer.active ? "online agora" : "online";
+  else peerStatus.textContent = lastSeenLabel(peer.lastSeen);
+}
+
+function setPeerTyping(active) {
+  clearTimeout(peerTypingTimer);
+  if (active) peerTypingTimer = setTimeout(() => setPeerTyping(false), 5000);
+  if (active === peerTyping) return;
+  peerTyping = active;
+  typingText.textContent = active ? `${peerName || "A outra pessoa"} está digitando` : "";
+  fx.typing(typingEl, active);
+  paintPeerStatus();
+}
+
+setInterval(() => { if (chatShown) { paintPeerStatus(); updatePresence(presenceList); } }, 60000);
+
+// ---------- chamadas (estilo Discord: voz, câmera e transmissão de tela na mesma chamada) ----------
+
+const mediaLabel = { audio: "Chamada de voz", video: "Chamada de vídeo", screen: "Transmissão de tela" };
+// Canais fixos da chamada, sempre nesta ordem. Ligar câmera ou tela no meio da chamada só troca a faixa, sem religar nada.
+const SLOTS = ["mic", "cam", "screen", "screenAudio"];
+const SLOT_KIND = { mic: "audio", cam: "video", screen: "video", screenAudio: "audio" };
+const QUALITY_KEY = "potato.quality";
+const QUALITY = {
+  "720p": { width: 1280, height: 720, frameRate: 30, bitrate: 2_500_000, hint: "detail" },
+  "1080p": { width: 1920, height: 1080, frameRate: 30, bitrate: 4_500_000, hint: "detail" },
+  "1080p60": { width: 1920, height: 1080, frameRate: 60, bitrate: 8_000_000, hint: "motion" }
+};
+const canStream = Boolean(navigator.mediaDevices?.getDisplayMedia);
+
+const stage = $("#stage");
+const streamTile = $("#stream-tile");
+const streamVideo = $("#stream-video");
+const tileMe = $("#tile-me");
+const tilePeer = $("#tile-peer");
+const remoteAudio = $("#remote-audio");
+const qualityMenu = $("#quality-menu");
+const callInfo = $(".call-info");
+const SPEAKING_LEVEL = 0.025;
+
+function setToggle(button, on, titleOn, titleOff) {
+  button.classList.toggle("is-off", !on);
+  button.title = on ? titleOn : titleOff;
+  button.setAttribute("aria-pressed", String(on));
+}
+
+function mediaDeniedText() {
+  return inExtension
+    ? "O painel lateral não conseguiu usar câmera, microfone ou tela. Abra nosso chat numa aba (botão de abrir em aba, no topo do painel) para fazer chamadas."
+    : "Permissão de câmera, microfone ou tela não concedida.";
+}
+
+function newCall(fields) {
+  return {
+    connected: false,
+    accepted: false,
+    slots: null,
+    local: { mic: null, cam: null, screen: null, screenAudio: null },
+    remote: {},
+    remoteState: { mic: true, cam: false, screen: false },
+    ...fields
+  };
+}
+
+const micOn = () => Boolean(call?.local.mic?.enabled);
+const currentQuality = () => call?.quality || store.get("localStorage", QUALITY_KEY) || "1080p";
+
+function myState() {
+  return { mic: micOn(), cam: Boolean(call?.local.cam), screen: Boolean(call?.local.screen) };
+}
+
+// Avisa a outra pessoa o que está ligado (microfone, câmera, transmissão).
+function sendState() {
+  if (call?.slots) socket?.emit("call-state", { to: call.peerId, ...myState() });
+}
+
+function receiveCallState(state) {
+  if (!call) return;
+  const before = call.remoteState;
+  call.remoteState = { mic: Boolean(state.mic), cam: Boolean(state.cam), screen: Boolean(state.screen) };
+  if (call.remoteState.screen && !before.screen) {
+    toast(`${call.name} começou a transmitir a tela`, "live");
+    sound.play("join");
+  }
+  if (!call.remoteState.screen && before.screen) sound.play("leave");
+  paintStage();
+}
+
+function attach(slot) {
+  const transceiver = call?.slots?.[slot];
+  if (!transceiver) return Promise.resolve();
+  return transceiver.sender.replaceTrack(call.local[slot] || null).catch(() => {});
+}
+
+function paintTile(tile, { video, muted, live }) {
+  const element = tile.querySelector("video");
+  const id = video?.id || "";
+  if (element.dataset.track !== id) {
+    element.srcObject = video ? new MediaStream([video]) : null;
+    element.dataset.track = id;
+  }
+  tile.classList.toggle("has-video", Boolean(video));
+  tile.classList.toggle("muted", muted);
+  tile.classList.toggle("live", live);
+}
+
+function paintStage() {
+  if (!call) return;
+  const { local, remote, remoteState } = call;
+  const peerLive = Boolean(remoteState.screen && remote.screen);
+  const owner = peerLive ? "peer" : local.screen ? "me" : null;
+
+  stage.classList.toggle("has-stream", Boolean(owner));
+  streamTile.classList.toggle("hidden", !owner);
+  if (owner) {
+    const tracks = (owner === "peer" ? [remote.screen, remote.screenAudio] : [local.screen]).filter(Boolean);
+    const ids = tracks.map((track) => track.id).join();
+    if (streamVideo.dataset.tracks !== ids) {
+      streamVideo.srcObject = new MediaStream(tracks);
+      streamVideo.dataset.tracks = ids;
+    }
+    streamVideo.muted = owner === "me";
+    $("#stream-owner").textContent = owner === "me" ? "Sua transmissão" : `Transmissão de ${call.name}`;
+    $("#stream-volume-wrap").classList.toggle("hidden", owner === "me");
+  } else if (streamVideo.srcObject) {
+    streamVideo.srcObject = null;
+    delete streamVideo.dataset.tracks;
+  }
+
+  paintTile(tileMe, { video: local.cam, muted: !micOn(), live: Boolean(local.screen) });
+  paintTile(tilePeer, { video: remoteState.cam ? remote.cam : null, muted: !remoteState.mic, live: peerLive });
+
+  setToggle($("#toggle-mic"), micOn(), "Silenciar microfone", "Ativar microfone");
+  setToggle($("#toggle-cam"), Boolean(local.cam), "Desligar câmera", "Ligar câmera");
+  setToggle($("#toggle-live"), Boolean(local.screen), "Parar transmissão", "Transmitir tela");
+}
+
+function openCallPanel(status) {
+  const peer = call.name || peerName;
+  callStatus.textContent = status;
+  callInfo.classList.remove("live");
+  callTimer.textContent = "";
+  paintAvatar($("#me-face"), me);
+  paintAvatar($("#call-avatar-face"), peer);
+  $("#peer-tile-name").textContent = peer;
+  tileMe.title = "Você";
+  tilePeer.title = peer;
+  tilePeer.classList.add("ringing");
+  setToggle($("#toggle-chat"), true, "Esconder o chat", "Mostrar o chat");
+  messageInput.placeholder = "Mensagem…";
+  $("#toggle-live").classList.toggle("hidden", !canStream);
+  chatView.classList.add("in-call");
+  paintStage();
+  fx.show(callPanel, { y: -20, scale: 0.97 });
+  scrollToLatest();
+}
+
+function createPeer() {
+  peerConnection = new RTCPeerConnection(rtcConfig);
+  peerConnection.onicecandidate = ({ candidate }) => candidate && socket.emit("webrtc-ice", { candidate, to: call?.peerId });
+  peerConnection.ontrack = ({ track, transceiver }) => {
+    if (!call) return;
+    const slot = SLOTS[peerConnection.getTransceivers().indexOf(transceiver)];
+    if (!slot) return;
+    call.remote[slot] = track;
+    if (slot === "mic") remoteAudio.srcObject = new MediaStream([track]);
+    paintStage();
+  };
+  peerConnection.onconnectionstatechange = () => {
+    const state = peerConnection?.connectionState;
+    if (state === "connected") {
+      onConnected();
+      if (call) callStatus.textContent = `Em chamada com ${call.name}`;
+    }
+    if (state === "disconnected") callStatus.textContent = "Conexão instável…";
+    if (state === "failed") {
+      toast("A chamada caiu. Redes muito restritas podem precisar de um servidor TURN.", "error");
+      sound.play("error");
+      teardown(true);
+    }
+  };
+  return peerConnection;
+}
+
+// Anel verde em volta de quem está falando.
+function watchSpeaking() {
+  const meters = new Map();
+  const until = { me: 0, peer: 0 };
+  const level = (track) => {
+    if (!track) return 0;
+    if (!meters.has(track.id)) meters.set(track.id, sound.meter(new MediaStream([track])));
+    return meters.get(track.id)();
+  };
+  const tick = () => {
+    if (!call) return;
+    const now = performance.now();
+    if (micOn() && level(call.local.mic) > SPEAKING_LEVEL) until.me = now + 300;
+    if (call.remoteState.mic && level(call.remote.mic) > SPEAKING_LEVEL) until.peer = now + 300;
+    tileMe.classList.toggle("speaking", now < until.me);
+    tilePeer.classList.toggle("speaking", now < until.peer);
+    call.frame = requestAnimationFrame(tick);
+  };
+  tick();
+}
+
+function onConnected() {
+  if (!call || call.connected) return;
+  call.connected = true;
+  clearTimeout(call.timeout);
+  sound.stopLoop();
+  sound.play("connected");
+  tilePeer.classList.remove("ringing");
+  callInfo.classList.add("live");
+  const started = Date.now();
+  call.clock = setInterval(() => {
+    const seconds = Math.floor((Date.now() - started) / 1000);
+    callTimer.textContent = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+  }, 1000);
+  sendState();
+  tuneScreen();
+  watchSpeaking();
+}
+
+async function acquireMic(active) {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    if (active !== call) return stream.getTracks().forEach((track) => track.stop());
+    active.local.mic = stream.getAudioTracks()[0];
+  } catch {
+    if (active === call) toast(inExtension ? mediaDeniedText() : "Sem microfone: você está mudo na chamada.");
+  }
+}
+
+async function toggleMic() {
+  if (!call) return;
+  if (!call.local.mic) {
+    await acquireMic(call);
+    await attach("mic");
+  } else {
+    call.local.mic.enabled = !call.local.mic.enabled;
+  }
+  sendState();
+  paintStage();
+  fx.press($("#toggle-mic"));
+}
+
+async function toggleCam() {
+  const active = call;
+  if (!active) return;
+  if (active.local.cam) {
+    active.local.cam.stop();
+    active.local.cam = null;
+  } else {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } } });
+      if (active !== call) return stream.getTracks().forEach((track) => track.stop());
+      active.local.cam = stream.getVideoTracks()[0];
+    } catch {
+      toast(mediaDeniedText(), "error");
+      return;
+    }
+  }
+  await attach("cam");
+  sendState();
+  paintStage();
+  fx.press($("#toggle-cam"));
+}
+
+// Qualidade da transmissão: taxa de bits e prioridade (nitidez para texto ou fluidez para jogos).
+async function tuneScreen() {
+  const sender = call?.slots?.screen?.sender;
+  const quality = QUALITY[call?.quality];
+  if (!sender || !quality || !call.local.screen) return;
+  const params = sender.getParameters();
+  if (!params.encodings?.length) return;
+  params.encodings[0].maxBitrate = quality.bitrate;
+  params.encodings[0].maxFramerate = quality.frameRate;
+  try {
+    await sender.setParameters({ ...params, degradationPreference: quality.hint === "motion" ? "maintain-framerate" : "maintain-resolution" });
+  } catch {
+    await sender.setParameters(params).catch(() => {});
+  }
+}
+
+async function startLive(key = currentQuality()) {
+  const active = call;
+  if (!active || !canStream) return false;
+  const quality = QUALITY[key] || QUALITY["1080p"];
+  let display;
+  try {
+    display = await navigator.mediaDevices.getDisplayMedia({
+      video: { width: { ideal: quality.width }, height: { ideal: quality.height }, frameRate: { ideal: quality.frameRate, max: quality.frameRate } },
+      audio: true,
+      systemAudio: "include",
+      surfaceSwitching: "include",
+      selfBrowserSurface: "exclude"
+    });
+  } catch {
+    toast(inExtension ? mediaDeniedText() : "Transmissão cancelada.");
+    return false;
+  }
+  if (active !== call) {
+    display.getTracks().forEach((track) => track.stop());
+    return false;
+  }
+  stopLive(false);
+  const [video] = display.getVideoTracks();
+  video.contentHint = quality.hint;
+  active.local.screen = video;
+  active.local.screenAudio = display.getAudioTracks()[0] || null;
+  active.quality = key;
+  store.set("localStorage", QUALITY_KEY, key);
+  video.addEventListener("ended", () => { if (call?.local.screen === video) stopLive(); });
+  await Promise.all([attach("screen"), attach("screenAudio")]);
+  await tuneScreen();
+  sendState();
+  paintStage();
+  if (active.slots) sound.play("join");
+  return true;
+}
+
+function stopLive(notify = true) {
+  if (!call?.local.screen) return;
+  call.local.screen.stop();
+  call.local.screenAudio?.stop();
+  call.local.screen = null;
+  call.local.screenAudio = null;
+  attach("screen");
+  attach("screenAudio");
+  if (!notify) return;
+  sendState();
+  paintStage();
+  sound.play("leave");
+}
+
+async function startCall(media) {
+  if (call) {
+    if (media === "video" && !call.local.cam) return toggleCam();
+    if (media === "screen" && !call.local.screen) return startLive();
+    return toast("Você já está numa chamada.");
+  }
+  if (!peerOnline()) {
+    sound.play("error");
+    return toast(`${peerName || "A outra pessoa"} não está online agora.`);
+  }
+  const active = call = newCall({ media, role: "caller", name: peerName });
+  // A tela é escolhida primeiro, enquanto o clique ainda vale para o navegador.
+  if (media === "screen" && !(await startLive())) return teardown(false);
+  if (active !== call) return;
+  await acquireMic(active);
+  if (media === "video") await toggleCam();
+  if (active !== call) return;
+
+  openCallPanel(`Chamando ${active.name}…`);
+  try {
+    const peer = createPeer();
+    active.slots = Object.fromEntries(SLOTS.map((slot) => [slot, peer.addTransceiver(SLOT_KIND[slot], { direction: "sendrecv" })]));
+    await Promise.all(SLOTS.map(attach));
+    await peer.setLocalDescription(await peer.createOffer());
+    socket.emit("webrtc-offer", { description: peer.localDescription, media, state: myState() });
+  } catch {
+    sound.play("error");
+    toast("Não foi possível iniciar a chamada.", "error");
+    return teardown(false);
+  }
+  sound.loop("ringback");
+  active.timeout = setTimeout(() => {
+    if (call === active && !active.connected) {
+      toast("Sem resposta.");
+      sound.play("hangup");
+      teardown(true);
+    }
+  }, 45000);
+}
+
+function receiveOffer({ description, media, name, from, state }) {
+  if (call) {
+    socket.emit("call-declined", { to: from });
+    return;
+  }
+  call = newCall({ media, role: "callee", peerId: from, offer: description, name });
+  call.remoteState = state || { mic: true, cam: media === "video", screen: media === "screen" };
+  paintAvatar($("#incoming-face"), name);
+  $("#incoming-title").textContent = `${name} está ligando`;
+  $("#incoming-kind").textContent = mediaLabel[media] || "Chamada";
+  incoming.classList.remove("hidden");
+  fx.incoming(incoming.querySelector(".incoming-card"));
+  sound.loop("ring");
+  if (document.hidden && notificationsOn()) {
+    try { new Notification(`${name} está ligando`, { body: mediaLabel[media], tag: "potato-call", requireInteraction: true }); } catch {}
+  }
+  const active = call;
+  call.timeout = setTimeout(() => {
+    if (call === active && !active.accepted) {
+      toast(`Chamada perdida de ${name}.`);
+      socket.emit("call-declined", { to: from });
+      teardown(false);
+    }
+  }, 45000);
+}
+
+async function acceptCall() {
+  if (!call || call.role !== "callee") return;
+  const active = call;
+  active.accepted = true;
+  clearTimeout(active.timeout);
+  sound.stopLoop();
+  incoming.classList.add("hidden");
+  try {
+    await acquireMic(active);
+    if (active.media === "video") await toggleCam();
+    if (active !== call) return;
+    openCallPanel("Conectando…");
+    const peer = createPeer();
+    await peer.setRemoteDescription(active.offer);
+    const transceivers = peer.getTransceivers();
+    active.slots = Object.fromEntries(SLOTS.map((slot, index) => [slot, transceivers[index]]).filter(([, transceiver]) => transceiver));
+    transceivers.forEach((transceiver) => { transceiver.direction = "sendrecv"; });
+    await Promise.all(SLOTS.map(attach));
+    await flushCandidates();
+    await peer.setLocalDescription(await peer.createAnswer());
+    socket.emit("webrtc-answer", { description: peer.localDescription, to: active.peerId, state: myState() });
+  } catch {
+    sound.play("error");
+    toast(inExtension ? mediaDeniedText() : "Não foi possível entrar na chamada.", "error");
+    teardown(true);
+  }
+}
+
+function declineCall() {
+  if (!call) return;
+  socket.emit("call-declined", { to: call.peerId });
+  sound.play("hangup");
+  teardown(false);
+}
+
+async function receiveAnswer({ description, from, state }) {
+  if (call?.role !== "caller" || !peerConnection) return;
+  call.peerId = from;
+  if (state) call.remoteState = state;
+  sound.stopLoop();
+  callStatus.textContent = "Conectando…";
+  await peerConnection.setRemoteDescription(description);
+  await flushCandidates();
+  paintStage();
+}
+
+async function receiveIce({ candidate }) {
+  if (!call) return;
+  if (!peerConnection?.remoteDescription) pendingCandidates.push(candidate);
+  else await peerConnection.addIceCandidate(candidate).catch(() => {});
+}
+
+async function flushCandidates() {
+  for (const candidate of pendingCandidates.splice(0)) await peerConnection.addIceCandidate(candidate).catch(() => {});
+}
+
+function teardown(notifyPeer) {
+  if (notifyPeer && call) socket?.emit("call-ended", { to: call.peerId });
+  if (notifyPeer && call?.connected) sound.play("hangup");
+  if (call) {
+    clearTimeout(call.timeout);
+    clearInterval(call.clock);
+    cancelAnimationFrame(call.frame);
+    Object.values(call.local).forEach((track) => track?.stop());
+  }
+  sound.stopLoop();
+  peerConnection?.close();
+  peerConnection = null;
+  pendingCandidates = [];
+  call = null;
+  for (const media of [streamVideo, remoteAudio, ...stage.querySelectorAll("video")]) {
+    media.srcObject = null;
+    delete media.dataset.track;
+    delete media.dataset.tracks;
+  }
+  incoming.classList.add("hidden");
+  qualityMenu.classList.add("hidden");
+  chatView.classList.remove("call-expanded", "in-call");
+  callInfo.classList.remove("live");
+  messageInput.placeholder = "Escreva uma mensagem…";
+  [tileMe, tilePeer].forEach((tile) => tile.classList.remove("speaking", "has-video", "live", "muted", "ringing"));
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  fx.hide(callPanel, { y: -20, scale: 0.97 });
+  requestAnimationFrame(() => scrollToLatest());
+}
+
+function paintQualityMenu() {
+  qualityMenu.querySelectorAll("[data-quality]").forEach((option) => option.classList.toggle("selected", option.dataset.quality === currentQuality()));
+}
+
+function toggleFullscreen() {
+  if (document.fullscreenElement) return document.exitFullscreen().catch(() => {});
+  streamTile.requestFullscreen?.().catch(() => {});
+}
+
+$("#audio-call").addEventListener("click", () => startCall("audio"));
+$("#video-call").addEventListener("click", () => startCall("video"));
+$("#share-screen").addEventListener("click", () => startCall("screen"));
+$("#share-screen").classList.toggle("hidden", !canStream);
+$("#toggle-mic").addEventListener("click", toggleMic);
+$("#toggle-cam").addEventListener("click", toggleCam);
+$("#toggle-live").addEventListener("click", (event) => {
+  event.stopPropagation();
+  if (call?.local.screen) return stopLive();
+  paintQualityMenu();
+  qualityMenu.classList.toggle("hidden");
+});
+qualityMenu.addEventListener("click", (event) => {
+  const option = event.target.closest("[data-quality]");
+  if (!option) return;
+  qualityMenu.classList.add("hidden");
+  startLive(option.dataset.quality);
+});
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".live-wrap")) qualityMenu.classList.add("hidden");
+});
+$("#toggle-chat").addEventListener("click", () => {
+  const hidden = chatView.classList.toggle("call-expanded");
+  setToggle($("#toggle-chat"), !hidden, "Esconder o chat", "Mostrar o chat");
+  if (!hidden) scrollToLatest();
+});
+$("#stream-full").addEventListener("click", toggleFullscreen);
+streamTile.addEventListener("dblclick", toggleFullscreen);
+$("#stream-volume").addEventListener("input", (event) => { streamVideo.volume = Number(event.target.value); });
+$("#end-call").addEventListener("click", () => teardown(true));
+$("#accept-call").addEventListener("click", acceptCall);
+$("#decline-call").addEventListener("click", declineCall);
+window.addEventListener("beforeunload", () => { if (call) socket?.emit("call-ended", { to: call.peerId }); });
+
+// ---------- ponte com a extensão ----------
+
+window.addEventListener("message", (event) => {
+  if (!inExtension || event.source !== window.parent || event.origin !== parentOrigin) return;
+  const data = event.data || {};
+  if (data.type === "potato:session" && data.token && !socket) {
+    startSession({ token: data.token, name: data.name }, { animate: true });
+  }
+});
+
+// ---------- início ----------
+
+document.querySelectorAll(".hero-potato, .potato-mini").forEach((potato) => potato.addEventListener("click", () => {
+  fx.squish(potato.querySelector("svg") || potato);
+  sound.play("whoosh");
+}));
+
+paintSound();
+paintNotifyButton();
+fx.ambient();
+const saved = store.get("localStorage", SESSION_KEY) || store.get("sessionStorage", SESSION_KEY);
+if (saved?.token) {
+  showChat(false);
+  startSession(saved, { animate: false });
+} else {
+  fx.intro();
+  tellParent({ type: "potato:ready" });
+  // Cursor já no campo certo (no celular não, para o teclado não pular na cara).
+  if (!matchMedia("(pointer: coarse)").matches) (rememberedName ? $("#password") : $("#name")).focus({ preventScroll: true });
+}

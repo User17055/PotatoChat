@@ -1,0 +1,12 @@
+{
+  "name": "potato-chat-php",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Potato Chat em PHP: o mesmo site, para hospedagem PHP comum (pasta de subdomínio).",
+  "type": "module",
+  "scripts": {
+    "start": "php -S localhost:8000 -t site",
+    "check": "php -l site/api.php && php -l site/index.php && php -l site/lib/potato.php && node --check site/realtime.js && node --check site/app.js && node --check extensao/background.js && node --check extensao/options.js && node --check extensao/sidepanel.js",
+    "test": "node tests/integration.mjs"
+  }
+}
