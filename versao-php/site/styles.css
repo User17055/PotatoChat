@@ -119,6 +119,9 @@ body { min-height: 100vh; min-height: 100dvh; overflow: hidden; }
 button, input, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; -webkit-tap-highlight-color: transparent; }
 button:disabled { cursor: default; opacity: .55; }
+/* Ao tocar, o botão afunda um pouquinho. Usa scale (e não transform) para não brigar com as animações do GSAP. */
+:is(.icon-button, .pill, .primary, .tab, .theme-choice, .jump, .round, .gif-button, .load-more, .chip, .quick-emojis button):active:not(:disabled) { scale: .92; }
+:is(.setting-row, button.person):active:not(:disabled) { scale: .98; }
 svg { flex: none; }
 .icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .hidden { display: none !important; }
@@ -221,18 +224,16 @@ html.has-session #chat-view.hidden { display: grid !important; }
 .person strong { font-size: 13px; font-weight: 600; }
 .person small { margin-top: 2px; color: var(--muted); font-size: 11px; }
 .person.online small { color: var(--ok); }
-button.person { width: 100%; border: 0; background: transparent; color: inherit; text-align: left; transition: background .2s; }
+button.person { position: relative; width: 100%; border: 0; background: transparent; color: inherit; text-align: left; transition: background .2s, box-shadow .2s; }
 button.person:hover { background: var(--surface-2); }
-.person-edit { margin-left: auto; width: 16px; height: 16px; color: var(--faint); opacity: 0; transition: opacity .2s; }
-button.person:hover .person-edit, button.person:focus-visible .person-edit { opacity: 1; }
+/* Aba aberta (conversa ou perfil): fundo e um risquinho na cor do tema. */
+button.person.active { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--accent); }
+.person-edit { margin-left: auto; width: 16px; height: 16px; color: var(--faint); opacity: 0; transition: opacity .2s, transform .4s; }
+button.person:hover .person-edit, button.person:focus-visible .person-edit { opacity: 1; transform: rotate(60deg); }
 @media (hover: none) { .person-edit { opacity: .6; } }
-.sidebar-bottom { display: grid; gap: 6px; }
-.side-option { display: flex; align-items: center; gap: 12px; width: 100%; padding: 9px 10px; border: 1px solid transparent; border-radius: 12px; background: transparent; color: var(--muted); text-align: left; transition: background .2s, color .2s, border-color .2s; }
-.side-option:hover:not(:disabled) { background: var(--surface-2); border-color: var(--line); color: var(--ink); }
-.side-option .icon { width: 19px; height: 19px; }
-.side-option strong, .side-option small { display: block; }
-.side-option strong { color: var(--ink); font-size: 13px; font-weight: 500; }
-.side-option small { margin-top: 2px; font-size: 11px; }
+.sidebar-bottom { display: grid; gap: 6px; padding-top: 12px; border-top: 1px solid var(--line); }
+.side-profile .avatar::after, .tab .avatar::after { display: none; }
+.side-profile strong { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- avatares ---------- */
 .avatar { --hue: 40; position: relative; flex: none; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; font-size: 15px; font-weight: 600; color: hsl(var(--hue) 70% 12%); background: linear-gradient(140deg, hsl(var(--hue) 85% 72%), hsl(calc(var(--hue) + 30) 75% 58%)); }
@@ -242,9 +243,6 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .avatar.big::after { display: none; }
 /* Foto de perfil: a imagem entra no lugar do degradê com a inicial. */
 .avatar.has-photo { background-color: var(--surface-3); background-position: center; background-size: cover; }
-.me-button { padding: 0; overflow: hidden; }
-.me-button .avatar { width: 100%; height: 100%; font-size: 14px; }
-.me-button .avatar::after { display: none; }
 
 /* ---------- conversa ---------- */
 .conversation { height: 100vh; height: 100dvh; min-width: 0; display: flex; flex-direction: column; }
@@ -264,14 +262,14 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .icon-button.unavailable { opacity: .45; }
 .icon-button.unavailable:hover { border-color: var(--line); color: var(--ink); }
 .icon-button.is-off { color: var(--faint); }
-.compact-only { display: none; }
 
 .net-banner { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 8px; border-bottom: 1px solid color-mix(in srgb, var(--accent) 30%, var(--bg)); background: color-mix(in srgb, var(--accent) 16%, var(--bg)); color: var(--accent-2); font-size: 12px; font-weight: 600; }
 .spinner { width: 13px; height: 13px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin .8s linear infinite; }
 
 /* ---------- mensagens ---------- */
 .messages-wrap { position: relative; min-height: 0; }
-.messages { position: relative; height: 100%; padding: 24px max(20px, calc((100% - 820px) / 2)) 12px; display: flex; flex-direction: column; gap: 3px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+/* pan-y: a rolagem vertical continua com o navegador e o arrasto para o lado (responder) fica com o app. */
+.messages { position: relative; height: 100%; padding: 24px max(20px, calc((100% - 820px) / 2)) 12px; display: flex; flex-direction: column; gap: 3px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
 .load-more { align-self: center; margin-bottom: 10px; padding: 7px 14px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 12px; }
 .load-more:hover { border-color: var(--accent); color: var(--ink); }
 .empty { margin: auto; display: grid; justify-items: center; gap: 12px; max-width: 300px; color: var(--muted); font-size: 14px; font-weight: 500; line-height: 1.55; text-align: center; }
@@ -284,7 +282,7 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .message.mine { align-self: flex-end; }
 .bubble-row { position: relative; display: flex; }
 .mine .bubble-row { justify-content: flex-end; }
-.bubble { position: relative; min-width: 70px; padding: 8px 12px 7px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface-2); font-size: 14.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; box-shadow: 0 2px 10px #0003; transition: background .3s; }
+.bubble { position: relative; min-width: 70px; padding: 8px 12px 7px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface-2); font-size: 14.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; box-shadow: 0 2px 10px #0003; transition: background .3s, box-shadow .25s; }
 .message:not(.mine):not(.grouped) .bubble { border-top-left-radius: 6px; }
 .mine .bubble { border-color: transparent; background: linear-gradient(160deg, var(--accent-2), var(--accent)); color: var(--accent-ink); box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 13%, transparent); }
 .mine:not(.grouped) .bubble { border-top-right-radius: 6px; }
@@ -315,16 +313,25 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .bubble.gif .foot { position: absolute; right: 9px; bottom: 9px; float: none; margin: 0; padding: 4px 7px; border-radius: 999px; background: #000000a6; color: #fff; opacity: 1; }
 .bubble.gif .status[data-state="read"] { color: #7cc4ff; }
 
-.tools { position: absolute; bottom: calc(100% + 4px); left: 0; z-index: 5; display: flex; align-items: center; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: 999px; background: color-mix(in srgb, var(--surface-3) 95%, transparent); box-shadow: 0 10px 26px #0008; white-space: nowrap; opacity: 0; transform: translateY(6px) scale(.95); pointer-events: none; transition: opacity .18s, transform .18s; }
-.mine .tools { left: auto; right: 0; }
+.tools { position: absolute; bottom: calc(100% + 4px); left: 0; z-index: 5; display: flex; align-items: center; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-3); box-shadow: 0 10px 26px #0008; white-space: nowrap; opacity: 0; transform: translateY(8px) scale(.85); transform-origin: 0 100%; pointer-events: none; transition: opacity .18s, transform .32s cubic-bezier(.34, 1.56, .64, 1); }
+.mine .tools { left: auto; right: 0; transform-origin: 100% 100%; }
 .tool-emoji, .tool { width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; color: var(--muted); font-size: 17px; transition: transform .15s, background .15s, color .15s; }
 .tool-emoji:hover { transform: scale(1.3) translateY(-2px); }
 .tool:hover { background: var(--surface-3); color: var(--ink); }
 .danger-tool:hover { color: var(--danger); }
 .tool .icon { width: 16px; height: 16px; }
 .message.show-tools .tools { opacity: 1; transform: none; pointer-events: auto; }
+/* Os botões entram um a um (--i vem do app.js) e a mensagem escolhida ganha destaque. */
+.message.show-tools :is(.tool-emoji, .tool) { animation: tool-in .34s cubic-bezier(.34, 1.56, .64, 1) backwards; animation-delay: calc(var(--i, 0) * 22ms); }
+@keyframes tool-in { from { opacity: 0; transform: translateY(10px) scale(.3); } }
+.message.show-tools .bubble { box-shadow: 0 10px 28px #0007, 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
 /* No toque, segurar a mensagem abre as ações: sem seleção de texto nem menu nativo do sistema. */
 @media (pointer: coarse) { .bubble, .bubble img { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; } }
+
+/* Arrastar para responder: o ícone aparece no lugar de onde o balão saiu. */
+.swipe-reply { position: absolute; left: 2px; top: 50%; z-index: 0; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%; background: var(--surface-2); color: var(--muted); opacity: 0; transform: translateY(-50%) scale(.5); pointer-events: none; transition: background .15s, color .15s; }
+.swipe-reply.ready { background: var(--accent); color: var(--accent-ink); }
+.swipe-reply .icon { width: 16px; height: 16px; }
 
 .reactions { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 4px; margin: -6px 8px 0; }
 .mine .reactions { justify-content: flex-end; }
@@ -359,8 +366,10 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .quick-emojis button:hover { background: var(--surface-2); transform: translateY(-2px); }
 .composer textarea { flex: 1; min-width: 0; max-height: 140px; padding: 9px 6px; border: 0; background: transparent; color: var(--ink); font-size: 14.5px; line-height: 1.45; resize: none; outline: none; overflow-y: hidden; }
 .composer textarea::placeholder { color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.send { flex: 0 0 42px; height: 42px; display: grid; place-items: center; overflow: hidden; border: 0; border-radius: 50%; background: var(--accent); color: var(--accent-ink); box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 25%, transparent); transition: filter .2s; }
+.send { flex: 0 0 42px; height: 42px; display: grid; place-items: center; overflow: hidden; border: 0; border-radius: 50%; background: var(--accent); color: var(--accent-ink); box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 25%, transparent); transition: filter .2s, opacity .2s, box-shadow .2s, scale .3s cubic-bezier(.34, 1.56, .64, 1); }
 .send:hover { filter: brightness(1.08); }
+/* Campo vazio: o botão de enviar fica recolhido e acende quando há o que mandar. */
+.composer:has(textarea:placeholder-shown) .send { opacity: .5; scale: .86; box-shadow: none; }
 .send .icon { width: 19px; height: 19px; margin: 1px 2px 0 0; stroke-width: 2.2; }
 
 /* ---------- GIFs ---------- */
@@ -520,24 +529,37 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .pill.small { padding: 7px 13px; font-size: 12.5px; }
 .pill.small .icon { width: 15px; height: 15px; }
 
-/* ---------- configurações ---------- */
-.settings-card { width: min(100%, 420px); max-height: calc(100vh - 40px); max-height: calc(100dvh - 40px); padding: 18px 20px 14px; overflow-y: auto; overscroll-behavior: contain; text-align: left; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
-.settings-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
-.close-x { width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--surface-2); color: var(--muted); transition: color .2s, background .2s; }
-.close-x:hover { background: var(--surface-3); color: var(--ink); }
-.close-x .icon { width: 17px; height: 17px; }
-.settings-profile { display: flex; align-items: center; gap: 16px; }
-.profile-text { min-width: 0; }
-.profile-text strong { display: block; overflow: hidden; font-size: 16px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.profile-text .muted { margin-top: 2px; font-size: 12px; }
-.photo-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 10px; }
+/* =====================================================================
+   Perfil (aba separada da conversa)
+   ===================================================================== */
+.app-shell[data-tab="profile"] .conversation, .app-shell:not([data-tab="profile"]) .profile-view { display: none; }
+.profile-view { height: 100vh; height: 100dvh; min-width: 0; display: flex; flex-direction: column; }
+.profile-top { flex: none; min-height: 78px; padding: 14px 24px; display: flex; align-items: center; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 80%, transparent); backdrop-filter: blur(14px); }
+.profile-top h2 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
+.profile-scroll { flex: 1 1 auto; min-height: 0; padding: 36px max(16px, calc((100% - 540px) / 2)) 40px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+
+.profile-hero { display: grid; justify-items: center; text-align: center; }
+.profile-hero h3 { max-width: 100%; margin: 18px 0 0; overflow: hidden; font-size: 24px; font-weight: 700; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }
+.profile-hero .muted { max-width: 340px; }
+.photo-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 10px; margin-top: 14px; }
 .profile-photo { position: relative; flex: none; display: block; padding: 0; border: 0; border-radius: 50%; background: none; transition: opacity .2s; }
-.profile-photo .avatar.big { width: 88px; height: 88px; font-size: 36px; }
+.profile-photo .avatar.big { width: 112px; height: 112px; font-size: 44px; box-shadow: 0 16px 40px #0006; }
 .profile-photo:hover .avatar { filter: brightness(1.08); }
-.photo-badge { position: absolute; right: 0; bottom: 0; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: var(--accent); color: var(--accent-ink); box-shadow: 0 0 0 3px var(--surface); }
+/* Anel em degradê em volta da foto (como os stories), girando ao passar o mouse. */
+.photo-ring { position: absolute; inset: -7px; border-radius: 50%; background: conic-gradient(from 0deg, var(--accent-2), var(--accent), var(--accent-3), var(--accent), var(--accent-2)); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px)); mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px)); }
+.profile-photo:hover .photo-ring { animation: spin 3s linear infinite; }
+.photo-badge { position: absolute; right: 2px; bottom: 2px; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%; background: var(--accent); color: var(--accent-ink); box-shadow: 0 0 0 3px var(--bg); transition: transform .3s cubic-bezier(.34, 1.56, .64, 1); }
+.profile-photo:hover .photo-badge { transform: scale(1.12) rotate(-8deg); }
 .photo-badge .icon { width: 15px; height: 15px; }
-.settings-card.busy .profile-photo, .settings-card.busy #photo-pick { opacity: .5; pointer-events: none; }
-.settings-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.profile-view.busy .profile-photo, .profile-view.busy #photo-pick { opacity: .5; pointer-events: none; }
+
+.profile-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 26px; padding: 14px 4px; border: 1px solid var(--line); border-radius: 20px; background: color-mix(in srgb, var(--surface) 80%, transparent); }
+.profile-stats div { display: grid; justify-items: center; gap: 2px; padding: 0 6px; text-align: center; }
+.profile-stats div + div { border-left: 1px solid var(--line); }
+.profile-stats strong { background: var(--title); -webkit-background-clip: text; background-clip: text; color: transparent; font-size: 24px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.profile-stats span { color: var(--muted); font-size: 11.5px; line-height: 1.3; }
+.profile-card { margin-top: 14px; padding: 16px; border: 1px solid var(--line); border-radius: 20px; background: color-mix(in srgb, var(--surface) 80%, transparent); }
+.profile-card.settings-list { padding: 6px; }
 .settings-list { display: grid; gap: 2px; }
 .setting-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 9px 10px; border: 0; border-radius: 12px; background: transparent; color: var(--muted); text-align: left; transition: background .2s, color .2s; }
 .setting-row:hover:not(:disabled) { background: var(--surface-2); }
@@ -566,13 +588,34 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .text-button { padding: 4px 2px; border: 0; background: none; color: var(--muted); font-size: 12.5px; text-decoration: underline; text-underline-offset: 3px; }
 .text-button:hover { color: var(--danger); }
 
+/* Troca de tema: o navegador tira uma foto da tela antiga e o fx.reveal abre a nova num círculo. */
+::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+
+/* ---------- abas (só no celular e no painel da extensão) ---------- */
+.tabbar { display: none; }
+.tab { position: relative; z-index: 1; height: 46px; display: grid; place-items: center; border: 0; background: transparent; color: var(--muted); transition: color .25s; }
+.tab .icon { width: 24px; height: 24px; }
+.tab.active { color: var(--accent); }
+.tab .avatar { width: 28px; height: 28px; font-size: 12px; box-shadow: 0 0 0 2px transparent; transition: box-shadow .25s; }
+.tab.active .avatar { box-shadow: 0 0 0 2px var(--bg-2), 0 0 0 4px var(--accent); }
+/* Pílula atrás da aba aberta, que desliza de uma para a outra. */
+.tab-glow { position: absolute; top: 6px; left: 12px; width: calc((100% - 24px) / 2); height: 46px; pointer-events: none; transition: transform .5s cubic-bezier(.34, 1.4, .5, 1); }
+.tab-glow::before { content: ""; position: absolute; inset: 0 calc(50% - 38px); border-radius: 999px; background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.app-shell[data-tab="profile"] .tab-glow { transform: translateX(100%); }
+.tab-badge { position: absolute; top: 2px; left: calc(50% + 6px); min-width: 18px; height: 18px; padding: 0 5px; display: grid; place-items: center; border-radius: 9px; background: var(--live); color: #fff; font-size: 10.5px; font-weight: 700; box-shadow: 0 0 0 2px var(--bg-2); }
+.person .tab-badge { position: static; margin-left: auto; box-shadow: none; }
+
 /* =====================================================================
    Telas pequenas e painel lateral da extensão
    ===================================================================== */
 @media (max-width: 760px) {
-  .app-shell { grid-template-columns: minmax(0, 1fr); }
+  .app-shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
   .sidebar { display: none; }
-  .compact-only { display: grid; }
+  .conversation, .profile-view { height: auto; min-height: 0; }
+  .tabbar { position: relative; display: grid; grid-template-columns: 1fr 1fr; padding: 6px 12px calc(6px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: color-mix(in srgb, var(--bg-2) 92%, transparent); backdrop-filter: blur(14px); }
+  .in-call .tabbar { display: none; }
+  .profile-top { min-height: 64px; padding: 10px 16px; }
+  .profile-scroll { padding: 26px 16px 28px; }
   .topbar { min-height: 64px; padding: 10px 12px; }
   .topbar h2 { font-size: 16px; }
   .avatar { width: 34px; height: 34px; font-size: 14px; }
@@ -599,6 +642,10 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
   .round .icon { width: 18px; height: 18px; }
   .round.hangup { width: 52px; }
   .volume input { width: 64px; }
+}
+/* Celular digitando: as abas saem para sobrar espaço acima do teclado. */
+@media (max-width: 760px) and (pointer: coarse) {
+  .app-shell:has(#message-input:focus) .tabbar { display: none; }
 }
 @media (max-width: 420px) {
   .quick-emojis button:not(:first-child) { display: none; }

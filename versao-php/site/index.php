@@ -169,18 +169,19 @@ function asset(string $file): string
     </main>
 
     <!-- ===================== CHAT ===================== -->
-    <main id="chat-view" class="app-shell hidden">
+    <main id="chat-view" class="app-shell hidden" data-tab="chat">
       <aside class="sidebar">
         <div>
           <div class="brand-row"><svg class="potato-mini" viewBox="0 0 142 100" aria-hidden="true"><use href="#potato" /></svg><strong>Potato</strong></div>
           <div class="room-label">No nosso chat</div>
           <div id="people" class="people"></div>
         </div>
-        <!-- Foto, tema, notificações, sons e sair ficam todos na janela de Configurações. -->
+        <!-- Seu perfil: foto, tema, notificações, sons e sair ficam todos na aba Perfil. -->
         <div class="sidebar-bottom">
-          <button class="side-option" type="button" data-settings>
-            <svg class="icon"><use href="#i-settings" /></svg>
-            <span><strong>Configurações</strong><small>Foto, tema, sons e mais</small></span>
+          <button id="side-profile" class="person side-profile" type="button" data-tab-target="profile">
+            <span id="side-avatar" class="avatar" aria-hidden="true">?</span>
+            <span><strong id="side-name">Você</strong><small>Ver seu perfil</small></span>
+            <svg class="icon person-edit"><use href="#i-settings" /></svg>
           </button>
         </div>
       </aside>
@@ -203,16 +204,6 @@ function asset(string $file): string
             </button>
             <button id="share-screen" class="icon-button" type="button" title="Transmitir tela" data-title="Transmitir tela" aria-label="Transmitir tela">
               <svg class="icon"><use href="#i-monitor-up" /></svg>
-            </button>
-            <button id="me-button" class="icon-button compact-only me-button" type="button" title="Configurações" aria-label="Configurações" data-settings>
-              <span id="me-avatar" class="avatar" aria-hidden="true">?</span>
-            </button>
-            <button id="toggle-sound" class="icon-button compact-only swap" type="button" title="Sons" aria-label="Ligar ou desligar sons">
-              <svg class="icon when-on"><use href="#i-volume" /></svg>
-              <svg class="icon when-off"><use href="#i-volume-off" /></svg>
-            </button>
-            <button class="icon-button compact-only" type="button" title="Sair" aria-label="Sair" data-logout>
-              <svg class="icon"><use href="#i-logout" /></svg>
             </button>
           </div>
         </header>
@@ -332,6 +323,74 @@ function asset(string $file): string
           </button>
         </form>
       </section>
+
+      <!-- ===================== PERFIL ===================== -->
+      <section id="profile-view" class="profile-view" aria-labelledby="profile-name">
+        <header class="profile-top">
+          <h2>Seu perfil</h2>
+        </header>
+        <div class="profile-scroll">
+          <section class="profile-hero">
+            <button id="profile-photo" class="profile-photo" type="button" aria-label="Escolher foto" title="Escolher foto">
+              <span class="photo-ring" aria-hidden="true"></span>
+              <span id="profile-face" class="avatar big">?</span>
+              <span class="photo-badge"><svg class="icon"><use href="#i-camera" /></svg></span>
+            </button>
+            <h3 id="profile-name">Você</h3>
+            <p id="profile-since" class="muted">Sua foto aparece para a outra pessoa na conversa e nas chamadas. Pode ser um GIF.</p>
+            <div class="photo-actions">
+              <button id="photo-pick" class="pill gold small" type="button"><svg class="icon"><use href="#i-camera" /></svg>Trocar foto</button>
+              <button id="photo-remove" class="text-button hidden" type="button">Remover</button>
+            </div>
+            <input id="photo-input" type="file" accept="image/*" hidden />
+          </section>
+
+          <section class="profile-stats" aria-label="Seus números no chat">
+            <div><strong data-stat="messages">–</strong><span>mensagens</span></div>
+            <div><strong data-stat="reactions">–</strong><span>reações</span></div>
+            <div><strong data-stat="days">–</strong><span>dias de conversa</span></div>
+          </section>
+
+          <section class="profile-card">
+            <p class="picker-label">Tema <small>· só muda para você</small></p>
+            <div id="themes" class="themes" role="group" aria-label="Tema do chat"></div>
+          </section>
+
+          <section class="profile-card settings-list">
+            <button id="toggle-notify" class="setting-row swap is-off" type="button" role="switch" aria-checked="false">
+              <svg class="icon when-on"><use href="#i-bell" /></svg>
+              <svg class="icon when-off"><use href="#i-bell-off" /></svg>
+              <span class="setting-text"><strong>Notificações</strong><small id="notify-state">Desativadas</small></span>
+              <span class="switch" aria-hidden="true"></span>
+            </button>
+            <button id="toggle-sound-setting" class="setting-row swap" type="button" role="switch" aria-checked="true">
+              <svg class="icon when-on"><use href="#i-volume" /></svg>
+              <svg class="icon when-off"><use href="#i-volume-off" /></svg>
+              <span class="setting-text"><strong>Sons</strong><small class="sound-state">Ligados</small></span>
+              <span class="switch" aria-hidden="true"></span>
+            </button>
+          </section>
+
+          <section class="profile-card settings-list">
+            <button class="setting-row logout" type="button" data-logout>
+              <svg class="icon"><use href="#i-logout" /></svg>
+              <span class="setting-text"><strong>Sair</strong><small>Encerrar a sessão neste aparelho</small></span>
+            </button>
+          </section>
+        </div>
+      </section>
+
+      <!-- Abas do celular e do painel da extensão (como no Instagram). -->
+      <nav class="tabbar" aria-label="Navegação">
+        <span class="tab-glow" aria-hidden="true"></span>
+        <button class="tab" type="button" data-tab-target="chat" aria-label="Conversa" title="Conversa">
+          <svg class="icon"><use href="#i-message" /></svg>
+          <span id="tab-unread" class="tab-badge unread-badge hidden">0</span>
+        </button>
+        <button class="tab" type="button" data-tab-target="profile" aria-label="Seu perfil" title="Seu perfil">
+          <span id="tab-avatar" class="avatar" aria-hidden="true">?</span>
+        </button>
+      </nav>
     </main>
 
     <!-- ===================== JANELAS ===================== -->
@@ -357,60 +416,6 @@ function asset(string $file): string
           <button id="confirm-cancel" class="pill ghost" type="button">Cancelar</button>
           <button id="confirm-ok" class="pill danger" type="button">Apagar</button>
         </div>
-      </div>
-    </div>
-
-    <div id="settings" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-      <div class="modal-card settings-card">
-        <div class="settings-head">
-          <h3 id="settings-title">Configurações</h3>
-          <button id="settings-close" class="close-x" type="button" aria-label="Fechar" title="Fechar">
-            <svg class="icon"><use href="#i-x" /></svg>
-          </button>
-        </div>
-
-        <section class="settings-profile">
-          <button id="profile-photo" class="profile-photo" type="button" aria-label="Escolher foto" title="Escolher foto">
-            <span id="profile-face" class="avatar big">?</span>
-            <span class="photo-badge"><svg class="icon"><use href="#i-camera" /></svg></span>
-          </button>
-          <div class="profile-text">
-            <strong id="profile-name">Você</strong>
-            <p class="muted">Sua foto aparece para a outra pessoa na conversa e nas chamadas. Pode ser um GIF.</p>
-            <div class="photo-actions">
-              <button id="photo-pick" class="pill gold small" type="button"><svg class="icon"><use href="#i-camera" /></svg>Trocar foto</button>
-              <button id="photo-remove" class="text-button hidden" type="button">Remover</button>
-            </div>
-          </div>
-          <input id="photo-input" type="file" accept="image/*" hidden />
-        </section>
-
-        <section class="settings-section">
-          <p class="picker-label">Tema <small>· só muda para você</small></p>
-          <div id="themes" class="themes" role="group" aria-label="Tema do chat"></div>
-        </section>
-
-        <section class="settings-section settings-list">
-          <button id="toggle-notify" class="setting-row swap is-off" type="button" role="switch" aria-checked="false">
-            <svg class="icon when-on"><use href="#i-bell" /></svg>
-            <svg class="icon when-off"><use href="#i-bell-off" /></svg>
-            <span class="setting-text"><strong>Notificações</strong><small id="notify-state">Desativadas</small></span>
-            <span class="switch" aria-hidden="true"></span>
-          </button>
-          <button id="toggle-sound-setting" class="setting-row swap" type="button" role="switch" aria-checked="true">
-            <svg class="icon when-on"><use href="#i-volume" /></svg>
-            <svg class="icon when-off"><use href="#i-volume-off" /></svg>
-            <span class="setting-text"><strong>Sons</strong><small class="sound-state">Ligados</small></span>
-            <span class="switch" aria-hidden="true"></span>
-          </button>
-        </section>
-
-        <section class="settings-section settings-list">
-          <button class="setting-row logout" type="button" data-logout>
-            <svg class="icon"><use href="#i-logout" /></svg>
-            <span class="setting-text"><strong>Sair</strong><small>Encerrar a sessão neste aparelho</small></span>
-          </button>
-        </section>
       </div>
     </div>
 

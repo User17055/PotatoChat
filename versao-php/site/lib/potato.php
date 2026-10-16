@@ -719,6 +719,9 @@ function act(array $me, string $event, $data)
         case 'avatar':
             return set_avatar($name, $body['image'] ?? null);
 
+        case 'stats':
+            return stats($name);
+
         // Tema escolhido: fica na conta e muda na hora nas outras abas da mesma pessoa.
         case 'theme':
             $theme = str($body['theme'] ?? '');
@@ -792,6 +795,21 @@ function act(array $me, string $event, $data)
             return null;
     }
     return null;
+}
+
+// Números da tela de perfil: mensagens enviadas, reações dadas e desde quando a conversa existe.
+function stats(string $name): array
+{
+    $messages = (int) query('SELECT COUNT(*) FROM ' . t('messages') . ' WHERE sender = ? AND deleted = 0', [$name])->fetchColumn();
+    $since = query('SELECT created_at FROM ' . t('messages') . ' ORDER BY n LIMIT 1')->fetchColumn();
+    $reactions = 0;
+    $rows = query('SELECT reactions FROM ' . t('messages') . " WHERE deleted = 0 AND reactions <> '{}'")->fetchAll(PDO::FETCH_COLUMN);
+    foreach ($rows as $json) {
+        foreach ((array) json_decode((string) $json, true) as $names) {
+            if (in_array($name, (array) $names, true)) $reactions++;
+        }
+    }
+    return ['messages' => $messages, 'reactions' => $reactions, 'since' => $since ?: null];
 }
 
 // GIF escolhido na busca do chat: só imagens servidas pelo próprio GIPHY. false = recusado.

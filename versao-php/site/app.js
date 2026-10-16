@@ -139,10 +139,10 @@ function paintAvatar(node, name) {
   node.classList.toggle("has-photo", Boolean(photo));
 }
 
-// Avatares fora da lista de pessoas (topo no celular, chamada, janela do perfil).
+// Avatares fora da lista de pessoas (abas, barra lateral, perfil e chamada).
 function repaintAvatars() {
-  paintAvatar($("#me-avatar"), me);
-  paintAvatar($("#profile-face"), me);
+  for (const node of [$("#tab-avatar"), $("#side-avatar"), $("#profile-face")]) paintAvatar(node, me);
+  $("#side-name").textContent = me || "Você";
   if (!call) return;
   paintAvatar($("#me-face"), me);
   paintAvatar($("#call-avatar-face"), call.name || peerName);
@@ -306,7 +306,7 @@ loginForm.addEventListener("submit", async (event) => {
     store.set("localStorage", NAME_KEY, result.name);
     passwordInputs.forEach((input) => { input.value = ""; });
     startSession(result, { animate: true });
-    if (result.created) setTimeout(() => toast("Conta criada! Escolha sua foto e o tema em Configurações.", "ok"), 900);
+    if (result.created) setTimeout(() => toast("Conta criada! Escolha sua foto e o tema no seu perfil.", "ok"), 900);
   } catch (error) {
     if (creating) $("#password-again").value = "";
     loginError.textContent = error.message === "Failed to fetch" ? "Servidor fora do ar. Tente de novo." : error.message;
@@ -482,6 +482,7 @@ function receive(message, live) {
     setPeerTyping(false);
     sound.play("receive");
     notify(message);
+    if (tab !== "chat") bumpUnread();
   } else if (!local) {
     sound.play("tap");
   }
@@ -639,6 +640,8 @@ function fill(article, message) {
       remove.append(icon("trash"));
       tools.append(remove);
     }
+    // Ordem de entrada da animação dos botões (styles.css).
+    [...tools.children].forEach((button, index) => button.style.setProperty("--i", index));
     row.append(tools);
   }
   article.append(row);
@@ -1008,10 +1011,12 @@ messagesEl.addEventListener("click", (event) => {
 });
 
 // A barra de ações abre com o botão direito (PC) ou segurando a mensagem (celular).
+// No toque, arrastar a mensagem para a direita responde a ela, como no WhatsApp.
 const LONG_PRESS_MS = 450;
-let pressTimer = 0;
-let pressStart = null;
-let pressFired = false;
+const SWIPE_MAX = 90;
+const SWIPE_REPLY = 60;
+// Toque em andamento numa mensagem: mode "hold" (pode virar menu) ou "swipe" (arrastando para responder).
+let press = null;
 let pressReleasedAt = 0;
 
 function closeTools() {
@@ -1042,35 +1047,68 @@ messagesEl.addEventListener("contextmenu", (event) => {
 });
 
 messagesEl.addEventListener("pointerdown", (event) => {
-  if (event.pointerType === "mouse") return;
+  if (event.pointerType === "mouse" || !event.isPrimary) return;
   const article = actionableMessage(event.target);
   if (!article) return;
-  pressStart = { x: event.clientX, y: event.clientY };
-  pressFired = false;
-  clearTimeout(pressTimer);
-  pressTimer = setTimeout(() => {
-    pressStart = null;
-    pressFired = true;
+  const bubble = article.querySelector(".bubble");
+  press = { article, bubble, x: event.clientX, y: event.clientY, mode: "hold", opened: false, ready: false };
+  fx.hold(bubble);
+  press.timer = setTimeout(() => {
+    if (press?.mode !== "hold") return;
+    press.opened = true;
     openTools(article);
+    fx.release(bubble, true);
     navigator.vibrate?.(12);
   }, LONG_PRESS_MS);
 });
 
 messagesEl.addEventListener("pointermove", (event) => {
-  if (pressStart && Math.hypot(event.clientX - pressStart.x, event.clientY - pressStart.y) > 10) cancelPress();
+  if (!press || press.opened) return;
+  const dx = event.clientX - press.x;
+  const dy = event.clientY - press.y;
+  if (press.mode === "hold") {
+    if (Math.hypot(dx, dy) < 10) return;
+    clearTimeout(press.timer);
+    fx.release(press.bubble, false);
+    // Movimento para a direita vira o gesto de responder; qualquer outro é rolagem.
+    if (dx <= 0 || Math.abs(dx) < Math.abs(dy) * 1.5) {
+      press = null;
+      return;
+    }
+    press.mode = "swipe";
+    press.targets = [...press.article.querySelectorAll(".bubble-row, .reactions")];
+    press.hint = el("span", "swipe-reply");
+    press.hint.append(icon("reply"));
+    press.article.prepend(press.hint);
+  }
+  // Resistência: o balão anda menos que o dedo e para em SWIPE_MAX.
+  const offset = Math.min(SWIPE_MAX, Math.max(0, dx - 10) * 0.7);
+  const ready = offset >= SWIPE_REPLY;
+  fx.swipe(press.targets, press.hint, offset, Math.min(1, offset / SWIPE_REPLY));
+  if (ready && !press.ready) navigator.vibrate?.(8);
+  press.hint.classList.toggle("ready", ready);
+  press.ready = ready;
 });
 
-function cancelPress() {
-  clearTimeout(pressTimer);
-  pressStart = null;
+function endPress(event) {
+  if (!press) return;
+  clearTimeout(press.timer);
+  if (press.mode === "swipe") {
+    fx.swipeBack(press.targets, press.hint);
+    if (press.ready && event.type === "pointerup") {
+      startReply(press.article.msg);
+      sound.play("tap");
+    }
+  } else if (!press.opened) {
+    fx.release(press.bubble, false);
+  } else {
+    pressReleasedAt = Date.now();
+  }
+  press = null;
 }
 
-messagesEl.addEventListener("pointerup", () => {
-  cancelPress();
-  if (pressFired) pressReleasedAt = Date.now();
-  pressFired = false;
-});
-messagesEl.addEventListener("pointercancel", cancelPress);
+messagesEl.addEventListener("pointerup", endPress);
+messagesEl.addEventListener("pointercancel", endPress);
 
 // Tocar/clicar fora fecha a barra; o clique que vem ao soltar o dedo depois de segurar é ignorado.
 document.addEventListener("click", (event) => {
@@ -1180,7 +1218,8 @@ messagesEl.addEventListener("scroll", () => {
 jump.addEventListener("click", () => scrollToLatest(true));
 
 function markSeen() {
-  if (!socket?.connected || document.hidden || !nearBottom()) return;
+  // No perfil a conversa está escondida: nada foi lido ainda.
+  if (!socket?.connected || document.hidden || tab !== "chat" || !nearBottom()) return;
   const last = list[list.length - 1];
   if (last && reads[me]?.id !== last.id) {
     reads[me] = { id: last.id, at: new Date().toISOString() };
@@ -1240,44 +1279,120 @@ $("#toggle-notify").addEventListener("click", async () => {
 });
 
 function paintSound() {
-  document.querySelectorAll("#toggle-sound, #toggle-sound-setting").forEach((button) => button.classList.toggle("is-off", !sound.enabled));
+  const button = $("#toggle-sound-setting");
+  button.classList.toggle("is-off", !sound.enabled);
+  button.setAttribute("aria-checked", String(sound.enabled));
   document.querySelectorAll(".sound-state").forEach((label) => { label.textContent = sound.enabled ? "Ligados" : "Mudos"; });
-  $("#toggle-sound-setting").setAttribute("aria-checked", String(sound.enabled));
 }
 
-document.querySelectorAll("#toggle-sound, #toggle-sound-setting").forEach((button) => button.addEventListener("click", () => {
+$("#toggle-sound-setting").addEventListener("click", (event) => {
   sound.toggle();
   paintSound();
-  fx.press(button);
-}));
+  fx.press(event.currentTarget);
+});
 
-// ---------- configurações (foto, tema, notificações, sons e sair) ----------
+// ---------- abas: conversa e perfil ----------
 
-const settings = $("#settings");
+const profileView = $("#profile-view");
+let tab = "chat";
+// Mensagens que chegaram enquanto a pessoa olhava o perfil.
+let unreadAway = 0;
+// A conversa some com display: none e perde a rolagem; null = estava no fim.
+let chatScroll = null;
+
+function paintTabs() {
+  document.querySelectorAll("[data-tab-target]").forEach((button) => {
+    const active = button.dataset.tabTarget === tab;
+    button.classList.toggle("active", active);
+    if (active) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  });
+}
+
+function paintUnread() {
+  document.querySelectorAll(".unread-badge").forEach((badge) => {
+    badge.textContent = unreadAway > 99 ? "99+" : String(unreadAway);
+    badge.classList.toggle("hidden", !unreadAway);
+  });
+}
+
+function bumpUnread() {
+  unreadAway += 1;
+  paintUnread();
+  document.querySelectorAll(".unread-badge").forEach((badge) => fx.pop(badge));
+}
+
+function showTab(name) {
+  if (name === tab || !me) return;
+  closeTools();
+  closeGifs();
+  if (tab === "chat") chatScroll = nearBottom() ? null : messagesEl.scrollTop;
+  tab = name;
+  chatView.dataset.tab = name;
+  paintTabs();
+  sound.play("tap");
+  if (name === "profile") {
+    openProfile();
+    fx.view(profileView, 1);
+    return;
+  }
+  unreadAway = 0;
+  paintUnread();
+  messagesEl.scrollTop = chatScroll ?? messagesEl.scrollHeight;
+  markSeen();
+  fx.view($(".conversation"), -1);
+}
+
+document.addEventListener("click", (event) => {
+  const target = event.target.closest("[data-tab-target]");
+  if (!target) return;
+  showTab(target.dataset.tabTarget);
+  if (target.classList.contains("tab")) fx.press(target);
+});
+
+// No perfil, Esc volta para a conversa.
+window.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || tab !== "profile") return;
+  event.stopPropagation();
+  showTab("chat");
+}, true);
+
+// ---------- perfil (foto, números, tema, notificações, sons e sair) ----------
+
 const PHOTO_SIZE = 320;
 // Mesmo limite do servidor (AVATAR_GIF_MAX em lib/potato.php).
 const GIF_PHOTO_MAX = 700000;
+const longDate = (iso) => new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "long", year: "numeric" }).format(new Date(iso));
+const STAT_LABELS = { messages: ["mensagem", "mensagens"], reactions: ["reação", "reações"], days: ["dia de conversa", "dias de conversa"] };
 
-function onSettingsKey(event) {
-  if (event.key !== "Escape") return;
-  event.stopPropagation();
-  closeSettings();
-}
-
-function openSettings() {
-  if (!me) return;
-  closeGifs();
+function openProfile() {
   $("#profile-name").textContent = me;
   $("#photo-remove").classList.toggle("hidden", !avatars.has(me));
   repaintAvatars();
-  settings.classList.remove("hidden");
-  fx.incoming(settings.querySelector(".modal-card"));
-  document.addEventListener("keydown", onSettingsKey, true);
+  loadStats();
 }
 
-function closeSettings() {
-  settings.classList.add("hidden");
-  document.removeEventListener("keydown", onSettingsKey, true);
+// Dias de calendário desde a primeira mensagem, contando hoje.
+function daysSince(iso) {
+  const start = new Date(iso);
+  start.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((today - start) / 864e5) + 1;
+}
+
+function loadStats() {
+  if (!socket?.connected) return;
+  socket.timeout(8000).emit("stats", null, (error, result) => {
+    if (error || !result) return;
+    const values = { messages: result.messages, reactions: result.reactions, days: result.since ? daysSince(result.since) : 0 };
+    for (const [key, value] of Object.entries(values)) {
+      const node = profileView.querySelector(`[data-stat="${key}"]`);
+      fx.count(node, value);
+      node.nextElementSibling.textContent = STAT_LABELS[key][value === 1 ? 0 : 1];
+    }
+    if (result.since) $("#profile-since").textContent = `No chat${peerName ? ` com ${peerName}` : ""} desde ${longDate(result.since)}`;
+  });
 }
 
 function readImage(file) {
@@ -1322,10 +1437,9 @@ async function squarePhoto(file) {
 
 function savePhoto(image) {
   if (!socket?.connected) return toast("Sem conexão agora. Tente de novo em instantes.", "error");
-  const card = settings.querySelector(".modal-card");
-  card.classList.add("busy");
+  profileView.classList.add("busy");
   socket.timeout(20000).emit("avatar", { image }, (error, result) => {
-    card.classList.remove("busy");
+    profileView.classList.remove("busy");
     if (error || !result?.ok) {
       toast(result?.error || "Não foi possível salvar a foto.", "error");
       sound.play("error");
@@ -1334,19 +1448,19 @@ function savePhoto(image) {
     presenceList = presenceList.map((user) => (user.name === me ? { ...user, avatar: result.avatar } : user));
     updatePresence(presenceList);
     $("#photo-remove").classList.toggle("hidden", !image);
-    fx.pop($("#profile-face"));
+    const face = $("#profile-face");
+    fx.pop(face);
+    if (image) {
+      const box = face.getBoundingClientRect();
+      fx.burst(box.left + box.width / 2, box.top + box.height / 2, ["✨", "💖", "⭐"], 14);
+    }
     sound.play(image ? "sparkle" : "tap");
     toast(image ? "Foto atualizada" : "Foto removida", "ok");
   });
 }
 
-document.addEventListener("click", (event) => {
-  if (event.target.closest("[data-settings]")) openSettings();
-});
-
-settings.addEventListener("click", (event) => {
-  if (event.target === settings || event.target.closest("#settings-close")) closeSettings();
-  else if (event.target.closest("#profile-photo, #photo-pick")) $("#photo-input").click();
+profileView.addEventListener("click", (event) => {
+  if (event.target.closest("#profile-photo, #photo-pick")) $("#photo-input").click();
   else if (event.target.closest("#photo-remove")) savePhoto(null);
 });
 
@@ -1428,9 +1542,10 @@ function renderThemes() {
   holder.addEventListener("click", (event) => {
     const choice = event.target.closest("[data-theme-choice]");
     if (!choice || choice.getAttribute("aria-pressed") === "true") return;
-    applyTheme(choice.dataset.themeChoice);
-    sound.play("tap");
-    saveTheme();
+    const box = choice.querySelector(".swatch").getBoundingClientRect();
+    sound.play("whoosh");
+    // saveTheme lê o tema já aplicado, então espera a troca acontecer.
+    fx.reveal(() => applyTheme(choice.dataset.themeChoice), box.left + box.width / 2, box.top + box.height / 2).then(saveTheme, saveTheme);
   });
 }
 
@@ -1449,6 +1564,7 @@ function updatePresence(users) {
   if (peer && peerWasOnline !== null && peer.online !== peerWasOnline) {
     sound.play(peer.online ? "join" : "leave");
     toast(peer.online ? `${peer.name} está online` : `${peer.name} saiu do chat`, peer.online ? "ok" : "info");
+    if (peer.online) fx.pop(peerAvatar);
   }
   peerWasOnline = peer ? peer.online : null;
 
@@ -1463,26 +1579,20 @@ function updatePresence(users) {
     button.title = peer?.online ? button.dataset.title : `${peer?.name || "A outra pessoa"} está offline`;
   }
 
-  peopleEl.replaceChildren();
-  const self = users.find((user) => user.name === me) || { name: me, online: true };
-  for (const person of [self, peer].filter(Boolean)) {
-    // A própria linha é um botão: abre as configurações, com a foto no topo.
-    const row = el(person === self ? "button" : "div", `person${person.online ? " online" : ""}`);
-    const avatar = el("div", "avatar");
-    paintAvatar(avatar, person.name);
-    avatar.classList.toggle("online", person.online);
-    const text = el("div");
-    text.append(el("strong", "", person.name === me ? `${person.name} (você)` : person.name),
-      el("small", "", person.online ? (person.active ? "Ativo agora" : "Online") : lastSeenLabel(person.lastSeen)));
-    row.append(avatar, text);
-    if (person === self) {
-      row.type = "button";
-      row.title = "Trocar sua foto";
-      row.dataset.settings = "";
-      row.append(icon("camera", "icon person-edit"));
-    }
-    peopleEl.append(row);
-  }
+  // A conversa com a outra pessoa (você fica embaixo, no seu perfil). Clicar volta para a conversa.
+  const row = el("button", `person${peer?.online ? " online" : ""}`);
+  row.type = "button";
+  row.dataset.tabTarget = "chat";
+  const avatar = el("div", "avatar");
+  paintAvatar(avatar, peerName);
+  avatar.classList.toggle("online", Boolean(peer?.online));
+  const text = el("div");
+  text.append(el("strong", "", peer ? peer.name : "Aguardando alguém"),
+    el("small", "", !peer ? "Ainda sem a outra pessoa" : peer.online ? (peer.active ? "Ativo agora" : "Online") : lastSeenLabel(peer.lastSeen)));
+  row.append(avatar, text, el("span", "tab-badge unread-badge hidden"));
+  peopleEl.replaceChildren(row);
+  paintTabs();
+  paintUnread();
 }
 
 function peerOnline() {
@@ -1645,6 +1755,8 @@ function openCallPanel(status) {
   setToggle($("#toggle-chat"), true, "Esconder o chat", "Mostrar o chat");
   messageInput.placeholder = "Mensagem…";
   $("#toggle-live").classList.toggle("hidden", !canStream);
+  // A chamada fica na aba da conversa.
+  showTab("chat");
   chatView.classList.add("in-call");
   paintStage();
   fx.show(callPanel, { y: -20, scale: 0.97 });
@@ -2045,6 +2157,7 @@ renderThemes();
 applyTheme(store.get("localStorage", THEME_KEY));
 paintSound();
 paintNotifyButton();
+paintTabs();
 fx.ambient();
 const saved = store.get("localStorage", SESSION_KEY) || store.get("sessionStorage", SESSION_KEY);
 if (saved?.token) {

@@ -64,7 +64,8 @@ export const fx = {
           .fromTo(".sidebar", { x: -60, opacity: 0 }, { x: 0, opacity: 1, duration: 0.6, ...clear })
           .fromTo(".peer", { y: -18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ...clear }, "-=0.4")
           .fromTo(".actions .icon-button", { scale: 0 }, { scale: 1, stagger: 0.05, duration: 0.45, ease: "back.out(2.5)", ...clear }, "-=0.35")
-          .fromTo(".composer", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ...clear }, "-=0.45");
+          .fromTo(".composer", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ...clear }, "-=0.45")
+          .fromTo(".tabbar", { y: 70 }, { y: 0, duration: 0.6, ...clear }, "-=0.5");
         if (items.length) timeline.fromTo(items, { y: 18, opacity: 0 }, { y: 0, opacity: 1, stagger: { each: 0.025, from: "end" }, duration: 0.4, ...clear }, "-=0.5");
       }
     });
@@ -110,6 +111,78 @@ export const fx = {
   show(element, from = { y: 12 }) {
     element.classList.remove("hidden");
     if (motion()) gsap.fromTo(element, { opacity: 0, ...from }, { opacity: 1, x: 0, y: 0, scale: 1, duration: 0.35, ease: "power3.out" });
+  },
+
+  // Troca de aba: a tela nova desliza do lado de onde veio; no perfil, os blocos entram um a um.
+  view(element, direction = 1) {
+    if (!motion()) return;
+    gsap.fromTo(element, { opacity: 0, x: 28 * direction }, { opacity: 1, x: 0, duration: 0.4, ease: "power3.out", clearProps: "transform,opacity" });
+    const items = element.querySelectorAll(".profile-hero > *, .profile-stats > div, .profile-card");
+    if (items.length) gsap.fromTo(items, { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: 0.5, stagger: 0.045, delay: 0.05, ease: "power3.out", clearProps: "transform,opacity" });
+  },
+
+  // Número que sobe contando até o valor novo.
+  count(element, value) {
+    const format = (n) => Math.round(n).toLocaleString("pt-BR");
+    const from = Number(element.dataset.value || 0);
+    element.dataset.value = value;
+    if (!motion() || from === value) {
+      element.textContent = format(value);
+      return;
+    }
+    const state = { n: from };
+    gsap.to(state, { n: value, duration: 1.1, ease: "power2.out", onUpdate: () => { element.textContent = format(state.n); } });
+  },
+
+  // Segurar a mensagem (celular): o balão afunda devagar e volta com mola quando o menu abre.
+  hold(bubble) {
+    if (motion()) gsap.to(bubble, { scale: 0.95, duration: 0.4, delay: 0.08, ease: "power1.in", overwrite: true });
+  },
+
+  release(bubble, opened) {
+    if (!gsap) return;
+    gsap.to(bubble, opened
+      ? { scale: 1, duration: 0.6, ease: "elastic.out(1.2, 0.45)", overwrite: true, clearProps: "transform" }
+      : { scale: 1, duration: 0.2, overwrite: true, clearProps: "transform" });
+  },
+
+  // Arrastar para responder: o balão segue o dedo e o ícone de resposta cresce junto.
+  swipe(targets, hint, offset, progress) {
+    if (gsap) {
+      gsap.set(targets, { x: offset });
+      gsap.set(hint, { yPercent: -50, scale: 0.5 + progress * 0.5, opacity: progress });
+      return;
+    }
+    targets.forEach((node) => { node.style.transform = `translateX(${offset}px)`; });
+    hint.style.opacity = progress;
+  },
+
+  swipeBack(targets, hint) {
+    if (!motion()) {
+      hint.remove();
+      if (gsap) gsap.set(targets, { clearProps: "transform" });
+      else targets.forEach((node) => { node.style.transform = ""; });
+      return;
+    }
+    gsap.to(hint, { opacity: 0, scale: 0.5, duration: 0.2, onComplete: () => hint.remove() });
+    gsap.to(targets, { x: 0, duration: 0.55, ease: "elastic.out(1, 0.6)", clearProps: "transform" });
+  },
+
+  // Troca de tema: as cores novas se espalham num círculo a partir de onde a pessoa tocou.
+  reveal(update, x, y) {
+    if (!motion() || !document.startViewTransition) {
+      update();
+      return Promise.resolve();
+    }
+    const radius = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+    const transition = document.startViewTransition(update);
+    transition.ready.then(() => {
+      document.documentElement.animate(
+        { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${radius}px at ${x}px ${y}px)`] },
+        { duration: 700, easing: "cubic-bezier(.65, 0, .35, 1)", pseudoElement: "::view-transition-new(root)" }
+      );
+    }).catch(() => {});
+    return transition.updateCallbackDone;
   },
 
   hide(element, to = { y: 12 }) {

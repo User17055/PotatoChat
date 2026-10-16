@@ -253,6 +253,10 @@ try {
   second.emit("delete", { id: reply.message.id });
   assert.equal((await deleted).deleted, true);
 
+  // Números do perfil: mensagem apagada não conta, e cada reação conta para quem reagiu.
+  assert.deepEqual(await withAck(first, "stats"), { messages: 1, reactions: 0, since: message.createdAt });
+  assert.deepEqual(await withAck(second, "stats"), { messages: 0, reactions: 1, since: message.createdAt });
+
   // Página anterior do histórico.
   const older = await withAck(first, "history:before", { before: message.id });
   assert.deepEqual(older, { items: [], hasMore: false });
