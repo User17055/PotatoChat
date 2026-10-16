@@ -403,6 +403,7 @@ function connect(token, animate) {
     for (const clientId of pending.keys()) if (list.some((message) => message.clientId === clientId)) pending.delete(clientId);
     reads = payload.reads || {};
     hasMore = payload.hasMore;
+    syncTheme(payload.theme);
     renderAll();
     scrollToLatest();
     markSeen();
@@ -413,6 +414,11 @@ function connect(token, animate) {
   socket.on("seen", ({ name, id, at }) => { reads[name] = { id, at }; refreshStatuses(); });
   socket.on("presence", updatePresence);
   socket.on("typing", ({ active }) => setPeerTyping(active));
+  // Tema trocado em outra aba ou aparelho da mesma pessoa.
+  socket.on("theme", ({ theme }) => {
+    themeSaved = true;
+    applyTheme(theme);
+  });
 
   socket.on("webrtc-offer", receiveOffer);
   socket.on("webrtc-answer", receiveAnswer);
@@ -1053,6 +1059,79 @@ $("#photo-input").addEventListener("change", async () => {
   }
 });
 
+// ---------- tema ----------
+
+const THEME_KEY = "potato.theme";
+// Mesma lista do servidor (THEMES em lib/potato.php). bg e accent pintam a bolinha de cada tema.
+const THEMES = [
+  { id: "escuro", label: "Escuro", bg: "#12100d", accent: "#f5c04f" },
+  { id: "preto", label: "Escuro total", bg: "#000000", accent: "#f5c04f" },
+  { id: "rosa", label: "Rosa", bg: "#150c12", accent: "#ff7eb6" },
+  { id: "roxo", label: "Roxo", bg: "#0f0d17", accent: "#b38dff" },
+  { id: "azul", label: "Azul", bg: "#0a1017", accent: "#5cc8ff" },
+  { id: "verde", label: "Verde", bg: "#0a120e", accent: "#5ee0a0" },
+  { id: "claro", label: "Claro", bg: "#f6f1e9", accent: "#f2b33d" }
+];
+// false enquanto a escolha ainda não foi gravada no banco (sem conexão): ao reconectar, ela é enviada de novo.
+let themeSaved = true;
+
+const findTheme = (id) => THEMES.find((theme) => theme.id === id) || THEMES[0];
+
+// Cores do tema para o painel da extensão pintar a barra de cima igual.
+function themeColors() {
+  const style = getComputedStyle(document.documentElement);
+  return Object.fromEntries(["bg", "surface", "surface-2", "line", "ink", "muted", "accent"].map((name) => [name, style.getPropertyValue(`--${name}`).trim()]));
+}
+
+function applyTheme(id) {
+  const theme = findTheme(id);
+  document.documentElement.dataset.theme = theme.id;
+  document.querySelector('meta[name="theme-color"]').content = theme.bg;
+  store.set("localStorage", THEME_KEY, theme.id);
+  $("#theme-state").textContent = theme.label;
+  $("#themes").querySelectorAll("[data-theme-choice]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.themeChoice === theme.id));
+  });
+  tellParent({ type: "potato:theme", colors: themeColors() });
+}
+
+// O tema fica na conta (no banco): vale em qualquer aparelho em que a pessoa entrar.
+function saveTheme() {
+  themeSaved = false;
+  if (!socket?.connected) return;
+  const theme = document.documentElement.dataset.theme;
+  socket.timeout(10000).emit("theme", { theme }, (error, result) => {
+    if (!error && result?.ok && document.documentElement.dataset.theme === theme) themeSaved = true;
+  });
+}
+
+// Tema da conta, que chega com o histórico. Se a última escolha daqui não chegou ao banco, ela vale.
+function syncTheme(theme) {
+  if (!themeSaved) return saveTheme();
+  if (theme) applyTheme(theme);
+}
+
+function renderThemes() {
+  const holder = $("#themes");
+  for (const theme of THEMES) {
+    const button = el("button", "theme-choice");
+    button.type = "button";
+    button.dataset.themeChoice = theme.id;
+    const swatch = el("span", "swatch");
+    swatch.style.setProperty("--sw-bg", theme.bg);
+    swatch.style.setProperty("--sw-accent", theme.accent);
+    button.append(swatch, el("span", "", theme.label));
+    holder.append(button);
+  }
+  holder.addEventListener("click", (event) => {
+    const choice = event.target.closest("[data-theme-choice]");
+    if (!choice || choice.getAttribute("aria-pressed") === "true") return;
+    applyTheme(choice.dataset.themeChoice);
+    sound.play("tap");
+    saveTheme();
+  });
+}
+
 // ---------- presença e digitação ----------
 
 function updatePresence(users) {
@@ -1660,6 +1739,8 @@ document.querySelectorAll(".hero-potato, .potato-mini").forEach((potato) => pota
   sound.play("whoosh");
 }));
 
+renderThemes();
+applyTheme(store.get("localStorage", THEME_KEY));
 paintSound();
 paintNotifyButton();
 fx.ambient();

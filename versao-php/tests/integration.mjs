@@ -165,8 +165,8 @@ try {
 
   // As tabelas da versão 1 ganharam as colunas novas, e a conta antiga continua lá (ainda sem senha).
   const columns = sql("SHOW COLUMNS FROM {p}users").map((row) => row.Field);
-  for (const column of ["pass_hash", "avatar", "avatar_type", "avatar_key"]) assert.ok(columns.includes(column), column);
-  assert.equal(sql("SELECT value FROM {p}settings WHERE name = 'schema'")[0].value, "2");
+  for (const column of ["pass_hash", "avatar", "avatar_type", "avatar_key", "theme"]) assert.ok(columns.includes(column), column);
+  assert.equal(sql("SELECT value FROM {p}settings WHERE name = 'schema'")[0].value, "3");
   assert.deepEqual(await welcome(), { open: 2 });
 
   // Primeiro acesso: o servidor pede a senha de novo antes de guardar, e não aceita senha curta.
@@ -274,6 +274,21 @@ try {
   await photoGone;
   assert.equal((await fetch(`${baseUrl}/${saved.avatar}`)).status, 404);
   assert.equal(sql("SELECT avatar FROM {p}users WHERE name = 'Pessoa 1'")[0].avatar, null);
+
+  // Tema: fica na conta, muda na hora nas outras abas da mesma pessoa e não vai para a outra pessoa.
+  assert.equal(first.history.theme, null);
+  const firstTab2 = await connect(firstLogin.body.token);
+  const themed = next(firstTab2, "theme");
+  const notForPeer = silent(second, "theme", 2500);
+  assert.deepEqual(await withAck(first, "theme", { theme: "rosa" }), { ok: true });
+  assert.deepEqual(await themed, { theme: "rosa" });
+  await notForPeer;
+  assert.equal((await withAck(first, "theme", { theme: "neon" })).error, "Tema desconhecido.");
+  firstTab2.disconnect();
+  const firstTab3 = await connect(firstLogin.body.token);
+  assert.equal(firstTab3.history.theme, "rosa");
+  firstTab3.disconnect();
+  assert.equal(sql("SELECT theme FROM {p}users WHERE name = 'Pessoa 1'")[0].theme, "rosa");
 
   // Mensagem enviada pela extensão chega para os dois lados.
   const fromExtension = next(second, "message");
@@ -397,7 +412,7 @@ try {
   for (let i = 0; i < 14; i += 1) if ((await login("Pessoa 1", "errada")).status === 429) blocked += 1;
   assert.ok(blocked >= 1);
 
-  console.log("Integração PHP + MySQL aprovada: atualização do banco antigo, página, contas com senha própria, sala de duas pessoas, foto de perfil, extensão, confirmação, deduplicação, respostas, reações, leitura, apagar, digitando, chamadas, long polling, sessões da versão Node, paginação, senha esquecida e persistência.");
+  console.log("Integração PHP + MySQL aprovada: atualização do banco antigo, página, contas com senha própria, sala de duas pessoas, foto de perfil, tema, extensão, confirmação, deduplicação, respostas, reações, leitura, apagar, digitando, chamadas, long polling, sessões da versão Node, paginação, senha esquecida e persistência.");
 } finally {
   servers.forEach((server) => server.kill());
   try {

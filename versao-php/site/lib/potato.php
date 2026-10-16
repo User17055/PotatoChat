@@ -11,9 +11,11 @@ const PAGE_SIZE = 60;
 const REACTIONS = ['❤️', '😂', '😮', '😢', '👍', '🔥'];
 const MAX_BODY = 1000000;
 const EVENT_KEEP_MS = 120000;
-const SCHEMA_VERSION = '2';
+const SCHEMA_VERSION = '3';
 const MIN_PASSWORD = 4;
 const AVATAR_MAX = 400000;
+// Mesma lista do app.js (THEMES). O primeiro é o padrão.
+const THEMES = ['escuro', 'preto', 'rosa', 'roxo', 'azul', 'verde', 'claro'];
 
 final class HttpError extends RuntimeException
 {
@@ -216,7 +218,7 @@ function schema(): array
     ];
 }
 
-// Senha (hash) e foto de cada conta. Ficam separadas para atualizar a tabela da versão 1.
+// Senha (hash), foto e tema de cada conta. Ficam separadas para atualizar tabelas de versões anteriores.
 function user_columns(): array
 {
     $ascii = 'CHARACTER SET ascii COLLATE ascii_bin';
@@ -225,6 +227,7 @@ function user_columns(): array
         'avatar' => "avatar MEDIUMTEXT $ascii NULL",
         'avatar_type' => "avatar_type VARCHAR(16) $ascii NULL",
         'avatar_key' => "avatar_key CHAR(32) $ascii NULL",
+        'theme' => "theme VARCHAR(16) $ascii NULL",
     ];
 }
 
@@ -376,7 +379,7 @@ function issue_token(string $name): string
 // (A foto não entra aqui: ela só é lida quando alguém abre a imagem.)
 function accounts(): array
 {
-    return query('SELECT position, name, pass_hash, avatar_key FROM ' . t('users') . ' ORDER BY position LIMIT ' . MAX_USERS)->fetchAll();
+    return query('SELECT position, name, pass_hash, avatar_key, theme FROM ' . t('users') . ' ORDER BY position LIMIT ' . MAX_USERS)->fetchAll();
 }
 
 function users(): array
@@ -545,9 +548,10 @@ function reads(): array
     return $reads;
 }
 
+// Histórico de quem conecta, com o tema da conta (null = nunca escolheu).
 function history(string $me): array
 {
-    return page() + ['reads' => (object) reads(), 'me' => $me];
+    return page() + ['reads' => (object) reads(), 'me' => $me, 'theme' => find_account($me)['theme'] ?? null];
 }
 
 function set_read(string $name, string $id, string $at): void
@@ -693,6 +697,14 @@ function act(array $me, string $event, $data)
 
         case 'avatar':
             return set_avatar($name, $body['image'] ?? null);
+
+        // Tema escolhido: fica na conta e muda na hora nas outras abas da mesma pessoa.
+        case 'theme':
+            $theme = str($body['theme'] ?? '');
+            if (!in_array($theme, THEMES, true)) return ['ok' => false, 'error' => 'Tema desconhecido.'];
+            query('UPDATE ' . t('users') . ' SET theme = ? WHERE name = ?', [$theme, $name]);
+            emit('theme', ['theme' => $theme], 'self', $me);
+            return ['ok' => true];
 
         case 'react':
             $emoji = str($body['emoji'] ?? '');

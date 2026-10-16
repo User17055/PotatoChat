@@ -38,6 +38,16 @@ function post(message) {
   frame.contentWindow?.postMessage(message, siteOrigin);
 }
 
+// Barra de cima com as cores do tema escolhido no chat (guardadas para a próxima abertura).
+const THEME_COLORS = ["bg", "surface", "surface-2", "line", "ink", "muted", "accent"];
+function paintTheme(colors) {
+  for (const name of THEME_COLORS) {
+    const value = String(colors?.[name] || "");
+    if (value && CSS.supports("color", value)) document.documentElement.style.setProperty(`--${name}`, value);
+  }
+}
+chrome.storage.local.get("themeColors").then(({ themeColors }) => paintTheme(themeColors));
+
 // Ponte com o site: compartilha a sessão para não pedir a senha a cada abertura do painel.
 window.addEventListener("message", async (event) => {
   if (event.source !== frame.contentWindow || event.origin !== siteOrigin) return;
@@ -52,6 +62,10 @@ window.addEventListener("message", async (event) => {
     await chrome.storage.local.set({ session: { token: data.token, name: data.name } });
   }
   if (data.type === "potato:hide") hide();
+  if (data.type === "potato:theme" && data.colors) {
+    paintTheme(data.colors);
+    await chrome.storage.local.set({ themeColors: data.colors });
+  }
   if (data.type === "potato:logout") {
     await chrome.storage.local.remove("session");
   }

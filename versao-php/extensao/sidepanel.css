@@ -1,20 +1,22 @@
 * { box-sizing: border-box; }
-html, body { margin: 0; width: 100%; height: 100%; background: #12100d; color: #f5efe6; font-family: "Poppins", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+/* Cores do tema do chat (o site manda as dele; estas são as do tema Escuro). */
+:root { --bg: #12100d; --surface: #1b1814; --surface-2: #24201a; --line: #383127; --ink: #f5efe6; --muted: #a89f92; --accent: #f5c04f; }
+html, body { margin: 0; width: 100%; height: 100%; background: var(--bg); color: var(--ink); font-family: "Poppins", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
 body { display: grid; grid-template-rows: 46px 1fr; }
-header { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 0 12px; border-bottom: 1px solid #383127; background: linear-gradient(180deg, #1d1915, #17140f); }
+header { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 0 12px; border-bottom: 1px solid var(--line); background: linear-gradient(180deg, var(--surface), var(--bg)); }
 .brand { display: flex; align-items: center; gap: 9px; font-size: 14px; }
 .brand strong { font-weight: 600; letter-spacing: -.01em; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: #5d564d; transition: background .3s, box-shadow .3s; }
 .dot.on { background: #6fd987; box-shadow: 0 0 0 3px #6fd98722, 0 0 8px #6fd98799; }
 nav { display: flex; gap: 4px; }
-nav a, nav button { border: 1px solid transparent; background: transparent; color: #a89f92; cursor: pointer; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 10px; transition: background .2s, color .2s, border-color .2s; }
-nav a:hover, nav button:hover { background: #24201a; border-color: #383127; color: #f5c04f; }
+nav a, nav button { border: 1px solid transparent; background: transparent; color: var(--muted); cursor: pointer; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 10px; transition: background .2s, color .2s, border-color .2s; }
+nav a:hover, nav button:hover { background: var(--surface-2); border-color: var(--line); color: var(--accent); }
 nav svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-:focus-visible { outline: 2px solid #f5c04f; outline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 iframe { width: 100%; height: 100%; border: 0; }
 #error:not([hidden]) { display: grid; justify-items: center; align-content: center; gap: 6px; padding: 32px 24px; text-align: center; }
 #error img { margin-bottom: 8px; filter: drop-shadow(0 12px 24px #f5c04f22); }
 #error strong { font-size: 17px; font-weight: 600; }
-#error p { margin: 0 0 14px; color: #a89f92; font-size: 13px; line-height: 1.5; }
-#error button { border: 0; border-radius: 12px; padding: 11px 18px; background: #f5c04f; color: #251b08; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+#error p { margin: 0 0 14px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+#error button { border: 0; border-radius: 12px; padding: 11px 18px; background: var(--accent); color: #251b08; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
 #error button:hover { filter: brightness(1.07); }

@@ -29,6 +29,8 @@ function asset(string $file): string
     <script>
       // Já logado: vai direto para o chat, sem piscar a tela de login.
       try { if (JSON.parse(localStorage.getItem("potato.session"))?.token) document.documentElement.classList.add("has-session"); } catch {}
+      // Tema escolhido: aplicado antes de desenhar a página, sem piscar o tema padrão.
+      try { const theme = JSON.parse(localStorage.getItem("potato.theme")); if (/^[a-z]+$/.test(theme)) document.documentElement.dataset.theme = theme; } catch {}
     </script>
   </head>
   <body>
@@ -113,6 +115,7 @@ function asset(string $file): string
       <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></symbol>
       <symbol id="i-caps" viewBox="0 0 24 24"><path d="M9 18v-6H5l7-7 7 7h-4v6H9z"/></symbol>
       <symbol id="i-loader" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></symbol>
+      <symbol id="i-palette" viewBox="0 0 24 24"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></symbol>
       <symbol id="i-camera" viewBox="0 0 24 24"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></symbol>
     </svg>
     <div class="ambient" aria-hidden="true"><span></span><span></span><span></span></div>
@@ -172,6 +175,10 @@ function asset(string $file): string
           <div id="people" class="people"></div>
         </div>
         <div class="sidebar-bottom">
+          <button class="side-option" type="button" data-profile>
+            <svg class="icon"><use href="#i-palette" /></svg>
+            <span><strong>Tema</strong><small id="theme-state">Escuro</small></span>
+          </button>
           <button id="toggle-notify" class="side-option swap is-off" type="button">
             <svg class="icon when-on"><use href="#i-bell" /></svg>
             <svg class="icon when-off"><use href="#i-bell-off" /></svg>
@@ -208,7 +215,7 @@ function asset(string $file): string
             <button id="share-screen" class="icon-button" type="button" title="Transmitir tela" data-title="Transmitir tela" aria-label="Transmitir tela">
               <svg class="icon"><use href="#i-monitor-up" /></svg>
             </button>
-            <button id="me-button" class="icon-button compact-only me-button" type="button" title="Sua foto" aria-label="Sua foto de perfil" data-profile>
+            <button id="me-button" class="icon-button compact-only me-button" type="button" title="Foto e tema" aria-label="Sua foto e tema" data-profile>
               <span id="me-avatar" class="avatar" aria-hidden="true">?</span>
             </button>
             <button id="toggle-sound" class="icon-button compact-only swap" type="button" title="Sons" aria-label="Ligar ou desligar sons">
@@ -360,6 +367,10 @@ function asset(string $file): string
         <h3 id="profile-name">Você</h3>
         <p class="muted">Sua foto aparece para a outra pessoa na conversa e nas chamadas.</p>
         <input id="photo-input" type="file" accept="image/*" hidden />
+        <div class="theme-picker">
+          <p class="picker-label">Tema <small>· só muda para você</small></p>
+          <div id="themes" class="themes" role="group" aria-label="Tema do chat"></div>
+        </div>
         <div class="modal-actions">
           <button id="profile-close" class="pill ghost" type="button">Fechar</button>
           <button id="photo-pick" class="pill gold" type="button"><svg class="icon"><use href="#i-camera" /></svg>Trocar foto</button>

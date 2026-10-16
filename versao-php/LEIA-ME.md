@@ -12,6 +12,7 @@ O mesmo site (mesmo HTML, CSS, animações, sons, chamadas e extensão), adaptad
 | `.env` | `site/config.php` (só os dados do banco) |
 | Uma senha da sala para os dois | Cada pessoa tem nome e senha próprios, guardados no banco |
 | Avatar com a inicial do nome | Foto de perfil, que cada um escolhe e troca quando quiser |
+| Um visual só | Temas (Escuro, Escuro total, Rosa, Roxo, Azul, Verde e Claro), salvos na conta de cada um |
 
 As sessões têm o mesmo formato da versão Node. Se o chat continuar no mesmo endereço e com a mesma `token_secret`, ninguém precisa entrar de novo.
 
@@ -44,12 +45,13 @@ versao-php/
 6. **Abra o site.** No primeiro acesso as tabelas (prefixo `potato_`) são criadas sozinhas. Se preferir, importe antes o `banco.sql` pelo phpMyAdmin.
 7. **Criem as duas contas logo.** As duas primeiras pessoas que entrarem escolhem nome e senha (o site pede a senha duas vezes). Depois disso eles valem para sempre e ninguém mais cria conta. Enquanto sobrar uma vaga, quem abrir o link pode ficar com ela.
 
-Para atualizar o site depois, envie de novo só os arquivos alterados. Os navegadores pegam a versão nova sozinhos, sem precisar limpar o cache. Se o banco veio de uma versão anterior, as colunas novas (senha e foto) são acrescentadas sozinhas no primeiro acesso. Quem já estava registrado sem senha escolhe uma ao entrar de novo.
+Para atualizar o site depois, envie de novo só os arquivos alterados. Os navegadores pegam a versão nova sozinhos, sem precisar limpar o cache. Se o banco veio de uma versão anterior, as colunas novas (senha, foto e tema) são acrescentadas sozinhas no primeiro acesso. Quem já estava registrado sem senha escolhe uma ao entrar de novo.
 
-## Contas e foto de perfil
+## Contas, foto e tema
 
 - **Senha:** fica no banco só como *hash* (`pass_hash` na tabela `potato_users`), nunca o texto da senha.
 - **Foto:** clique no seu nome na barra lateral (no celular, no seu avatar no topo) e escolha uma imagem. O navegador recorta o centro num quadrado, reduz e envia. A foto fica no banco e aparece para a outra pessoa na conversa, nas chamadas e nas notificações.
+- **Tema:** na mesma janela da foto (ou em *Tema*, na barra lateral). Cada pessoa escolhe o seu, e ele só muda para ela. A escolha fica na conta (coluna `theme`), então vale em qualquer aparelho em que ela entrar, e as outras abas abertas mudam na hora. O navegador guarda uma cópia para o tema aparecer já na tela de login, sem piscar. No tema Claro, a chamada continua escura, porque o vídeo fica melhor assim.
 - **Esqueceu a senha?** No phpMyAdmin, abra a tabela `potato_users`, edite a linha da pessoa e marque `pass_hash` como `NULL`. As sessões dela caem, e no próximo login ela escolhe uma senha nova com o mesmo nome. As mensagens não mudam.
 
 **Requisitos:** PHP 7.4 ou superior com a extensão `pdo_mysql` (vem ativa em praticamente todas as hospedagens), e MySQL 5.6+ ou MariaDB 10.1+.
