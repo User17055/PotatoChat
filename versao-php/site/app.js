@@ -56,6 +56,8 @@ let typingActive = false;
 let typingTimer;
 let peerTypingTimer;
 let chatShown = false;
+// Chave da busca de GIFs (vem com o histórico; vazia = GIFs ainda não ativados no config.php).
+let gifKey = "";
 
 let call = null;
 let peerConnection = null;
@@ -157,6 +159,9 @@ function isJumbo(text) {
   const count = window.Intl?.Segmenter ? [...new Intl.Segmenter("pt", { granularity: "grapheme" }).segment(compact)].length : [...compact].length;
   return count <= 3;
 }
+
+// Texto curto da mensagem (citação da resposta, notificação): GIF não tem texto.
+const previewText = (message) => (message.gif ? "GIF" : message.text);
 
 function richText(text) {
   const fragment = document.createDocumentFragment();
@@ -301,7 +306,7 @@ loginForm.addEventListener("submit", async (event) => {
     store.set("localStorage", NAME_KEY, result.name);
     passwordInputs.forEach((input) => { input.value = ""; });
     startSession(result, { animate: true });
-    if (result.created) setTimeout(() => toast("Conta criada! Toque no seu avatar para escolher uma foto.", "ok"), 900);
+    if (result.created) setTimeout(() => toast("Conta criada! Escolha sua foto e o tema em Configurações.", "ok"), 900);
   } catch (error) {
     if (creating) $("#password-again").value = "";
     loginError.textContent = error.message === "Failed to fetch" ? "Servidor fora do ar. Tente de novo." : error.message;
@@ -403,6 +408,7 @@ function connect(token, animate) {
     for (const clientId of pending.keys()) if (list.some((message) => message.clientId === clientId)) pending.delete(clientId);
     reads = payload.reads || {};
     hasMore = payload.hasMore;
+    gifKey = payload.gifKey || "";
     syncTheme(payload.theme);
     renderAll();
     scrollToLatest();
@@ -583,10 +589,15 @@ function fill(article, message) {
     bubble.append(quote);
   }
 
-  const text = el("div", "text");
-  if (message.deleted) text.textContent = "Mensagem apagada";
-  else text.append(richText(message.text));
-  bubble.append(text);
+  if (message.gif && !message.deleted) {
+    bubble.classList.add("gif");
+    bubble.append(gifImage(message.gif));
+  } else {
+    const text = el("div", "text");
+    if (message.deleted) text.textContent = "Mensagem apagada";
+    else text.append(richText(message.text));
+    bubble.append(text);
+  }
 
   const foot = el("span", "foot");
   if (message.source === "extension") foot.append(el("span", "via", "via extensão"));
@@ -669,16 +680,18 @@ function refreshStatuses() {
   messagesEl.querySelectorAll(".message.mine").forEach((article) => paintStatus(article, readIndex));
 }
 
-function send(text) {
-  const clean = text.trim();
-  if (!clean || !me) return;
+// Mensagem de texto, ou de GIF (gif = { url, width, height, title }, sem texto).
+function send(text, gif = null) {
+  const clean = gif ? "" : text.trim();
+  if ((!clean && !gif) || !me) return;
   const message = {
     id: null,
     clientId: uid(),
     sender: me,
     text: clean.slice(0, 2000),
+    gif,
     createdAt: new Date().toISOString(),
-    replyTo: replyTo ? { id: replyTo.id, sender: replyTo.sender, text: replyTo.text.slice(0, 160) } : null,
+    replyTo: replyTo ? { id: replyTo.id, sender: replyTo.sender, text: previewText(replyTo).slice(0, 160) } : null,
     reactions: {},
     deleted: false,
     status: "pending"
@@ -698,7 +711,7 @@ function deliver(message) {
   const node = () => messagesEl.querySelector(`[data-client-id="${message.clientId}"]`);
   message.status = "pending";
   if (node()) paintStatus(node());
-  socket.timeout(10000).emit("message", { text: message.text, clientId: message.clientId, replyTo: message.replyTo?.id }, (error, result) => {
+  socket.timeout(10000).emit("message", { text: message.text, gif: message.gif, clientId: message.clientId, replyTo: message.replyTo?.id }, (error, result) => {
     if (!pending.has(message.clientId)) return;
     if (!error && result?.ok) return receive(result.message, true);
     message.status = "failed";
@@ -761,6 +774,188 @@ document.querySelectorAll("[data-emoji]").forEach((button) => button.addEventLis
   fx.press(button);
 }));
 
+// ---------- GIFs (busca do GIPHY) ----------
+
+const gifPanel = $("#gif-panel");
+const gifButton = $("#gif-button");
+const gifSearch = $("#gif-search");
+const gifResults = $("#gif-results");
+const gifGrid = $("#gif-grid");
+const gifNote = $("#gif-note");
+const GIF_PAGE = 24;
+const GIF_MAX_WIDTH = 280;
+const GIF_MAX_HEIGHT = 220;
+// Lista aberta: busca atual, quantos já vieram, se acabou, e qual pedido é o mais novo (respostas atrasadas são ignoradas).
+const gifs = { query: "", offset: 0, done: false, loading: false, request: 0, columns: [] };
+let gifTimer;
+
+// GIF da mensagem: o tamanho fica reservado antes de carregar, para a conversa não pular.
+function gifImage(gif) {
+  const image = el("img", "gif-media");
+  const scale = Math.min(1, GIF_MAX_WIDTH / gif.width, GIF_MAX_HEIGHT / gif.height);
+  image.src = gif.url;
+  image.alt = gif.title || "GIF";
+  image.decoding = "async";
+  image.draggable = false;
+  image.style.width = `${Math.round(gif.width * scale)}px`;
+  image.style.aspectRatio = `${gif.width} / ${gif.height}`;
+  return image;
+}
+
+// Do resultado do GIPHY: a versão de 200 px de altura vai na mensagem (leve), a de 200 px de largura vai na grade.
+function gifFrom(item) {
+  const sent = item.images?.fixed_height;
+  const thumb = item.images?.fixed_width || sent;
+  if (!sent?.url || !thumb?.url) return null;
+  return {
+    gif: { url: sent.webp || sent.url, width: Number(sent.width), height: Number(sent.height), title: item.title || "" },
+    thumb: { url: thumb.webp || thumb.url, width: Number(thumb.width), height: Number(thumb.height) }
+  };
+}
+
+const gifColumnCount = () => (gifGrid.clientWidth >= 330 ? 3 : 2);
+
+function showGifNote(text) {
+  gifNote.textContent = text;
+  gifNote.classList.toggle("hidden", !text);
+}
+
+function resetGifGrid() {
+  gifs.columns = Array.from({ length: gifColumnCount() }, () => Object.assign(el("div", "gif-col"), { fill: 0 }));
+  gifGrid.replaceChildren(...gifs.columns);
+  gifResults.scrollTop = 0;
+}
+
+function addGif(found) {
+  if (!found.gif.width || !found.gif.height || !found.thumb.width || !found.thumb.height) return;
+  const button = el("button", "gif-item");
+  button.type = "button";
+  button.gif = found.gif;
+  button.title = found.gif.title || "GIF";
+  button.setAttribute("aria-label", found.gif.title ? `Enviar GIF: ${found.gif.title}` : "Enviar GIF");
+  const image = el("img");
+  image.src = found.thumb.url;
+  image.alt = "";
+  image.loading = "lazy";
+  image.decoding = "async";
+  image.width = found.thumb.width;
+  image.height = found.thumb.height;
+  button.append(image);
+  // Sempre na coluna mais curta: a grade fica equilibrada, estilo mural.
+  const column = gifs.columns.reduce((low, next) => (next.fill < low.fill ? next : low));
+  column.fill += found.thumb.height / found.thumb.width;
+  column.append(button);
+}
+
+// fresh = começa de novo (abriu o painel ou mudou a busca); senão, carrega a próxima página.
+async function loadGifs(fresh) {
+  if (fresh) {
+    gifs.request += 1;
+    gifs.offset = 0;
+    gifs.done = false;
+    resetGifGrid();
+  } else if (gifs.done || gifs.loading) return;
+  if (!gifKey) {
+    gifs.done = true;
+    return showGifNote("Os GIFs ainda não foram ativados: falta colocar a chave do GIPHY no config.php (veja o LEIA-ME).");
+  }
+  const { request, query } = gifs;
+  gifs.loading = true;
+  if (!gifs.offset) showGifNote("Carregando GIFs…");
+  try {
+    const params = new URLSearchParams({ api_key: gifKey, limit: String(GIF_PAGE), offset: String(gifs.offset), rating: "pg-13" });
+    if (query) {
+      params.set("q", query);
+      params.set("lang", "pt");
+    }
+    const response = await fetch(`https://api.giphy.com/v1/gifs/${query ? "search" : "trending"}?${params}`);
+    if (request !== gifs.request) return;
+    if (!response.ok) {
+      throw new Error(response.status === 429 ? "Muitas buscas de GIF nesta hora. Tente de novo daqui a pouco."
+        : response.status === 401 || response.status === 403 ? "O GIPHY não aceitou a chave do config.php. Confira se ela foi copiada inteira."
+        : "Não deu para carregar os GIFs agora.");
+    }
+    const { data = [], pagination = {} } = await response.json();
+    if (request !== gifs.request) return;
+    data.map(gifFrom).filter(Boolean).forEach(addGif);
+    gifs.offset += data.length;
+    // O GIPHY não pagina além de 4999 (busca) ou 499 (em alta).
+    gifs.done = !data.length || gifs.offset >= (pagination.total_count ?? Infinity) || gifs.offset + GIF_PAGE > (query ? 4999 : 499);
+    showGifNote(gifs.offset ? "" : query ? `Nenhum GIF encontrado para “${query}”.` : "Nenhum GIF por aqui agora.");
+  } catch (error) {
+    if (request !== gifs.request) return;
+    gifs.done = true;
+    showGifNote(error.message === "Failed to fetch" ? "Sem conexão com o GIPHY agora." : error.message);
+  } finally {
+    if (request === gifs.request) gifs.loading = false;
+  }
+}
+
+function onGifKey(event) {
+  if (event.key !== "Escape") return;
+  event.stopPropagation();
+  closeGifs();
+  messageInput.focus();
+}
+
+function openGifs() {
+  fx.show(gifPanel, { y: 10, scale: 0.98 });
+  gifButton.setAttribute("aria-expanded", "true");
+  document.addEventListener("keydown", onGifKey, true);
+  // Abre onde parou. Sem resultados (primeira vez ou erro) ou com outra largura, monta de novo.
+  if (!gifGrid.querySelector(".gif-item") || gifs.columns.length !== gifColumnCount()) loadGifs(true);
+  if (matchMedia("(pointer: fine)").matches) gifSearch.focus({ preventScroll: true });
+}
+
+function closeGifs() {
+  if (gifPanel.classList.contains("hidden")) return;
+  gifPanel.classList.add("hidden");
+  gifButton.setAttribute("aria-expanded", "false");
+  document.removeEventListener("keydown", onGifKey, true);
+}
+
+gifButton.addEventListener("click", () => {
+  if (gifPanel.classList.contains("hidden")) openGifs();
+  else closeGifs();
+  fx.press(gifButton);
+});
+
+gifSearch.addEventListener("input", () => {
+  clearTimeout(gifTimer);
+  gifTimer = setTimeout(searchGifs, 400);
+});
+
+// Enter busca na hora (e não envia o formulário da mensagem).
+gifSearch.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  clearTimeout(gifTimer);
+  searchGifs();
+});
+
+function searchGifs() {
+  const query = gifSearch.value.trim();
+  if (query === gifs.query) return;
+  gifs.query = query;
+  loadGifs(true);
+}
+
+gifResults.addEventListener("scroll", () => {
+  if (gifResults.scrollHeight - gifResults.scrollTop - gifResults.clientHeight < 300) loadGifs(false);
+}, { passive: true });
+
+gifGrid.addEventListener("click", (event) => {
+  const item = event.target.closest(".gif-item");
+  if (!item) return;
+  send("", item.gif);
+  closeGifs();
+  if (matchMedia("(pointer: fine)").matches) messageInput.focus();
+});
+
+document.addEventListener("click", (event) => {
+  if (!event.target.closest("#gif-panel, #gif-button")) closeGifs();
+});
+
 // Ações sobre as mensagens (delegação de eventos).
 messagesEl.addEventListener("click", (event) => {
   const article = event.target.closest(".message");
@@ -816,7 +1011,7 @@ messagesEl.addEventListener("dblclick", (event) => {
 function startReply(message) {
   replyTo = message;
   $("#reply-name").textContent = message.sender === me ? "Respondendo a você" : `Respondendo a ${message.sender}`;
-  $("#reply-text").textContent = message.text;
+  $("#reply-text").textContent = previewText(message);
   fx.show(replyBar, { y: 16 });
   messageInput.focus();
 }
@@ -923,7 +1118,7 @@ function notify(message) {
   document.title = `(${unreadTitle}) Potato Chat`;
   if (!notificationsOn()) return;
   try {
-    const notification = new Notification(message.sender, { body: message.deleted ? "" : message.text.slice(0, 160), icon: avatars.get(message.sender), tag: "potato-chat", renotify: true, silent: true });
+    const notification = new Notification(message.sender, { body: message.deleted ? "" : previewText(message).slice(0, 160), icon: avatars.get(message.sender), tag: "potato-chat", renotify: true, silent: true });
     notification.onclick = () => { window.focus(); notification.close(); };
   } catch {}
 }
@@ -943,6 +1138,7 @@ function paintNotifyButton() {
     label.textContent = notificationsOn() ? "Ativadas" : "Desativadas";
   }
   button.classList.toggle("is-off", !notificationsOn());
+  button.setAttribute("aria-checked", String(notificationsOn()));
 }
 
 $("#toggle-notify").addEventListener("click", async () => {
@@ -955,40 +1151,44 @@ $("#toggle-notify").addEventListener("click", async () => {
 });
 
 function paintSound() {
-  document.querySelectorAll("#toggle-sound, #toggle-sound-side").forEach((button) => button.classList.toggle("is-off", !sound.enabled));
+  document.querySelectorAll("#toggle-sound, #toggle-sound-setting").forEach((button) => button.classList.toggle("is-off", !sound.enabled));
   document.querySelectorAll(".sound-state").forEach((label) => { label.textContent = sound.enabled ? "Ligados" : "Mudos"; });
+  $("#toggle-sound-setting").setAttribute("aria-checked", String(sound.enabled));
 }
 
-document.querySelectorAll("#toggle-sound, #toggle-sound-side").forEach((button) => button.addEventListener("click", () => {
+document.querySelectorAll("#toggle-sound, #toggle-sound-setting").forEach((button) => button.addEventListener("click", () => {
   sound.toggle();
   paintSound();
   fx.press(button);
 }));
 
-// ---------- foto de perfil ----------
+// ---------- configurações (foto, tema, notificações, sons e sair) ----------
 
-const profile = $("#profile");
+const settings = $("#settings");
 const PHOTO_SIZE = 320;
+// Mesmo limite do servidor (AVATAR_GIF_MAX em lib/potato.php).
+const GIF_PHOTO_MAX = 700000;
 
-function onProfileKey(event) {
+function onSettingsKey(event) {
   if (event.key !== "Escape") return;
   event.stopPropagation();
-  closeProfile();
+  closeSettings();
 }
 
-function openProfile() {
+function openSettings() {
   if (!me) return;
+  closeGifs();
   $("#profile-name").textContent = me;
   $("#photo-remove").classList.toggle("hidden", !avatars.has(me));
   repaintAvatars();
-  profile.classList.remove("hidden");
-  fx.incoming(profile.querySelector(".modal-card"));
-  document.addEventListener("keydown", onProfileKey, true);
+  settings.classList.remove("hidden");
+  fx.incoming(settings.querySelector(".modal-card"));
+  document.addEventListener("keydown", onSettingsKey, true);
 }
 
-function closeProfile() {
-  profile.classList.add("hidden");
-  document.removeEventListener("keydown", onProfileKey, true);
+function closeSettings() {
+  settings.classList.add("hidden");
+  document.removeEventListener("keydown", onSettingsKey, true);
 }
 
 function readImage(file) {
@@ -1001,9 +1201,23 @@ function readImage(file) {
   });
 }
 
+function readDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("Não deu para abrir esse GIF."));
+    reader.readAsDataURL(file);
+  });
+}
+
 // Recorta o centro num quadrado e reduz: a foto sobe leve (uns 30 KB) e já no formato do avatar.
+// GIF vai inteiro, porque o recorte tiraria a animação (o avatar redondo já esconde as bordas).
 async function squarePhoto(file) {
   if (!file.type.startsWith("image/")) throw new Error("Escolha um arquivo de imagem.");
+  if (file.type === "image/gif") {
+    if (file.size > GIF_PHOTO_MAX) throw new Error("Esse GIF é grande demais para foto (máximo de 700 KB).");
+    return readDataUrl(file);
+  }
   if (file.size > 25e6) throw new Error("Essa imagem é grande demais.");
   const image = await readImage(file);
   const side = Math.min(image.naturalWidth, image.naturalHeight);
@@ -1019,7 +1233,7 @@ async function squarePhoto(file) {
 
 function savePhoto(image) {
   if (!socket?.connected) return toast("Sem conexão agora. Tente de novo em instantes.", "error");
-  const card = profile.querySelector(".modal-card");
+  const card = settings.querySelector(".modal-card");
   card.classList.add("busy");
   socket.timeout(20000).emit("avatar", { image }, (error, result) => {
     card.classList.remove("busy");
@@ -1038,11 +1252,11 @@ function savePhoto(image) {
 }
 
 document.addEventListener("click", (event) => {
-  if (event.target.closest("[data-profile]")) openProfile();
+  if (event.target.closest("[data-settings]")) openSettings();
 });
 
-profile.addEventListener("click", (event) => {
-  if (event.target === profile || event.target.closest("#profile-close")) closeProfile();
+settings.addEventListener("click", (event) => {
+  if (event.target === settings || event.target.closest("#settings-close")) closeSettings();
   else if (event.target.closest("#profile-photo, #photo-pick")) $("#photo-input").click();
   else if (event.target.closest("#photo-remove")) savePhoto(null);
 });
@@ -1088,7 +1302,6 @@ function applyTheme(id) {
   document.documentElement.dataset.theme = theme.id;
   document.querySelector('meta[name="theme-color"]').content = theme.bg;
   store.set("localStorage", THEME_KEY, theme.id);
-  $("#theme-state").textContent = theme.label;
   $("#themes").querySelectorAll("[data-theme-choice]").forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.themeChoice === theme.id));
   });
@@ -1164,7 +1377,7 @@ function updatePresence(users) {
   peopleEl.replaceChildren();
   const self = users.find((user) => user.name === me) || { name: me, online: true };
   for (const person of [self, peer].filter(Boolean)) {
-    // A própria linha é um botão: abre a janela para trocar a foto.
+    // A própria linha é um botão: abre as configurações, com a foto no topo.
     const row = el(person === self ? "button" : "div", `person${person.online ? " online" : ""}`);
     const avatar = el("div", "avatar");
     paintAvatar(avatar, person.name);
@@ -1176,7 +1389,7 @@ function updatePresence(users) {
     if (person === self) {
       row.type = "button";
       row.title = "Trocar sua foto";
-      row.dataset.profile = "";
+      row.dataset.settings = "";
       row.append(icon("camera", "icon person-edit"));
     }
     peopleEl.append(row);

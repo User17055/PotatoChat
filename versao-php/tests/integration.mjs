@@ -25,7 +25,8 @@ const env = (name, fallback) => process.env[`POTATO_TEST_DB_${name}`] || fallbac
 const prefix = `teste${Date.now().toString(36)}_`;
 const db = { host: env("HOST", "127.0.0.1"), port: Number(env("PORT", 3399)), name: env("NAME", "potato_teste"), user: env("USER", "potato"), pass: env("PASS", "senha-teste"), prefix };
 
-await fs.writeFile(configFile, `<?php return ${phpValue({ token_secret: secret, db, poll_wait: 3 })};`);
+const giphyKey = "chave-de-teste-do-giphy";
+await fs.writeFile(configFile, `<?php return ${phpValue({ token_secret: secret, db, poll_wait: 3, giphy_key: giphyKey })};`);
 
 function phpValue(value) {
   if (typeof value === "string") return `'${value.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`;
@@ -65,6 +66,12 @@ function makePng(width, height) {
   const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(width * 3, 0xc8)]);
   const pixels = zlib.deflateSync(Buffer.concat(Array.from({ length: height }, () => row)));
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", header), chunk("IDAT", pixels), chunk("IEND", Buffer.alloc(0))]);
+}
+
+// GIF de verdade: tela de 16×16 com um quadro de 1 pixel (o GIF mínimo clássico). padding = bytes extras no fim.
+function makeGif(padding = 0) {
+  const gif = Buffer.from("474946383961" + "10001000" + "800000" + "000000ffffff" + "2c000000000100010000" + "0202440100" + "3b", "hex");
+  return Buffer.concat([gif, Buffer.alloc(padding)]);
 }
 
 function startServer(listen, env = {}) {
@@ -142,9 +149,10 @@ const withAck = (socket, event, data) => new Promise((resolve, reject) => {
   socket.timeout(10000).emit(event, data, (error, result) => (error ? reject(error) : resolve(result)));
 });
 
-// Banco da versão 1 (sem senhas nem fotos), com uma conta antiga: o site precisa atualizar sozinho.
+// Banco da versão 1 (sem senhas, fotos nem GIFs), com uma conta antiga: o site precisa atualizar sozinho.
 rawSql(`CREATE TABLE {p}settings (name VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY, value TEXT NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE {p}users (position INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, name VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL, created_at VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE {p}messages (n BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL, client_id VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL, sender VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL, text TEXT NOT NULL, created_at VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL, reply_to TEXT NULL, reactions TEXT NOT NULL, deleted TINYINT(1) NOT NULL DEFAULT 0, source VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'web', UNIQUE KEY message_id (id), KEY message_client (sender, client_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 INSERT INTO {p}settings (name, value) VALUES ('schema', '1');
 INSERT INTO {p}users (name, created_at) VALUES ('Pessoa 1', '2026-01-01T00:00:00.000Z');`);
 
@@ -166,7 +174,8 @@ try {
   // As tabelas da versão 1 ganharam as colunas novas, e a conta antiga continua lá (ainda sem senha).
   const columns = sql("SHOW COLUMNS FROM {p}users").map((row) => row.Field);
   for (const column of ["pass_hash", "avatar", "avatar_type", "avatar_key", "theme"]) assert.ok(columns.includes(column), column);
-  assert.equal(sql("SELECT value FROM {p}settings WHERE name = 'schema'")[0].value, "3");
+  assert.ok(sql("SHOW COLUMNS FROM {p}messages").some((row) => row.Field === "media"), "media");
+  assert.equal(sql("SELECT value FROM {p}settings WHERE name = 'schema'")[0].value, "4");
   assert.deepEqual(await welcome(), { open: 2 });
 
   // Primeiro acesso: o servidor pede a senha de novo antes de guardar, e não aceita senha curta.
@@ -248,6 +257,36 @@ try {
   const older = await withAck(first, "history:before", { before: message.id });
   assert.deepEqual(older, { items: [], hasMore: false });
 
+  // GIF: a chave da busca chega com o histórico, e o servidor só aceita imagens do próprio GIPHY.
+  assert.equal(first.history.gifKey, giphyKey);
+  const gif = { url: "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjEx/l0MYt5jPR6QX5pnqM/200.webp?cid=790b7611&rid=200.webp&ct=g", width: "356", height: "200", title: "Batata dançando" };
+  const gifArrived = next(second, "message");
+  const gifSent = await withAck(first, "message", { text: "texto junto é ignorado", gif, clientId: "cliente-gif" });
+  assert.equal(gifSent.ok, true);
+  const gifMessage = await gifArrived;
+  assert.equal(gifMessage.text, "");
+  assert.deepEqual(gifMessage.gif, { url: gif.url, width: 356, height: 200, title: "Batata dançando" });
+  assert.equal(message.gif, null);
+  assert.deepEqual(JSON.parse(sql(`SELECT media FROM {p}messages WHERE id = '${gifMessage.id}'`)[0].media), gifMessage.gif);
+  for (const bad of [
+    { ...gif, url: "https://giphy.com.exemplo.net/media/x/200.gif" },
+    { ...gif, url: "http://media.giphy.com/media/x/200.gif" },
+    { ...gif, url: "javascript:alert(1)" },
+    { ...gif, url: "https://media.giphy.com/media/x/200.gif\" onerror=\"x" },
+    { ...gif, width: 0 },
+    "https://media.giphy.com/media/x/200.gif"
+  ]) {
+    assert.equal((await withAck(first, "message", { gif: bad, clientId: "gif-ruim" })).error, "GIF inválido.", JSON.stringify(bad));
+  }
+  // Resposta a um GIF cita "GIF"; apagar o GIF tira o endereço do banco.
+  const gifReply = await withAck(second, "message", { text: "Que GIF!", clientId: "cliente-gif-2", replyTo: gifMessage.id });
+  assert.equal(gifReply.message.replyTo.text, "GIF");
+  const gifGone = next(second, "message:update");
+  first.emit("delete", { id: gifMessage.id });
+  const gifDeleted = await gifGone;
+  assert.equal(gifDeleted.deleted, true);
+  assert.equal(gifDeleted.gif, null);
+
   // Foto de perfil: fica no banco, aparece na presença da outra pessoa e é servida pela API.
   const png = makePng(40, 40);
   const photoOf = (list, name) => list.find((person) => person.name === name)?.avatar;
@@ -262,8 +301,16 @@ try {
   assert.match(photo.headers.get("cache-control"), /immutable/);
   assert.ok(Buffer.from(await photo.arrayBuffer()).equals(png));
   assert.equal((await withAck(first, "avatar", { image: "data:image/png;base64,AAAA" })).error, "Imagem inválida.");
-  assert.equal((await withAck(first, "avatar", { image: `data:image/gif;base64,${png.toString("base64")}` })).error, "Formato de imagem não aceito.");
+  assert.equal((await withAck(first, "avatar", { image: `data:image/bmp;base64,${png.toString("base64")}` })).error, "Formato de imagem não aceito.");
+  assert.equal((await withAck(first, "avatar", { image: `data:image/gif;base64,${png.toString("base64")}` })).error, "Imagem inválida.");
   assert.equal((await withAck(first, "avatar", { image: `data:image/jpeg;base64,${png.toString("base64")}` })).error, "Imagem inválida.");
+  // GIF animado vale como foto, inteiro, até 700 KB.
+  const gifPhoto = await withAck(second, "avatar", { image: `data:image/gif;base64,${makeGif().toString("base64")}` });
+  assert.equal(gifPhoto.ok, true);
+  const gifServed = await fetch(`${baseUrl}/${gifPhoto.avatar}`);
+  assert.equal(gifServed.headers.get("content-type"), "image/gif");
+  assert.ok(Buffer.from(await gifServed.arrayBuffer()).equals(makeGif()));
+  assert.equal((await withAck(second, "avatar", { image: `data:image/gif;base64,${makeGif(705000).toString("base64")}` })).error, "Imagem grande demais.");
   assert.equal((await fetch(`${baseUrl}/api.php?action=avatar&k=${"0".repeat(32)}`)).status, 404);
   // Trocar a foto muda o endereço; remover apaga do banco.
   const swapped = await withAck(second, "avatar", { image: `data:image/png;base64,${makePng(64, 48).toString("base64")}` });
@@ -359,12 +406,15 @@ try {
   assert.deepEqual(health, { ok: true, people: 0 });
 
   const stored = sql("SELECT * FROM {p}messages ORDER BY n");
-  assert.equal(stored.length, 4);
+  assert.equal(stored.length, 6);
   assert.equal(JSON.parse(stored[0].reactions)["❤️"][0], "Pessoa 2");
   assert.equal(stored[1].deleted, 1);
   assert.equal(stored[1].text, "");
-  assert.equal(stored[2].source, "extension");
-  assert.equal(stored[3].text, "Acordou?");
+  assert.equal(stored[2].deleted, 1);
+  assert.equal(stored[2].media, null);
+  assert.equal(JSON.parse(stored[3].reply_to).text, "GIF");
+  assert.equal(stored[4].source, "extension");
+  assert.equal(stored[5].text, "Acordou?");
   const status = Object.fromEntries(sql("SELECT name, last_seen FROM {p}status").map((row) => [row.name, row.last_seen]));
   assert.ok(status["Pessoa 1"]);
   assert.ok(status["Pessoa 2"]);
@@ -391,7 +441,7 @@ try {
   assert.equal(again.history.hasMore, true);
   assert.equal(again.history.items.at(-1).text, "Mensagem 64");
   const before = await withAck(again, "history:before", { before: again.history.items[0].id });
-  assert.equal(before.items.length, 9);
+  assert.equal(before.items.length, 11);
   assert.equal(before.hasMore, false);
   assert.equal(before.items[0].text, "Mensagem de integração");
   again.disconnect();
@@ -412,7 +462,7 @@ try {
   for (let i = 0; i < 14; i += 1) if ((await login("Pessoa 1", "errada")).status === 429) blocked += 1;
   assert.ok(blocked >= 1);
 
-  console.log("Integração PHP + MySQL aprovada: atualização do banco antigo, página, contas com senha própria, sala de duas pessoas, foto de perfil, tema, extensão, confirmação, deduplicação, respostas, reações, leitura, apagar, digitando, chamadas, long polling, sessões da versão Node, paginação, senha esquecida e persistência.");
+  console.log("Integração PHP + MySQL aprovada: atualização do banco antigo, página, contas com senha própria, sala de duas pessoas, GIFs, foto de perfil (também em GIF), tema, extensão, confirmação, deduplicação, respostas, reações, leitura, apagar, digitando, chamadas, long polling, sessões da versão Node, paginação, senha esquecida e persistência.");
 } finally {
   servers.forEach((server) => server.kill());
   try {

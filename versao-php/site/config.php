@@ -20,4 +20,8 @@ return [
     // Segundos que cada consulta espera por novidades (long polling).
     // 0 = consultas curtas a cada 1,5 s, para hospedagens que derrubam requisições demoradas.
     'poll_wait' => 20,
+
+    // Chave da busca de GIFs do GIPHY (grátis): https://developers.giphy.com → Create an App → API.
+    // Vazio = o botão GIF continua no chat, mas avisa que a busca ainda não foi ativada.
+    'giphy_key' => '',
 ];

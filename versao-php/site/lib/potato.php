@@ -11,9 +11,11 @@ const PAGE_SIZE = 60;
 const REACTIONS = ['❤️', '😂', '😮', '😢', '👍', '🔥'];
 const MAX_BODY = 1000000;
 const EVENT_KEEP_MS = 120000;
-const SCHEMA_VERSION = '3';
+const SCHEMA_VERSION = '4';
 const MIN_PASSWORD = 4;
 const AVATAR_MAX = 400000;
+// GIF animado vai sem recortar (o recorte tiraria a animação): limite maior, que ainda cabe numa requisição.
+const AVATAR_GIF_MAX = 700000;
 // Mesma lista do app.js (THEMES). O primeiro é o padrão.
 const THEMES = ['escuro', 'preto', 'rosa', 'roxo', 'azul', 'verde', 'claro'];
 
@@ -40,6 +42,7 @@ function config(): array
         $config = array_merge([
             'token_secret' => '',
             'poll_wait' => 20,
+            'giphy_key' => '',
         ], $custom);
         $config['db'] = array_merge([
             'host' => 'localhost',
@@ -177,6 +180,7 @@ function schema(): array
   reactions TEXT NOT NULL,
   deleted TINYINT(1) NOT NULL DEFAULT 0,
   source VARCHAR(16) $ascii NOT NULL DEFAULT 'web',
+  " . implode(",\n  ", message_columns()) . ",
   UNIQUE KEY message_id (id),
   KEY message_client (sender, client_id)
 ) $table",
@@ -231,6 +235,14 @@ function user_columns(): array
     ];
 }
 
+// GIF da mensagem (JSON com endereço, largura, altura e título). Separada pelo mesmo motivo.
+function message_columns(): array
+{
+    return [
+        'media' => 'media TEXT NULL',
+    ];
+}
+
 // Cria as tabelas que faltam e acrescenta as colunas novas. Uma requisição por vez.
 function migrate(PDO $pdo): void
 {
@@ -245,12 +257,13 @@ function migrate(PDO $pdo): void
             // Banco vazio: a tabela settings ainda não existe.
         }
         foreach (schema() as $sql) $pdo->exec($sql);
-        $columns = $pdo->query('SHOW COLUMNS FROM ' . t('users'))->fetchAll(PDO::FETCH_COLUMN);
-        $missing = array_diff_key(user_columns(), array_flip($columns));
-        if ($missing) {
+        foreach (['users' => user_columns(), 'messages' => message_columns()] as $table => $wanted) {
+            $columns = $pdo->query('SHOW COLUMNS FROM ' . t($table))->fetchAll(PDO::FETCH_COLUMN);
+            $missing = array_diff_key($wanted, array_flip($columns));
+            if (!$missing) continue;
             $changes = array_map(fn($column) => "ADD COLUMN $column", array_values($missing));
             if (isset($missing['avatar_key'])) $changes[] = 'ADD KEY user_avatar (avatar_key)';
-            $pdo->exec('ALTER TABLE ' . t('users') . ' ' . implode(', ', $changes));
+            $pdo->exec('ALTER TABLE ' . t($table) . ' ' . implode(', ', $changes));
         }
         $pdo->prepare('INSERT INTO ' . t('settings') . ' (name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)')
             ->execute(['schema', SCHEMA_VERSION]);
@@ -466,7 +479,7 @@ function avatar_url(?string $key): ?string
     return $key ? 'api.php?action=avatar&k=' . $key : null;
 }
 
-// Foto já recortada e reduzida no navegador (data URL). null remove a foto.
+// Foto já recortada e reduzida no navegador (data URL), ou GIF animado inteiro. null remove a foto.
 function set_avatar(string $name, $image): array
 {
     if ($image === null || $image === '') {
@@ -474,11 +487,11 @@ function set_avatar(string $name, $image): array
         emit('presence');
         return ['ok' => true, 'avatar' => null];
     }
-    if (!is_string($image) || !preg_match('#^data:image/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$#', $image, $match)) {
+    if (!is_string($image) || !preg_match('#^data:image/(jpeg|png|webp|gif);base64,([A-Za-z0-9+/]+={0,2})$#', $image, $match)) {
         return ['ok' => false, 'error' => 'Formato de imagem não aceito.'];
     }
     $raw = base64_decode($match[2], true);
-    if ($raw === false || strlen($raw) > AVATAR_MAX) return ['ok' => false, 'error' => 'Imagem grande demais.'];
+    if ($raw === false || strlen($raw) > ($match[1] === 'gif' ? AVATAR_GIF_MAX : AVATAR_MAX)) return ['ok' => false, 'error' => 'Imagem grande demais.'];
     $info = @getimagesizefromstring($raw);
     if (!$info || $info['mime'] !== 'image/' . $match[1] || $info[0] < 16 || $info[1] < 16 || $info[0] > 2048 || $info[1] > 2048) {
         return ['ok' => false, 'error' => 'Imagem inválida.'];
@@ -503,11 +516,13 @@ function to_message(array $row): array
 {
     $deleted = (bool) $row['deleted'];
     $reactions = json_decode((string) $row['reactions'], true);
+    $gif = $deleted || empty($row['media']) ? null : json_decode((string) $row['media'], true);
     return [
         'id' => $row['id'],
         'clientId' => $row['client_id'] !== null && $row['client_id'] !== '' ? $row['client_id'] : null,
         'sender' => $row['sender'],
         'text' => $deleted ? '' : $row['text'],
+        'gif' => is_array($gif) ? $gif : null,
         'createdAt' => $row['created_at'],
         'replyTo' => $row['reply_to'] ? json_decode($row['reply_to'], true) : null,
         // Reações sempre como objeto JSON ({}), igual à versão Node.
@@ -548,10 +563,16 @@ function reads(): array
     return $reads;
 }
 
-// Histórico de quem conecta, com o tema da conta (null = nunca escolheu).
+// Histórico de quem conecta, com o tema da conta (null = nunca escolheu) e a chave da busca de GIFs
+// (chave do GIPHY, feita para ficar no navegador; vazia = GIFs desligados).
 function history(string $me): array
 {
-    return page() + ['reads' => (object) reads(), 'me' => $me, 'theme' => find_account($me)['theme'] ?? null];
+    return page() + [
+        'reads' => (object) reads(),
+        'me' => $me,
+        'theme' => find_account($me)['theme'] ?? null,
+        'gifKey' => str(config()['giphy_key']),
+    ];
 }
 
 function set_read(string $name, string $id, string $at): void
@@ -723,8 +744,8 @@ function act(array $me, string $event, $data)
         case 'delete':
             $row = find_message(str($body['id'] ?? ''));
             if (!$row || $row['sender'] !== $name || $row['deleted']) return null;
-            $row = array_merge($row, ['deleted' => 1, 'text' => '', 'reactions' => '{}']);
-            query('UPDATE ' . t('messages') . " SET deleted = 1, text = '', reactions = '{}' WHERE n = ?", [$row['n']]);
+            $row = array_merge($row, ['deleted' => 1, 'text' => '', 'media' => null, 'reactions' => '{}']);
+            query('UPDATE ' . t('messages') . " SET deleted = 1, text = '', media = NULL, reactions = '{}' WHERE n = ?", [$row['n']]);
             emit('message:update', to_message($row));
             return null;
 
@@ -773,11 +794,34 @@ function act(array $me, string $event, $data)
     return null;
 }
 
+// GIF escolhido na busca do chat: só imagens servidas pelo próprio GIPHY. false = recusado.
+function clean_gif($gif)
+{
+    if ($gif === null) return null;
+    if (!is_array($gif)) return false;
+    $url = str($gif['url'] ?? '');
+    $width = (int) str($gif['width'] ?? '');
+    $height = (int) str($gif['height'] ?? '');
+    if (strlen($url) > 600 || !preg_match('#^https://(?:media\d*|i)\.giphy\.com/[A-Za-z0-9._~/?&=%+-]+$#', $url)) return false;
+    if ($width < 1 || $height < 1 || $width > 4000 || $height > 4000) return false;
+    return ['url' => $url, 'width' => $width, 'height' => $height, 'title' => text_slice(text_trim(str($gif['title'] ?? '')), 120)];
+}
+
+// Texto curto da mensagem para a citação de uma resposta.
+function preview_text(array $row): string
+{
+    if ($row['deleted']) return '';
+    return $row['text'] !== '' ? text_slice($row['text'], 160) : (empty($row['media']) ? '' : 'GIF');
+}
+
 function send_message(array $me, array $body): array
 {
-    $text = text_slice(text_trim(str($body['text'] ?? '')), 2000);
+    $gif = clean_gif($body['gif'] ?? null);
+    if ($gif === false) return ['ok' => false, 'error' => 'GIF inválido.'];
+    // Mensagem com GIF não leva texto.
+    $text = $gif ? '' : text_slice(text_trim(str($body['text'] ?? '')), 2000);
     $clientId = text_slice(str($body['clientId'] ?? ''), 64) ?: null;
-    if ($text === '') return ['ok' => false, 'error' => 'Mensagem vazia.'];
+    if ($text === '' && !$gif) return ['ok' => false, 'error' => 'Mensagem vazia.'];
 
     $hits = json_decode((string) query('SELECT hits FROM ' . t('clients') . ' WHERE conn = ?', [$me['conn']])->fetchColumn(), true) ?: [];
     $allowed = allow($hits, 25, 10 * 1000);
@@ -792,7 +836,7 @@ function send_message(array $me, array $body): array
 
     $original = find_message(str($body['replyTo'] ?? ''));
     $reply = $original
-        ? ['id' => $original['id'], 'sender' => $original['sender'], 'text' => $original['deleted'] ? '' : text_slice($original['text'], 160)]
+        ? ['id' => $original['id'], 'sender' => $original['sender'], 'text' => preview_text($original)]
         : null;
     $row = [
         'id' => uuid(),
@@ -804,9 +848,10 @@ function send_message(array $me, array $body): array
         'reactions' => '{}',
         'deleted' => 0,
         'source' => $me['client'],
+        'media' => $gif ? encode($gif) : null,
     ];
     query(
-        'INSERT INTO ' . t('messages') . ' (id, client_id, sender, text, created_at, reply_to, reactions, deleted, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO ' . t('messages') . ' (id, client_id, sender, text, created_at, reply_to, reactions, deleted, source, media) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         array_values($row)
     );
     set_read($me['name'], $row['id'], $row['created_at']);

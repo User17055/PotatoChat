@@ -109,9 +109,9 @@
 }
 
 /* Destaque usado como texto: no fundo claro precisa de um tom mais escuro para dar leitura. */
-:root[data-theme="claro"] :is(.eyebrow, .caps, .hint, .net-banner, .reply-bar strong, .reply-bar .reply-icon, .peek.shown, .field:focus-within > .icon, .jump:hover, .icon-button:not(.unavailable):hover),
-:root[data-theme="claro"] #toggle-notify:not(.is-off) .icon { color: var(--accent-text); }
-:root[data-theme="claro"] .icon-button:not(.unavailable):hover, :root[data-theme="claro"] .jump:hover { border-color: var(--accent-3); }
+:root[data-theme="claro"] :is(.eyebrow, .caps, .hint, .net-banner, .reply-bar strong, .reply-bar .reply-icon, .peek.shown, .field:focus-within > .icon, .jump:hover, .icon-button:not(.unavailable):hover, .gif-button:hover, .gif-button[aria-expanded="true"]),
+:root[data-theme="claro"] .setting-row.swap:not(.is-off) .icon { color: var(--accent-text); }
+:root[data-theme="claro"] :is(.icon-button:not(.unavailable):hover, .jump:hover, .gif-button:hover, .gif-button[aria-expanded="true"]) { border-color: var(--accent-3); }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 15px; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
@@ -233,9 +233,6 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .side-option strong, .side-option small { display: block; }
 .side-option strong { color: var(--ink); font-size: 13px; font-weight: 500; }
 .side-option small { margin-top: 2px; font-size: 11px; }
-#toggle-notify:not(.is-off) .icon { color: var(--accent); }
-.side-option.is-off .icon { color: var(--faint); }
-.side-option.logout:hover { color: var(--danger); }
 
 /* ---------- avatares ---------- */
 .avatar { --hue: 40; position: relative; flex: none; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; font-size: 15px; font-weight: 600; color: hsl(var(--hue) 70% 12%); background: linear-gradient(140deg, hsl(var(--hue) 85% 72%), hsl(calc(var(--hue) + 30) 75% 58%)); }
@@ -311,6 +308,13 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .reply-quote strong, .reply-quote span { display: block; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .reply-quote span { opacity: .75; }
 
+/* GIF: a imagem ocupa o balão, com a hora por cima dela. */
+.bubble.gif { min-width: 0; padding: 3px; }
+.bubble.gif .reply-quote { width: auto; margin: 2px 2px 5px; }
+.gif-media { display: block; max-width: 100%; height: auto; border-radius: 15px; background: var(--surface-3); }
+.bubble.gif .foot { position: absolute; right: 9px; bottom: 9px; float: none; margin: 0; padding: 4px 7px; border-radius: 999px; background: #000000a6; color: #fff; opacity: 1; }
+.bubble.gif .status[data-state="read"] { color: #7cc4ff; }
+
 .tools { position: absolute; bottom: calc(100% + 4px); left: 0; z-index: 5; display: flex; align-items: center; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: 999px; background: color-mix(in srgb, var(--surface-3) 95%, transparent); box-shadow: 0 10px 26px #0008; white-space: nowrap; opacity: 0; transform: translateY(6px) scale(.95); pointer-events: none; transition: opacity .18s, transform .18s; }
 .mine .tools { left: auto; right: 0; }
 .tool-emoji, .tool { width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; color: var(--muted); font-size: 17px; transition: transform .15s, background .15s, color .15s; }
@@ -347,7 +351,7 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .reply-bar button:hover { color: var(--ink); }
 .reply-bar button .icon { width: 16px; height: 16px; }
 
-.composer { margin: 8px max(14px, calc((100% - 850px) / 2)) 18px; display: flex; align-items: flex-end; gap: 8px; padding: 7px; border: 1px solid var(--line); border-radius: 22px; background: var(--surface); box-shadow: 0 10px 30px #0005; transition: border-color .2s, box-shadow .2s; }
+.composer { position: relative; margin: 8px max(14px, calc((100% - 850px) / 2)) 18px; display: flex; align-items: flex-end; gap: 8px; padding: 7px; border: 1px solid var(--line); border-radius: 22px; background: var(--surface); box-shadow: 0 10px 30px #0005; transition: border-color .2s, box-shadow .2s; }
 .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 40%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 8%, transparent), 0 10px 30px #0005; }
 .quick-emojis { display: flex; align-self: center; }
 .quick-emojis button { width: 32px; height: 36px; border: 0; border-radius: 10px; background: transparent; font-size: 18px; transition: transform .15s, background .15s; }
@@ -357,6 +361,25 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .send { flex: 0 0 42px; height: 42px; display: grid; place-items: center; overflow: hidden; border: 0; border-radius: 50%; background: var(--accent); color: var(--accent-ink); box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 25%, transparent); transition: filter .2s; }
 .send:hover { filter: brightness(1.08); }
 .send .icon { width: 19px; height: 19px; margin: 1px 2px 0 0; stroke-width: 2.2; }
+
+/* ---------- GIFs ---------- */
+.gif-button { flex: none; align-self: center; height: 28px; margin: 0 2px; padding: 0 7px; border: 1.5px solid var(--line); border-radius: 8px; background: transparent; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .06em; transition: color .2s, border-color .2s, transform .15s; }
+.gif-button:hover, .gif-button[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+.gif-panel { position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 12; width: min(420px, 100%); height: min(440px, 56vh); height: min(440px, 56dvh); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: 0 20px 50px #000a; }
+.gif-search { position: relative; display: block; flex: none; margin: 10px; }
+.gif-search .icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--faint); pointer-events: none; }
+.gif-search input { width: 100%; padding: 9px 12px 9px 36px; border: 1px solid var(--field-line); border-radius: 12px; background: var(--surface-2); color: var(--ink); font-size: 13.5px; outline: none; transition: border-color .2s; }
+.gif-search input::placeholder { color: var(--faint); }
+.gif-search input:focus { border-color: var(--accent); }
+.gif-results { flex: 1 1 auto; min-height: 0; padding: 0 10px 10px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+/* Mural: cada GIF entra na coluna mais curta (app.js), sem cortar a imagem. */
+.gif-grid { display: flex; align-items: flex-start; gap: 6px; }
+.gif-col { flex: 1 1 0; min-width: 0; display: grid; gap: 6px; }
+.gif-item { display: block; width: 100%; padding: 0; overflow: hidden; border: 0; border-radius: 10px; background: var(--surface-3); transition: transform .15s, box-shadow .15s; }
+.gif-item:hover, .gif-item:focus-visible { transform: scale(1.03); box-shadow: 0 0 0 2px var(--accent); outline: none; }
+.gif-item img { display: block; width: 100%; height: auto; }
+.gif-note { margin: 18px 10px; color: var(--muted); font-size: 12.5px; line-height: 1.5; text-align: center; }
+.gif-credit { flex: none; margin: 0; padding: 6px 12px 7px; border-top: 1px solid var(--line-soft); color: var(--faint); font-size: 9.5px; font-weight: 700; letter-spacing: .1em; text-align: right; text-transform: uppercase; }
 
 /* =====================================================================
    Chamadas (estilo Discord)
@@ -493,14 +516,42 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .incoming-card .eyebrow { margin: 34px 0 6px; }
 .ring { width: 84px; height: 84px; border: 2px solid var(--accent); border-radius: 50%; opacity: 0; }
 .pill.gold { background: var(--accent); color: var(--accent-ink); }
-.profile-photo { position: relative; display: block; margin: 0 auto 18px; padding: 0; border: 0; border-radius: 50%; background: none; transition: opacity .2s; }
-.profile-photo .avatar.big { width: 112px; height: 112px; font-size: 44px; }
+.pill.small { padding: 7px 13px; font-size: 12.5px; }
+.pill.small .icon { width: 15px; height: 15px; }
+
+/* ---------- configurações ---------- */
+.settings-card { width: min(100%, 420px); max-height: calc(100vh - 40px); max-height: calc(100dvh - 40px); padding: 18px 20px 14px; overflow-y: auto; overscroll-behavior: contain; text-align: left; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.settings-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.close-x { width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--surface-2); color: var(--muted); transition: color .2s, background .2s; }
+.close-x:hover { background: var(--surface-3); color: var(--ink); }
+.close-x .icon { width: 17px; height: 17px; }
+.settings-profile { display: flex; align-items: center; gap: 16px; }
+.profile-text { min-width: 0; }
+.profile-text strong { display: block; overflow: hidden; font-size: 16px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.profile-text .muted { margin-top: 2px; font-size: 12px; }
+.photo-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 10px; }
+.profile-photo { position: relative; flex: none; display: block; padding: 0; border: 0; border-radius: 50%; background: none; transition: opacity .2s; }
+.profile-photo .avatar.big { width: 88px; height: 88px; font-size: 36px; }
 .profile-photo:hover .avatar { filter: brightness(1.08); }
-.photo-badge { position: absolute; right: 2px; bottom: 2px; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: var(--accent); color: var(--accent-ink); box-shadow: 0 0 0 3px var(--surface); }
-.photo-badge .icon { width: 17px; height: 17px; }
-.profile-card.busy .profile-photo, .profile-card.busy .pill.gold { opacity: .5; pointer-events: none; }
-.profile-card { width: min(100%, 380px); }
-.theme-picker { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+.photo-badge { position: absolute; right: 0; bottom: 0; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: var(--accent); color: var(--accent-ink); box-shadow: 0 0 0 3px var(--surface); }
+.photo-badge .icon { width: 15px; height: 15px; }
+.settings-card.busy .profile-photo, .settings-card.busy #photo-pick { opacity: .5; pointer-events: none; }
+.settings-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.settings-list { display: grid; gap: 2px; }
+.setting-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 9px 10px; border: 0; border-radius: 12px; background: transparent; color: var(--muted); text-align: left; transition: background .2s, color .2s; }
+.setting-row:hover:not(:disabled) { background: var(--surface-2); }
+.setting-row .icon { width: 19px; height: 19px; }
+.setting-row.swap:not(.is-off) .icon { color: var(--accent); }
+.setting-text { flex: 1; min-width: 0; }
+.setting-text strong, .setting-text small { display: block; }
+.setting-text strong { color: var(--ink); font-size: 13.5px; font-weight: 500; }
+.setting-text small { margin-top: 2px; font-size: 11.5px; }
+.setting-row.logout:hover, .setting-row.logout:hover strong { color: var(--danger-text); }
+/* Interruptor liga/desliga. */
+.switch { position: relative; flex: none; width: 38px; height: 22px; border-radius: 999px; background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--line); transition: background .2s; }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transition: transform .2s, background .2s; }
+.setting-row:not(.is-off) .switch { background: var(--accent); box-shadow: none; }
+.setting-row:not(.is-off) .switch::after { transform: translateX(16px); background: var(--accent-ink); }
 .picker-label { margin: 0 0 10px; font-size: 12px; font-weight: 600; text-align: left; }
 .picker-label small { color: var(--muted); font-size: 11.5px; font-weight: 400; }
 .themes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px 6px; }
@@ -511,7 +562,7 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .swatch { width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, var(--sw-bg) 50%, var(--sw-accent) 50%); box-shadow: inset 0 0 0 1px #8080804d; transition: box-shadow .2s, transform .2s; }
 .theme-choice:hover .swatch { transform: scale(1.06); }
 .theme-choice[aria-pressed="true"] .swatch { box-shadow: inset 0 0 0 1px #8080804d, 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
-.text-button { margin-top: 14px; padding: 4px 8px; border: 0; background: none; color: var(--muted); font-size: 12.5px; text-decoration: underline; text-underline-offset: 3px; }
+.text-button { padding: 4px 2px; border: 0; background: none; color: var(--muted); font-size: 12.5px; text-decoration: underline; text-underline-offset: 3px; }
 .text-button:hover { color: var(--danger); }
 
 /* =====================================================================

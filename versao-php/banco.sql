@@ -2,7 +2,7 @@
 -- Opcional: o site cria tudo sozinho no primeiro acesso. Use este arquivo só se preferir importar pelo phpMyAdmin.
 -- Se mudar o prefixo em config.php, troque "potato_" aqui também.
 -- Já importou a versão anterior deste arquivo? Não precisa fazer nada: no primeiro acesso o site
--- acrescenta sozinho as colunas novas (senha, foto e tema) na tabela potato_users.
+-- acrescenta sozinho as colunas novas (senha, foto e tema em potato_users, GIF em potato_messages).
 
 CREATE TABLE IF NOT EXISTS `potato_settings` (
   name VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS `potato_messages` (
   reactions TEXT NOT NULL,
   deleted TINYINT(1) NOT NULL DEFAULT 0,
   source VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'web',
+  media TEXT NULL,
   UNIQUE KEY message_id (id),
   KEY message_client (sender, client_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
