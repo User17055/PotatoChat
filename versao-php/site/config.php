@@ -7,11 +7,11 @@ return [
 
     // Banco MySQL criado no painel da hospedagem (cPanel, hPanel…). As tabelas são criadas sozinhas.
     'db' => [
-        'host' => 'localhost',
+        'host' => 'potato.mysql.dbaas.com.br',
         'port' => 3306,
-        'name' => 'nome_do_banco',
-        'user' => 'usuario_do_banco',
-        'pass' => 'senha_do_banco',
+        'name' => 'potato',
+        'user' => 'potato',
+        'pass' => 'Japonego123@',
         // Prefixo das tabelas: permite usar um banco que já tem outras coisas.
         'prefix' => 'potato_',
     ],
