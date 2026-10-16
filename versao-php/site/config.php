@@ -23,5 +23,5 @@ return [
 
     // Chave da busca de GIFs do GIPHY (grátis): https://developers.giphy.com → Create an App → API.
     // Vazio = o botão GIF continua no chat, mas avisa que a busca ainda não foi ativada.
-    'giphy_key' => '',
+    'giphy_key' => 'wHE7eEmagymnCaFOApKXmlHSg93Kp5tE',
 ];
