@@ -61,6 +61,15 @@ function asset(string $file): string
       <feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="patches"/><feMergeNode in="skin"/></feMerge>
     </filter>
     <filter id="pt-blur" x="-20%" y="-200%" width="140%" height="500%"><feGaussianBlur stdDeviation="3"/></filter>
+    <!-- Batatinha plantada: folhas e terra. -->
+    <linearGradient id="plant-leaf" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9be58a"/>
+      <stop offset="1" stop-color="#3f9a4b"/>
+    </linearGradient>
+    <linearGradient id="plant-soil" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7a4e2a"/>
+      <stop offset="1" stop-color="#4a2e17"/>
+    </linearGradient>
   </defs>
       <symbol id="potato" viewBox="0 0 142 100">
   <ellipse cx="72" cy="92" rx="54" ry="4.5" fill="#000" opacity=".45" filter="url(#pt-blur)"/>
@@ -178,6 +187,7 @@ function asset(string $file): string
         </div>
         <!-- Seu perfil: foto, tema, notificações, sons e sair ficam todos na aba Perfil. -->
         <div class="sidebar-bottom">
+          <div class="plant-slot" data-plant></div>
           <button id="side-profile" class="person side-profile" type="button" data-tab-target="profile">
             <span id="side-avatar" class="avatar" aria-hidden="true">?</span>
             <span><strong id="side-name">Você</strong><small>Ver seu perfil</small></span>
@@ -377,6 +387,12 @@ function asset(string $file): string
               <span class="setting-text"><strong>Sair</strong><small>Encerrar a sessão neste aparelho</small></span>
             </button>
           </section>
+
+          <!-- No celular a batatinha mora aqui (no computador ela fica na barra lateral). -->
+          <footer class="profile-garden">
+            <div class="plant-slot" data-plant></div>
+            <p id="plant-note" class="muted">Toque para regar a batatinha</p>
+          </footer>
         </div>
       </section>
 
@@ -418,6 +434,33 @@ function asset(string $file): string
         </div>
       </div>
     </div>
+
+    <!-- Batatinha plantada: o app.js copia este desenho para cada [data-plant]. O broto cresce a cada rega (data-stage 0 a 3). -->
+    <template id="plant-template">
+      <button class="planted" type="button" data-stage="0" aria-label="Regar a batatinha" title="Regar a batatinha 💧">
+        <svg viewBox="0 0 120 100" aria-hidden="true">
+          <g class="plant-sprout">
+            <path d="M60 60C60 51 59 45 60 37" fill="none" stroke="#4f9e45" stroke-width="3" stroke-linecap="round"/>
+            <path class="leaf-extra" fill="url(#plant-leaf)" d="M60 52c-6 1-11-2-13-6 6-1 11 1 13 6Z"/>
+            <path fill="url(#plant-leaf)" d="M60 45c-10 0-18-6-20-14 10-1 18 4 20 14Z"/>
+            <path fill="url(#plant-leaf)" d="M60 39c8 0 16-6 19-14-10-1-18 4-19 14Z"/>
+            <g class="plant-flower">
+              <circle cx="60" cy="30" r="2.8" fill="#fff"/><circle cx="64" cy="33" r="2.8" fill="#fff"/><circle cx="56" cy="33" r="2.8" fill="#fff"/>
+              <circle cx="62.5" cy="36.5" r="2.8" fill="#fff"/><circle cx="57.5" cy="36.5" r="2.8" fill="#fff"/><circle cx="60" cy="33.6" r="2" fill="#f5c04f"/>
+            </g>
+          </g>
+          <g class="plant-body">
+            <ellipse cx="60" cy="77" rx="31" ry="19" fill="url(#pt-skin)" filter="url(#pt-texture)"/>
+            <ellipse cx="60" cy="77" rx="31" ry="19" fill="url(#pt-shine)"/>
+            <g class="plant-eyes" fill="#3b2410"><ellipse cx="51" cy="69" rx="2.2" ry="2.8"/><ellipse cx="69" cy="69" rx="2.2" ry="2.8"/></g>
+            <ellipse cx="45.5" cy="74" rx="4" ry="2" fill="#ff8f8f" opacity=".5"/><ellipse cx="74.5" cy="74" rx="4" ry="2" fill="#ff8f8f" opacity=".5"/>
+            <path d="M56 73.5q4 3.2 8 0" fill="none" stroke="#3b2410" stroke-width="1.6" stroke-linecap="round"/>
+          </g>
+          <path fill="url(#plant-soil)" d="M2 96c10-17 30-20 58-20s48 3 58 20Z"/>
+          <g fill="#2f1c0d" opacity=".5"><circle cx="30" cy="89" r="1.4"/><circle cx="47" cy="84" r="1"/><circle cx="78" cy="86" r="1.3"/><circle cx="92" cy="91" r="1"/><circle cx="62" cy="91" r="1.1"/></g>
+        </svg>
+      </button>
+    </template>
 
     <script src="vendor/gsap.min.js"></script>
     <script type="importmap">

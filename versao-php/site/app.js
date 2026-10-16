@@ -2146,6 +2146,44 @@ window.addEventListener("message", (event) => {
   }
 });
 
+// ---------- batatinha plantada ----------
+
+const PLANT_KEY = "potato.plant";
+// Cada rega faz o broto crescer um pouco; com flor, o próximo toque colhe e ela volta a ser semente.
+const PLANT_NOTES = ["Toque para regar a batatinha", "Ela gostou! Mais um pouquinho de água…", "Olha o broto crescendo 🌱", "Floriu! Toque para colher 🌼"];
+let plantStage = Math.min(3, Math.max(0, Number(store.get("localStorage", PLANT_KEY)) || 0));
+
+function paintPlants() {
+  document.querySelectorAll(".planted").forEach((plant) => {
+    plant.dataset.stage = plantStage;
+    plant.title = plantStage === 3 ? "Colher a batatinha 🥔" : "Regar a batatinha 💧";
+  });
+  $("#plant-note").textContent = PLANT_NOTES[plantStage];
+}
+
+document.querySelectorAll("[data-plant]").forEach((slot) => slot.append($("#plant-template").content.cloneNode(true)));
+paintPlants();
+
+document.addEventListener("click", (event) => {
+  const plant = event.target.closest(".planted");
+  if (!plant) return;
+  const box = plant.getBoundingClientRect();
+  if (plantStage === 3) {
+    plantStage = 0;
+    fx.harvest(plant);
+    fx.rain(["🥔", "🍟", "🌱"], 26);
+    sound.play("sparkle");
+    toast("Colheita! Uma batata fresquinha 🥔", "ok");
+  } else {
+    plantStage += 1;
+    fx.water(plant);
+    fx.burst(box.left + box.width / 2, box.top + box.height * 0.3, ["💧", "💧", "✨"], 9);
+    sound.play("react");
+  }
+  store.set("localStorage", PLANT_KEY, plantStage);
+  paintPlants();
+});
+
 // ---------- início ----------
 
 document.querySelectorAll(".hero-potato, .potato-mini").forEach((potato) => potato.addEventListener("click", () => {
