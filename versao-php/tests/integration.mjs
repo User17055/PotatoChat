@@ -633,7 +633,6 @@ try {
   assert.deepEqual([stopped.state.now, stopped.state.queue], [null, []]);
   // Assistir junto: um vídeo para os dois, com play/pause compartilhado; começar um vídeo pausa a música.
   assert.equal(dj1.history.watch.now, null);
-  assert.deepEqual(dj1.history.sounds, []);
   await withAck(dj1, "music", { op: "play", query: "https://youtu.be/dQw4w9WgXcQ" });
   const watchSeen = next(dj2, "watch");
   const watching = await withAck(dj1, "watch", { op: "start", query: "assiste: https://www.youtube.com/watch?v=aqz-KE-bpKQ" });
@@ -651,44 +650,11 @@ try {
   const local = await withAck(dj1, "watch", { op: "start", local: { name: "filme/da noite.mp4", size: 1234, duration: 5400.5 } });
   assert.deepEqual([local.state.now.source, local.state.now.name, local.state.now.duration], ["local", "filme_da noite.mp4", 5400.5]);
   assert.equal((await withAck(dj1, "watch", { op: "start", query: "https://clips.twitch.tv/AlgumClipe" })).error, "Clipe da Twitch não dá para assistir junto: use o link do vídeo ou do canal.");
-  assert.equal((await withAck(dj1, "watch", { op: "start", query: "um filme bom" })).ok, false);
+  assert.equal((await withAck(dj1, "watch", { op: "start", query: "um filme bom" })).error, "Não achei esse vídeo. Cole o link do YouTube ou da Twitch (ou escolha um vídeo do aparelho).");
   const watchEnded = await withAck(dj2, "watch", { op: "ended", uid: local.state.now.uid });
   assert.equal(watchEnded.state.playing, false);
   assert.deepEqual((await withAck(dj1, "watch", { op: "stop" })).state.now, null);
   await withAck(dj1, "music", { op: "stop" });
-
-  // Soundboard: o som toca nos dois; cada um pode subir os seus (só áudio).
-  const soundSeen = next(dj2, "soundboard");
-  assert.equal((await withAck(dj1, "soundboard", { op: "play", id: "buzina" })).ok, true);
-  assert.deepEqual(await soundSeen, { id: "buzina", by: "Pessoa 1" });
-  assert.equal((await withAck(dj1, "soundboard", { op: "play", id: "<script>" })).ok, false);
-  const notAudio = await upload(firstLogin.body.token, "nota.txt", "só um texto", "text/plain");
-  assert.equal((await withAck(dj1, "soundboard", { op: "add", file: notAudio.body.file.key, name: "Texto" })).error, "Escolha um áudio (mp3, m4a, ogg ou wav).");
-  const wav = Buffer.alloc(44 + 800, 128);
-  wav.write("RIFF", 0);
-  wav.writeUInt32LE(36 + 800, 4);
-  wav.write("WAVEfmt ", 8);
-  wav.writeUInt32LE(16, 16);
-  wav.writeUInt16LE(1, 20);
-  wav.writeUInt16LE(1, 22);
-  wav.writeUInt32LE(8000, 24);
-  wav.writeUInt32LE(8000, 28);
-  wav.writeUInt16LE(1, 32);
-  wav.writeUInt16LE(8, 34);
-  wav.write("data", 36);
-  wav.writeUInt32LE(800, 40);
-  const clip = await upload(firstLogin.body.token, "risada.wav", wav, "audio/wav");
-  const listSeen = next(dj2, "sounds");
-  const added = await withAck(dj1, "soundboard", { op: "add", file: clip.body.file.key, name: "  Risada da Pessoa 1, bem comprida  " });
-  assert.deepEqual([added.sounds.length, added.sounds[0].name, added.sounds[0].by], [1, "Risada da Pessoa 1, bem", "Pessoa 1"]);
-  assert.equal((await listSeen).sounds[0].id, added.sounds[0].id);
-  assert.equal((await fetch(`${baseUrl}/${added.sounds[0].url}`)).status, 200);
-  assert.equal((await withAck(dj2, "soundboard", { op: "add", file: clip.body.file.key, name: "De novo" })).ok, false);
-  const peek = await connect(secondLogin.body.token);
-  assert.deepEqual(peek.history.sounds.map((item) => item.name), ["Risada da Pessoa 1, bem"]);
-  peek.disconnect();
-  assert.deepEqual((await withAck(dj2, "soundboard", { op: "remove", id: added.sounds[0].id })).sounds, []);
-  assert.equal((await fetch(`${baseUrl}/${added.sounds[0].url}`)).status, 404);
 
   // O cartão do bot não conta como mensagem no perfil.
   const statsBefore = (await withAck(dj1, "stats")).messages;

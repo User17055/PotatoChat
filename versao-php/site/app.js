@@ -1,4 +1,4 @@
-import { sound, EFFECTS } from "./sound.js";
+import { sound } from "./sound.js";
 import { fx, effectFor, motion } from "./fx.js";
 import { io, apiUrl } from "./realtime.js";
 import { createPlayer } from "./music.js";
@@ -423,8 +423,7 @@ function connect(token, animate) {
     syncTheme(payload.theme);
     applyWallpaper(payload.wallpaper);
     applyMusic(payload.music, true);
-    applyWatch(payload.watch, true);
-    applySounds(payload.sounds);
+    applyWatch(payload.watch, true, false);
     renderAll();
     scrollToLatest();
     markSeen();
@@ -443,17 +442,12 @@ function connect(token, animate) {
     applyMusic(state);
     musicNotice(action);
   });
-  // Assistir junto e soundboard.
+  // Watch Party.
   socket.on("watch", ({ state, action }) => {
     applyWatch(state);
     watchNotice(action);
   });
-  socket.on("sounds", ({ sounds }) => applySounds(sounds));
-  socket.on("soundboard", ({ id, by }) => {
-    if (by === me) return;
-    playSound(id);
-    toast(`${by}: ${soundName(id)}`, "music", "audio-lines");
-  });
+
   socket.on("theme", ({ theme }) => {
     themeSaved = true;
     applyTheme(theme);
@@ -1035,7 +1029,6 @@ function onGifKey(event) {
 
 function openGifs() {
   closeAttach();
-  closeSounds();
   fx.show(gifPanel, { y: 10, scale: 0.98 });
   gifButton.setAttribute("aria-expanded", "true");
   document.addEventListener("keydown", onGifKey, true);
@@ -1215,7 +1208,6 @@ attachButton.addEventListener("click", () => {
   fx.press(attachButton);
   if (!attachMenu.classList.contains("hidden")) return closeAttach();
   closeGifs();
-  closeSounds();
   fx.show(attachMenu, { y: 10, scale: 0.96 });
   attachButton.setAttribute("aria-expanded", "true");
 });
@@ -2111,10 +2103,9 @@ const MUSIC_COMMANDS = [
   { name: "skip", icon: "skip", text: "Pula para a próxima da fila" },
   { name: "stop", icon: "stop", text: "Para e limpa a fila" },
   { name: "fila", icon: "list-music", text: "Abre o tocador com a fila" },
-  { name: "assistir", args: "link do YouTube ou da Twitch", icon: "tv", text: "Assistir junto (sozinho, escolhe um vídeo do aparelho)" },
-  { name: "som", icon: "audio-lines", text: "Abre o soundboard (sons que tocam para os dois)" }
+  { name: "watchparty", args: "nome ou link (YouTube ou Twitch)", icon: "tv", text: "Abre a sala para assistir junto (sozinho, só abre a sala)" }
 ];
-const COMMAND_ALIAS = { tocar: "play", continuar: "play", resume: "play", pausar: "pause", pular: "skip", next: "skip", proxima: "skip", parar: "stop", queue: "fila", watch: "assistir", ver: "assistir", sons: "som", soundboard: "som" };
+const COMMAND_ALIAS = { tocar: "play", continuar: "play", resume: "play", pausar: "pause", pular: "skip", next: "skip", proxima: "skip", parar: "stop", queue: "fila", watch: "watchparty", assistir: "watchparty", wp: "watchparty", ver: "watchparty" };
 // Aviso quando a outra pessoa mexe no tocador: ícone e texto.
 const MUSIC_NOTICE = {
   pause: ["pause", "pausou a música"],
@@ -2733,11 +2724,10 @@ function runCommand(text) {
   const query = (match[2] || "").trim();
   unblockMusic();
   if (name === "fila") openMusic();
-  else if (name === "assistir") {
+  else if (name === "watchparty") {
+    setWatchRoom(true);
     if (query) watchCommand("start", { query });
-    else $("#pick-watch").click();
-  } else if (name === "som") openSounds();
-  else if (name === "play") musicCommand("play", query ? { query } : {});
+  } else if (name === "play") musicCommand("play", query ? { query } : {});
   else musicCommand(name);
   sound.play("tap");
   return true;
@@ -2923,7 +2913,8 @@ window.addEventListener("keydown", (event) => {
   }
 }, true);
 
-// ---------- assistir junto (/assistir) ----------
+// ---------- watch party (/watchparty) ----------
+// Uma sala só para assistir: o vídeo grande e a conversa do lado (no celular, embaixo).
 
 // O que vem do servidor: o vídeo (now), se está passando e em que segundo estava em updatedAt (relógio dele).
 let watch = { now: null, playing: false, position: 0, updatedAt: 0 };
@@ -2936,7 +2927,11 @@ let watchBlocked = false;
 let watchSeeking = false;
 let watchBlockTimer = 0;
 let watchUnblockedAt = 0;
+// A sala está aberta aqui (cada um abre e sai quando quiser; o vídeo é o mesmo para os dois).
+let watchRoom = false;
+let watchSource = "youtube";
 const watchPanel = $("#watch-panel");
+const watchButton = $("#watch-button");
 const watchStage = $("#watch-stage");
 const watchAt = () => (watch.playing ? watch.position + (Date.now() + musicClock - watch.updatedAt) / 1000 : watch.position);
 const hasWatchFile = (item) => Boolean(watchFile && (watchFileFor === item.uid || watchFile.name === item.name));
@@ -2974,7 +2969,7 @@ function checkWatchBlocked() {
 // Acompanha o servidor: troca de vídeo, play/pause e acerta o tempo se ficou mais de 2 s fora.
 function syncWatch() {
   const item = watch.now;
-  if (!item || (item.source === "local" && !hasWatchFile(item))) return watchPlayer.destroy();
+  if (!watchRoom || !item || (item.source === "local" && !hasWatchFile(item))) return watchPlayer.destroy();
   if (watchPlayer.uid !== item.uid) return watchPlayer.open(item, watchAt, () => watch.playing, watchFile);
   if (!watchPlayer.ready) return;
   if (watch.playing) {
@@ -3000,7 +2995,8 @@ function watchListen() {
   checkWatchBlocked();
 }
 
-function applyWatch(state, measured = false) {
+// join: a sala abre sozinha quando um vídeo começa agora (ao abrir o app com um já passando, só o botão avisa).
+function applyWatch(state, measured = false, join = true) {
   if (!state) return;
   if (measured && state.serverNow) musicClock = state.serverNow - Date.now();
   const started = Boolean(state.now && state.now.uid !== watch.now?.uid);
@@ -3011,14 +3007,43 @@ function applyWatch(state, measured = false) {
     if (watchStarting && state.now.source === "local" && state.now.by === me) watchFileFor = state.now.uid;
     watchStarting = false;
   }
+  // Começou um vídeo: a sala abre para os dois.
+  if (started && join) setWatchRoom(true);
   paintWatch();
-  if (started) fx.show(watchPanel, { y: -10, scale: 0.98 });
   syncWatch();
+}
+
+function setWatchRoom(on) {
+  if (watchRoom === on) return;
+  watchRoom = on;
+  document.querySelector(".app-shell").classList.toggle("watching", on);
+  watchButton.setAttribute("aria-pressed", String(on));
+  if (on) {
+    closeMusic();
+    if (!watch.now && matchMedia("(pointer: fine)").matches) setTimeout(() => $("#watch-query").focus(), 50);
+  } else {
+    setWatchExpanded(false);
+  }
+  paintWatch();
+  syncWatch();
+  scrollToLatest();
+}
+
+function setWatchSource(source) {
+  watchSource = source;
+  for (const button of watchPanel.querySelectorAll("[data-watch-source]")) button.classList.toggle("active", button.dataset.watchSource === source);
+  $("#watch-query").placeholder = source === "twitch" ? "Canal ou link da Twitch (twitch.tv/…)" : "Nome ou link do YouTube";
+  $("#watch-query").focus();
 }
 
 function paintWatch() {
   const item = watch.now;
-  watchPanel.classList.toggle("hidden", !item);
+  watchPanel.classList.toggle("hidden", !watchRoom);
+  watchPanel.classList.toggle("has-video", Boolean(item));
+  watchButton.classList.toggle("live", Boolean(item) && !watchRoom);
+  watchButton.title = item && !watchRoom ? `Watch Party rolando: ${item.title}` : "Watch Party";
+  $("#watch-picker").classList.toggle("hidden", Boolean(item));
+  $("#watch-who").textContent = peerName ? `com ${peerName}` : "";
   if (!item) return setWatchExpanded(false);
   const needFile = item.source === "local" && !hasWatchFile(item);
   const live = item.source === "twitch" && item.kind === "channel";
@@ -3136,8 +3161,29 @@ document.addEventListener("fullscreenchange", () => {
   if (document.fullscreenElement !== watchPanel) setWatchExpanded(false);
 });
 
+watchButton.addEventListener("click", () => {
+  fx.press(watchButton);
+  setWatchRoom(!watchRoom);
+});
+
+$("#watch-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  let query = $("#watch-query").value.trim();
+  if (!query) return $("#watch-query").focus();
+  // Na Twitch, só o nome do canal já basta.
+  if (watchSource === "twitch" && !/twitch\.tv/i.test(query)) query = `twitch.tv/${query.replace(/^@/, "")}`;
+  watchCommand("start", { query });
+  $("#watch-query").value = "";
+});
+
 watchPanel.addEventListener("click", async (event) => {
   const target = event.target;
+  if (target.closest("#watch-leave")) return setWatchRoom(false);
+  const source = target.closest("[data-watch-source]");
+  if (source) {
+    if (source.dataset.watchSource === "local") return $("#pick-watch").click();
+    return setWatchSource(source.dataset.watchSource);
+  }
   if (target.closest("#watch-unblock")) return watchListen();
   if (target.closest("#watch-pick")) {
     watchPicking = true;
@@ -3177,162 +3223,11 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden && watch.now) syncWatch();
 });
 
-// ---------- soundboard (/som) ----------
-// Sons rápidos que tocam nos dois aparelhos: os prontos (feitos no navegador) e os que cada um sobe.
-
-let customSounds = [];
-let soundPlayedAt = 0;
-let soundFile = null;
-const soundAudio = new Map();
-const soundPanel = $("#sound-panel");
-const soundButton = $("#sound-button");
-const soundName = (id) => EFFECTS.find((item) => item.id === id)?.name || customSounds.find((item) => item.id === id)?.name || "um som";
-
-function soundTile(id, name, custom) {
-  const tile = el("button", `sound-tile${custom ? " custom" : ""}`);
-  tile.type = "button";
-  tile.dataset.sound = id;
-  tile.style.setProperty("--hue", hue(name));
-  tile.append(icon(custom ? "audio-lines" : "volume"), el("span", "", name));
-  if (custom) {
-    const remove = el("span", "sound-remove");
-    remove.dataset.removeSound = id;
-    remove.title = "Tirar este som";
-    remove.append(icon("x"));
-    tile.append(remove);
-  }
-  return tile;
-}
-
-function paintSounds() {
-  const add = el("button", "sound-tile add");
-  add.type = "button";
-  add.dataset.addSound = "";
-  add.append(icon("plus"), el("span", "", "Seu som"));
-  $("#sound-grid").replaceChildren(...EFFECTS.map((item) => soundTile(item.id, item.name, false)), ...customSounds.map((item) => soundTile(item.id, item.name, true)), add);
-}
-
-function playSound(id) {
-  if (EFFECTS.some((item) => item.id === id)) return sound.effect(id);
-  const custom = customSounds.find((item) => item.id === id);
-  if (!custom) return;
-  let audio = soundAudio.get(id);
-  if (!audio) {
-    audio = new Audio(new URL(custom.url, document.baseURI).href);
-    soundAudio.set(id, audio);
-  }
-  audio.currentTime = 0;
-  audio.play().catch(() => {});
-}
-
-function applySounds(list) {
-  customSounds = Array.isArray(list) ? list : [];
-  soundAudio.clear();
-  paintSounds();
-}
-
-function openSounds() {
-  closeGifs();
-  closeAttach();
-  fx.show(soundPanel, { y: 10, scale: 0.98 });
-  soundButton.setAttribute("aria-expanded", "true");
-}
-
-function closeSounds() {
-  if (soundPanel.classList.contains("hidden")) return;
-  soundPanel.classList.add("hidden");
-  soundButton.setAttribute("aria-expanded", "false");
-  $("#sound-form").classList.add("hidden");
-  soundFile = null;
-}
-
-soundButton.addEventListener("click", () => {
-  fx.press(soundButton);
-  if (soundPanel.classList.contains("hidden")) openSounds();
-  else closeSounds();
-});
-
-soundPanel.addEventListener("click", async (event) => {
-  const remove = event.target.closest("[data-remove-sound]");
-  if (remove) {
-    event.stopPropagation();
-    if (await confirmDialog({ title: "Tirar este som?", text: `“${soundName(remove.dataset.removeSound)}” sai do soundboard dos dois.`, confirm: "Tirar" })) {
-      socket?.emit("soundboard", { op: "remove", id: remove.dataset.removeSound });
-    }
-    return;
-  }
-  if (event.target.closest("[data-add-sound]")) return $("#pick-sound").click();
-  const tile = event.target.closest("[data-sound]");
-  if (!tile || Date.now() - soundPlayedAt < 350) return;
-  soundPlayedAt = Date.now();
-  playSound(tile.dataset.sound);
-  fx.press(tile);
-  socket?.emit("soundboard", { op: "play", id: tile.dataset.sound });
-});
-
-$("#pick-sound").addEventListener("change", (event) => {
-  const file = event.target.files[0];
-  event.target.value = "";
-  if (!file) return;
-  if (file.size > 1500000) return toast("O som pode ter até 1,5 MB (uns segundos de áudio).", "error");
-  soundFile = file;
-  const form = $("#sound-form");
-  form.classList.remove("hidden");
-  const name = $("#sound-name");
-  name.value = file.name.replace(/\.[^.]+$/, "").slice(0, 24);
-  name.focus();
-  name.select();
-});
-
-async function saveSound() {
-  if (!soundFile || !socket?.connected) return;
-  const file = soundFile;
-  const name = $("#sound-name").value.trim() || "Som";
-  soundFile = null;
-  $("#sound-form").classList.add("hidden");
-  toast("Subindo o som…", "music", "audio-lines");
-  try {
-    const response = await fetch(apiUrl("upload"), {
-      method: "POST",
-      headers: { "Content-Type": file.type || "application/octet-stream", "X-Potato-Token": socket.auth.token, "X-Potato-Name": encodeURIComponent(file.name || "som") },
-      body: file
-    });
-    const result = await response.json().catch(() => null);
-    if (!response.ok || !result?.ok) throw new Error(result?.error || "O som não subiu.");
-    socket.timeout(15000).emit("soundboard", { op: "add", file: result.file.key, name }, (error, answer) => {
-      if (error || !answer?.ok) return toast(answer?.error || "Não deu para pôr o som.", "error");
-      applySounds(answer.sounds);
-      toast(`“${name}” entrou no soundboard`, "ok");
-    });
-  } catch (error) {
-    toast(error.message, "error");
-  }
-}
-
-$("#sound-save").addEventListener("click", saveSound);
-// Enter no nome salva o som (e não manda a mensagem do campo de baixo).
-$("#sound-name").addEventListener("keydown", (event) => {
-  if (event.key !== "Enter") return;
-  event.preventDefault();
-  saveSound();
-});
-
-document.addEventListener("click", (event) => {
-  if (!event.target.closest("#sound-panel, #sound-button")) closeSounds();
-});
-
 window.addEventListener("keydown", (event) => {
-  if (event.key !== "Escape") return;
-  if (!soundPanel.classList.contains("hidden")) {
-    event.stopPropagation();
-    closeSounds();
-  } else if (watchPanel.classList.contains("expanded")) {
-    event.stopPropagation();
-    setWatchExpanded(false);
-  }
+  if (event.key !== "Escape" || !watchPanel.classList.contains("expanded")) return;
+  event.stopPropagation();
+  setWatchExpanded(false);
 }, true);
-
-paintSounds();
 
 // ---------- presença e digitação ----------
 

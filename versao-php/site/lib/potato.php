@@ -22,8 +22,6 @@ const FILE_UPLOADS_PER_10_MIN = 60;
 // Papel de parede: foto reduzida no navegador (lado maior até 1600 px). Cabe numa requisição mesmo em base64.
 const WALLPAPER_MAX = 650000;
 const MUSIC_QUEUE_MAX = 50;
-const SOUND_MAX = 1500000;
-const SOUND_LIST_MAX = 24;
 // Mesma lista do app.js (THEMES). O primeiro é o padrão.
 const THEMES = ['escuro', 'preto', 'rosa', 'roxo', 'azul', 'verde', 'claro'];
 
@@ -998,11 +996,20 @@ function watch_act(array $me, array $body): array
             $name = clean_file_name(str($local['name'] ?? ''));
             $item = ['source' => 'local', 'title' => $name, 'name' => $name, 'size' => max(0, (int) ($local['size'] ?? 0)), 'duration' => max(0, min(86400, (float) ($local['duration'] ?? 0)))];
         } else {
-            $link = parse_watch_link(text_slice(text_trim(str($body['query'] ?? '')), 300));
-            if (!$link) return ['ok' => false, 'error' => 'Cole o link de um vídeo do YouTube ou da Twitch (ou escolha um vídeo do aparelho).'];
+            $query = text_slice(text_trim(str($body['query'] ?? '')), 300);
+            $link = parse_watch_link($query);
+            // Sem link: procura pelo nome no YouTube (o primeiro que dá para passar fora de lá).
+            if (!$link && $query !== '' && config()['music_lookup']) {
+                foreach (array_slice(youtube_search($query), 0, 4) as $video) {
+                    if (!$video['checked'] && !youtube_meta($video['id'])) continue;
+                    $link = ['source' => 'youtube', 'id' => $video['id'], 'title' => text_slice((string) $video['title'], 200)];
+                    break;
+                }
+            }
+            if (!$link) return ['ok' => false, 'error' => 'Não achei esse vídeo. Cole o link do YouTube ou da Twitch (ou escolha um vídeo do aparelho).'];
             if ($link['source'] === 'clip') return ['ok' => false, 'error' => 'Clipe da Twitch não dá para assistir junto: use o link do vídeo ou do canal.'];
             if ($link['source'] === 'youtube') {
-                $meta = config()['music_lookup'] ? youtube_meta($link['id']) : null;
+                $meta = !isset($link['title']) && config()['music_lookup'] ? youtube_meta($link['id']) : null;
                 $item = $link + ['title' => text_slice((string) ($meta['title'] ?? 'Vídeo do YouTube'), 200)];
             } else {
                 $item = $link + ['title' => $link['kind'] === 'channel' ? "Ao vivo: {$link['id']}" : 'Vídeo da Twitch'];
@@ -1060,51 +1067,6 @@ function watch_act(array $me, array $body): array
     $public = watch_public($state);
     emit('watch', ['state' => $public, 'action' => $action]);
     return ['ok' => true, 'state' => $public, 'action' => $action];
-}
-
-// ---------- soundboard ----------
-// Sons rápidos que tocam nos dois aparelhos. Os prontos são feitos no próprio navegador (sound.js); cada um pode
-// subir os seus (áudio curto, enviado como arquivo). A lista fica na tabela de configurações (nome "sounds").
-
-function sound_list(bool $lock = false): array
-{
-    if ($lock) query('INSERT IGNORE INTO ' . t('settings') . " (name, value) VALUES ('sounds', '[]')");
-    $raw = query('SELECT value FROM ' . t('settings') . " WHERE name = 'sounds'" . ($lock ? ' FOR UPDATE' : ''))->fetchColumn();
-    $list = $raw ? json_decode((string) $raw, true) : null;
-    return is_array($list) ? array_values($list) : [];
-}
-
-// Comandos: play (id), add (file = chave do áudio enviado, name) e remove (id).
-function soundboard_act(array $me, array $body): array
-{
-    $op = str($body['op'] ?? '');
-    $id = str($body['id'] ?? '');
-    if ($op === 'play') {
-        if (!preg_match('/^[a-z0-9-]{1,40}$/', $id)) return ['ok' => false, 'error' => 'Som desconhecido.'];
-        emit('soundboard', ['id' => $id, 'by' => $me['name']]);
-        return ['ok' => true];
-    }
-    $list = sound_list(true);
-    if ($op === 'add') {
-        $key = str($body['file'] ?? '');
-        $file = query('SELECT kind, size FROM ' . t('files') . ' WHERE file_key = ? AND owner = ? AND message_id IS NULL', [$key, $me['name']])->fetch();
-        if (!$file || $file['kind'] !== 'audio') return ['ok' => false, 'error' => 'Escolha um áudio (mp3, m4a, ogg ou wav).'];
-        if ((int) $file['size'] > SOUND_MAX) return ['ok' => false, 'error' => 'O som pode ter até 1,5 MB (alguns segundos).'];
-        if (count($list) >= SOUND_LIST_MAX) return ['ok' => false, 'error' => 'Já tem ' . SOUND_LIST_MAX . ' sons. Tire um antes de pôr outro.'];
-        // Marcado como do soundboard, o arquivo não some na limpeza de envios abandonados.
-        query('UPDATE ' . t('files') . " SET message_id = 'soundboard' WHERE file_key = ?", [$key]);
-        $list[] = ['id' => 'u' . substr($key, 0, 12), 'key' => $key, 'name' => text_trim(text_slice(text_trim(str($body['name'] ?? '')), 24)) ?: 'Som', 'url' => file_url($key), 'by' => $me['name']];
-    } elseif ($op === 'remove') {
-        $found = array_values(array_filter($list, fn($sound) => ($sound['id'] ?? '') === $id));
-        if (!$found) return ['ok' => false, 'error' => 'Esse som já saiu.'];
-        query('DELETE FROM ' . t('files') . " WHERE file_key = ? AND message_id = 'soundboard'", [$found[0]['key']]);
-        $list = array_values(array_filter($list, fn($sound) => ($sound['id'] ?? '') !== $id));
-    } else {
-        return ['ok' => false, 'error' => 'Comando desconhecido.'];
-    }
-    query('INSERT INTO ' . t('settings') . " (name, value) VALUES ('sounds', ?) ON DUPLICATE KEY UPDATE value = VALUES(value)", [encode($list)]);
-    emit('sounds', ['sounds' => $list]);
-    return ['ok' => true, 'sounds' => $list];
 }
 
 // ---------- papel de parede ----------
@@ -1338,7 +1300,6 @@ function history(string $me): array
         'fileMax' => file_max(),
         'music' => music_public(music_state()),
         'watch' => watch_public(watch_state()),
-        'sounds' => sound_list(),
     ];
 }
 
@@ -1499,9 +1460,6 @@ function act(array $me, string $event, $data)
 
         case 'watch':
             return watch_act($me, $body);
-
-        case 'soundboard':
-            return soundboard_act($me, $body);
 
         // Tema escolhido: fica na conta e muda na hora nas outras abas da mesma pessoa.
         case 'theme':

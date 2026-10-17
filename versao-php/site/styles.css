@@ -786,9 +786,40 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .command small { color: var(--muted); font-size: 11.5px; }
 
 /* =====================================================================
-   Assistir junto (/assistir) e soundboard (/som)
+   Watch Party (/watchparty)
    ===================================================================== */
-/* Palco do vídeo em cima da conversa: o player e, embaixo, os controles dos dois. */
+/* Sala da Watch Party: cara de cinema, o vídeo grande e a conversa do lado (no celular, embaixo). */
+.app-shell.watching .conversation { background: radial-gradient(120% 80% at 30% 0%, #24183a 0%, #0b0a10 55%, #060609 100%); }
+.app-shell.watching .wallpaper { opacity: 0; }
+.watch-button { position: relative; }
+.watch-dot { position: absolute; top: 2px; right: 2px; width: 10px; height: 10px; display: none; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 2px var(--bg); }
+.watch-button.live .watch-dot { display: block; animation: blink 1.2s ease-in-out infinite; }
+.app-shell.watching .watch-button { border-color: #a78bfa; color: #a78bfa; }
+.watch-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #0e0d14; color: #fff; }
+.watch-badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: linear-gradient(120deg, #7c3aed, #ef4444); font-size: 12.5px; font-weight: 700; letter-spacing: .03em; }
+.watch-badge .icon { width: 16px; height: 16px; }
+.watch-who { flex: 1; min-width: 0; overflow: hidden; color: #ffffffa6; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.watch-head .watch-btn { background: #ffffff14; color: #fff; }
+.watch-head .watch-btn:hover { background: #ffffff26; }
+.watch-panel:not(.has-video) .watch-bar { display: none; }
+/* Nada passando: escolher de onde vem o vídeo. */
+.watch-picker { position: absolute; inset: 0; z-index: 1; display: grid; place-content: center; justify-items: center; gap: 10px; padding: 24px; overflow-y: auto; background: radial-gradient(circle at 50% 30%, #2a1f45, #08070c 70%); color: #fff; text-align: center; }
+.watch-picker-icon { width: 64px; height: 64px; display: grid; place-items: center; border-radius: 20px; background: linear-gradient(140deg, #7c3aed, #ef4444); box-shadow: 0 14px 40px #7c3aed55; }
+.watch-picker-icon .icon { width: 30px; height: 30px; }
+.watch-picker strong { font-size: 20px; }
+.watch-picker p { max-width: 380px; margin: 0; color: #ffffffa6; font-size: 13.5px; line-height: 1.5; }
+.watch-form { display: flex; gap: 8px; width: min(460px, 100%); margin-top: 6px; }
+.watch-form input { flex: 1; min-width: 0; padding: 11px 16px; border: 1px solid #ffffff26; border-radius: 999px; background: #ffffff12; color: #fff; font-size: 14px; outline: none; }
+.watch-form input::placeholder { color: #ffffff73; }
+.watch-form input:focus { border-color: #a78bfa; }
+.watch-form .music-pill { margin: 0; }
+.watch-sources { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 4px; }
+.watch-sources button { display: inline-flex; align-items: center; gap: 7px; padding: 8px 14px; border: 1px solid #ffffff26; border-radius: 999px; background: transparent; color: #ffffffcc; font-size: 13px; font-weight: 600; transition: background .2s, color .2s; }
+.watch-sources button:hover { background: #ffffff14; }
+.watch-sources button.active { border-color: transparent; background: #fff; color: #111; }
+.watch-sources .brand, .watch-sources .icon { width: 16px; height: 16px; }
+
+/* Palco do vídeo: o player e, embaixo, os controles dos dois. */
 .watch-panel { position: relative; z-index: 3; margin: 12px max(14px, calc((100% - 850px) / 2)) 0; overflow: hidden; border: 1px solid var(--line); border-radius: 20px; background: #000; box-shadow: 0 16px 40px #0007; }
 .watch-stage { position: relative; width: 100%; aspect-ratio: 16 / 9; max-height: 52vh; max-height: 52dvh; background: #000; }
 .watch-host, .watch-host > * { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
@@ -828,29 +859,6 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .watch-panel.expanded .watch-bar { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
 
 .attach-icon.watch { background: linear-gradient(140deg, #ffb35c, #f0576b); }
-
-/* Soundboard: abre em cima do campo de mensagem, como o dos GIFs. */
-.sound-button[aria-expanded="true"] { background: var(--surface-2); color: var(--accent); }
-.sound-panel { position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 12; width: min(420px, 100%); max-height: min(440px, 56dvh); overflow-y: auto; padding: 12px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: 0 20px 50px #000a; }
-.sound-head { display: flex; align-items: baseline; gap: 8px; margin: 0 4px 10px; }
-.sound-head strong { font-size: 15px; }
-.sound-head span { color: var(--muted); font-size: 12px; }
-.sound-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
-.sound-tile { position: relative; min-height: 64px; display: grid; justify-items: center; align-content: center; gap: 6px; padding: 10px 6px; border: 0; border-radius: 14px; background: linear-gradient(150deg, hsl(var(--hue) 60% 46%), hsl(calc(var(--hue) + 40) 55% 32%)); color: #fff; font-size: 12px; font-weight: 600; line-height: 1.2; text-align: center; text-shadow: 0 1px 2px #0006; box-shadow: 0 6px 14px #0004; transition: transform .15s, filter .2s; }
-.sound-tile:hover { filter: brightness(1.1); }
-.sound-tile:active { transform: scale(.94); }
-.sound-tile .icon { width: 20px; height: 20px; }
-.sound-tile span { overflow-wrap: anywhere; }
-.sound-tile.add { background: var(--surface-2); color: var(--muted); text-shadow: none; box-shadow: inset 0 0 0 1.5px var(--line); }
-.sound-tile.add:hover { color: var(--accent); }
-.sound-remove { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; background: #0006; opacity: 0; transition: opacity .2s; }
-.sound-remove .icon { width: 12px; height: 12px; }
-.sound-tile:hover .sound-remove { opacity: 1; }
-@media (hover: none) { .sound-remove { opacity: 1; } }
-.sound-form { display: flex; gap: 8px; margin-top: 10px; }
-.sound-form input { flex: 1; min-width: 0; padding: 9px 12px; border: 1px solid var(--field-line); border-radius: 12px; background: var(--surface-2); color: var(--ink); font-size: 13.5px; outline: none; }
-.sound-form input:focus { border-color: var(--accent); }
-.sound-form .music-pill { margin: 0; padding: 9px 16px; }
 
 /* =====================================================================
    Chamadas (estilo Discord)
@@ -971,8 +979,22 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
   .in-call .quick-emojis { display: none; }
   .in-call .composer textarea { padding-left: 10px; }
   .in-call .jump { right: 14px; }
-  /* Durante a chamada, o vídeo fica numa janelinha no topo da coluna do chat. */
-  .in-call .watch-panel { grid-column: 2; grid-row: 2; align-self: start; z-index: 4; margin: 10px; }
+  /* Sala da Watch Party no computador: o vídeo ocupa tudo e a conversa fica numa coluna à direita. */
+  .app-shell.watching { grid-template-columns: minmax(0, 1fr); }
+  .app-shell.watching .sidebar { display: none; }
+  .watching .conversation { display: grid; grid-template-columns: minmax(0, 1fr) 380px; grid-template-rows: auto auto minmax(0, 1fr) auto auto auto; }
+  .watching .topbar { grid-column: 2; grid-row: 1; }
+  .watching .net-banner { grid-column: 2; grid-row: 2; }
+  .watching .call-panel { grid-column: 2; grid-row: 2; height: 230px; margin: 8px; }
+  .watching .watch-panel { grid-column: 1; grid-row: 1 / -1; display: flex; flex-direction: column; margin: 14px 0 14px 14px; box-shadow: 0 0 0 1px #ffffff14, 0 30px 80px #000c, 0 0 60px #7c3aed26; }
+  .watching .watch-stage { flex: 1; max-height: none; aspect-ratio: auto; }
+  .watching .messages-wrap { grid-column: 2; grid-row: 3; }
+  .watching .typing { grid-column: 2; grid-row: 4; padding: 0 14px; }
+  .watching .reply-bar { grid-column: 2; grid-row: 5; margin: 0 10px; }
+  .watching .composer { grid-column: 2; grid-row: 6; margin: 8px 10px 12px; }
+  .watching .messages { padding: 14px 12px 10px; }
+  .watching .message { max-width: 92%; }
+  .watching .quick-emojis { display: none; }
   .in-call.call-expanded .conversation { grid-template-columns: minmax(0, 1fr); background: none; }
 }
 
@@ -1114,8 +1136,10 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
   .music-button.has-art { gap: 7px; padding: 0 11px 0 4px; }
   .mini-art { width: 26px; height: 26px; }
   .music-empty { margin-top: 14vh; }
-  .watch-panel { margin: 8px 8px 0; border-radius: 16px; }
-  .watch-stage { max-height: 34vh; max-height: 34dvh; }
+  /* Sala no celular: o vídeo em cima, a conversa embaixo (sem as abas). */
+  .app-shell.watching .tabbar, .watching .topbar { display: none; }
+  .watching .watch-panel { margin: 0; border: 0; border-radius: 0; }
+  .watching .watch-panel:not(.has-video) .watch-stage { aspect-ratio: auto; min-height: 330px; }
   .profile-scroll { padding: 26px 16px 28px; }
   .topbar { min-height: 64px; padding: 10px 12px; }
   .topbar h2 { font-size: 16px; }

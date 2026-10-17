@@ -105,26 +105,19 @@ Escreva no campo de mensagem e aperte Enter (ao digitar `/`, aparece a lista dos
 - **Busca pelo nome:** funciona sem configurar nada (o servidor lê a página de resultados do YouTube). Se um dia ela parar, configure a chave oficial: em [console.cloud.google.com](https://console.cloud.google.com), crie um projeto, ative a **YouTube Data API v3**, crie uma chave em *Credenciais* e coloque em `youtube_key` no `config.php`. A cota grátis dá cerca de 100 buscas por dia.
 - O servidor precisa conseguir acessar a internet (YouTube e Spotify) pelo PHP, o que as hospedagens comuns permitem.
 
-## Assistir junto (/assistir)
+## Watch Party (/watchparty)
 
-Um vídeo para os dois, no mesmo segundo, com play, pause e avanço valendo para os dois. Ele aparece em cima da conversa (no celular, a conversa continua embaixo) e tem tela cheia.
+Uma sala só para assistir junto: o vídeo grande, com cara de cinema, e a conversa do lado (no celular, embaixo). Abre pelo botão de TV no topo da conversa, pelo clipe de anexar → **Watch Party** ou com `/watchparty`. Os dois veem o mesmo vídeo, no mesmo segundo: play, pause e avanço valem para os dois, e tem tela cheia.
 
-| Como | O que passa |
+| De onde | Como |
 | --- | --- |
-| `/assistir link do YouTube` | Vídeo do YouTube |
-| `/assistir link da Twitch` | Vídeo gravado (`twitch.tv/videos/…`) ou canal ao vivo (`twitch.tv/canal`; ao vivo não dá para avançar, só pausar) |
-| `/assistir` sozinho, ou o clipe de anexar → **Assistir junto** | Um vídeo do aparelho: nada sobe para o servidor; a outra pessoa escolhe o mesmo arquivo no aparelho dela e os dois assistem sincronizados |
+| YouTube | Nome ou link (`/watchparty nome do vídeo` também funciona) |
+| Twitch | Nome do canal (ao vivo; aí só dá para pausar, não avançar) ou link de um vídeo gravado (`twitch.tv/videos/…`) |
+| Do aparelho | Cada um escolhe o mesmo arquivo no próprio aparelho; nada sobe para o servidor |
 
-- Começar um vídeo pausa a música do bot. O **X** fecha o vídeo para os dois.
-- Clipes da Twitch não têm como sincronizar. A Twitch só toca em site com HTTPS (a hospedagem já é).
-- **Netflix, HBO, Disney+ etc. não dá dentro do site:** os vídeos deles são protegidos e só tocam no site ou app deles, com a conta de cada um.
-
-## Soundboard (/som)
-
-O botão de ondinhas no campo de mensagem abre os sons rápidos. Apertou, toca nos dois aparelhos (e aparece quem tocou).
-
-- Dez sons prontos (aplausos, buzina, tum dum tss, tcharam, triste, boing, rufar, beijo, plim e suspense), feitos pelo próprio navegador.
-- **Seu som:** suba um áudio curto (mp3, m4a, ogg ou wav, até 1,5 MB) e dê um nome. Ele vale para os dois; o **X** no botão tira (até 24 sons).
+- Quando um vídeo começa, a sala abre para os dois. Cada um sai quando quiser (o vídeo continua para o outro, e o botão de TV fica com um pontinho vermelho). O **X** embaixo do vídeo para para os dois.
+- Começar um vídeo pausa a música do bot. Clipes da Twitch não têm como sincronizar.
+- **Netflix, Max (HBO), Disney+ etc. não tocam dentro do site:** os filmes deles são criptografados e só aparecem no site ou no app deles, com a conta de cada um. Guardar a senha deles no banco não resolveria isso e seria um risco para as contas.
 
 ## Chamadas e transmissão de tela
 
