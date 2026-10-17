@@ -107,7 +107,7 @@ Escreva no campo de mensagem e aperte Enter (ao digitar `/`, aparece a lista dos
 
 ## Batata Watch Party (/watchparty)
 
-Uma sala só para assistir junto: o vídeo grande, com cara de cinema, e a conversa do lado (no celular, embaixo). Abre pelo botão de TV no topo da conversa, pelo clipe de anexar → **Batata Watch Party** ou com `/watchparty`, sempre com uma abertura de cinema (um toque na tela acelera; com "reduzir movimento" ligado no aparelho, a sala abre direto). Os dois veem o mesmo vídeo, no mesmo segundo: play, pause e avanço valem para os dois, e tem tela cheia.
+Uma sala só para assistir junto: o vídeo grande, com cara de cinema, e a conversa do lado (no celular, embaixo). Abre pelo botão de TV no topo da conversa, pelo clipe de anexar → **Batata Watch Party** ou com `/watchparty`, sempre com uma abertura de cinema ao entrar e um encerramento ao sair (um toque na tela acelera; com "reduzir movimento" ligado no aparelho, a sala abre e fecha direto). Os dois veem o mesmo vídeo, no mesmo segundo: play, pause e avanço valem para os dois, e tem tela cheia.
 
 | De onde | Como |
 | --- | --- |
@@ -125,7 +125,9 @@ Uma sala só para assistir junto: o vídeo grande, com cara de cinema, e a conve
 
 Os filmes da Netflix e da HBO Max são protegidos contra cópia: só tocam no site ou no app deles, com a conta de cada um, nunca dentro de outro site. Por isso, nesses dois, a sala funciona como um controle remoto dos dois players:
 
-- **Cada um assiste com a própria conta.** A sala mostra o título, o relógio da sessão (igual para os dois) e o botão **Abrir na Netflix** / **Abrir na HBO Max**, que abre o link ou, se foi só o nome, a busca.
+- **Mesma conta ou uma para cada:** cada um assiste na própria tela, logado na Netflix ou na HBO Max. Pode ser a mesma conta nos dois aparelhos (cada um no seu perfil; o plano precisa permitir 2 telas ao mesmo tempo) ou contas diferentes: o tempo é sincronizado pela sala, não pela conta. Se vocês moram em casas diferentes, a Netflix e a HBO Max podem pedir verificação ou cobrar à parte pelo uso fora de casa.
+- **Transmitir a tela da Netflix numa chamada não funciona:** a proteção deles deixa o vídeo preto para quem assiste.
+- A sala mostra o título, o relógio da sessão (igual para os dois) e o botão **Abrir na Netflix** / **Abrir na HBO Max**, que abre o link ou, se foi só o nome, a busca.
 - **No computador, com a extensão do Chrome (versão 2.1.0):** com o filme aberto na aba da Netflix ou da HBO Max, o player segue a sala sozinho (play, pause e o mesmo segundo), e o play, o pause ou o avanço dado lá vale para os dois.
 - **No celular:** os apps da Netflix e da HBO Max não deixam nenhum outro app mandar no player. Use a **Contagem 3, 2, 1**, que aparece nos dois aparelhos no mesmo instante, para darem o play juntos. Quando alguém pausa, o outro recebe o aviso para pausar também.
 - **Nenhuma senha fica guardada:** salvar a senha da Netflix ou da HBO Max no banco não faria o filme tocar dentro do site e ainda deixaria as contas em risco.

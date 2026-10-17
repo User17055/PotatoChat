@@ -2945,7 +2945,7 @@ const STREAMING = {
 const streaming = (item) => Boolean(item && STREAMING[item.source]);
 const WATCH_HINT = {
   default: "Os dois veem o mesmo vídeo, no mesmo segundo. Play, pause e avanço valem para os dois.",
-  streaming: "Cada um assiste com a própria conta. No computador, a extensão do Potato Chat faz o player seguir a sala; no celular, a contagem ajuda a darem o play juntos."
+  streaming: "Pode ser a mesma conta nos dois (com plano de 2 telas) ou uma para cada. No computador, a extensão do Potato Chat faz o player seguir a sala; no celular, a contagem ajuda a darem o play juntos."
 };
 let countdownAt = 0;
 let countdownTimer = 0;
@@ -3035,15 +3035,18 @@ function setWatchRoom(on) {
   if (on) closeMusic();
   else setWatchExpanded(false);
   paintWatch();
-  // Abertura de cinema: o site muda por trás das cortinas.
+  // Abertura (ou encerramento) de cinema: o site muda por trás do clarão. Entrando, o player (pesado) só abre
+  // quando a animação termina, para ela não engasgar; saindo, ele fecha na hora.
   fx.cinema(on, () => {
     watchView = on;
     document.querySelector(".app-shell").classList.toggle("watching", on);
     paintWatch();
-    syncWatch();
+    if (!on) syncWatch();
     scrollToLatest();
     if (on && !watch.now && matchMedia("(pointer: fine)").matches) setTimeout(() => $("#watch-query").focus(), 50);
-  }, (cue) => sound.play(cue));
+  }, (cue) => sound.play(cue), () => {
+    if (watchView) syncWatch();
+  });
 }
 
 function setWatchSource(source) {

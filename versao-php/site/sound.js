@@ -117,6 +117,15 @@ const sounds = {
     noise({ from: 250, to: 5000, q: 0.9, duration: 0.8, volume: 0.22, attack: 0.68 });
     tone({ freq: 90, to: 420, duration: 0.8, volume: 0.07, type: "triangle", attack: 0.6 });
   },
+  // Saindo da sala: um vento que desce e um acorde que vai fechando, como o fim de um filme.
+  outro() {
+    noise({ from: 3200, to: 260, q: 0.8, duration: 0.6, volume: 0.12, attack: 0.04 });
+    [587.33, 440, 369.99, 293.66].forEach((freq, i) => tone({ freq, start: 0.2 + i * 0.08, duration: 0.9, volume: 0.045, type: "triangle", attack: 0.04 }));
+  },
+  // A batata dá tchau e some.
+  bye() {
+    tone({ freq: 700, to: 240, duration: 0.24, volume: 0.15, type: "triangle", attack: 0.005 });
+  },
   whoosh() {
     tone({ freq: 300, to: 1800, duration: 0.25, volume: 0.07, type: "sawtooth" });
   }

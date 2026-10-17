@@ -788,32 +788,32 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 /* =====================================================================
    Watch Party (/watchparty)
    ===================================================================== */
-/* Abertura da Batata Watch Party (fx.cinema): faixas pretas de cinema, a batata e o nome no meio, o mergulho
-   nas faixas de luz e um clarão. Tudo empilhado e centralizado, para caber igual no celular e no computador. */
+/* Abertura e encerramento da Batata Watch Party (fx.cinema): faixas pretas de cinema, a batata e o nome no meio,
+   o mergulho nas faixas de luz e um clarão. Tudo empilhado e centralizado, para caber igual no celular e no
+   computador. Cada peça que se mexe é uma camada pronta (will-change): o navegador só move e esmaece, sem
+   redesenhar nada a cada quadro. */
 .wp-intro { position: fixed; inset: 0; z-index: 200; overflow: hidden; pointer-events: none; }
-.wp-black { position: absolute; inset: 0; background: radial-gradient(circle at 50% 45%, #1b1029, #060409 55%, #000 85%); opacity: 0; }
-.wp-glow { position: absolute; left: 50%; top: 50%; width: 120vmin; height: 120vmin; margin: -60vmin 0 0 -60vmin; border-radius: 50%; background: radial-gradient(circle, #f5c04f42, #ff3b5c1c 38%, transparent 66%); opacity: 0; }
+.wp-black { position: absolute; inset: 0; background: radial-gradient(circle at 50% 45%, #1b1029, #060409 55%, #000 85%); opacity: 0; will-change: opacity; }
+.wp-glow { position: absolute; left: 50%; top: 50%; width: 120vmin; height: 120vmin; margin: -60vmin 0 0 -60vmin; border-radius: 50%; background: radial-gradient(circle, #f5c04f42, #ff3b5c1c 38%, transparent 66%); opacity: 0; will-change: transform, opacity; }
 .wp-ribbons { position: absolute; inset: 0; }
-.wp-ribbons i { position: absolute; top: 0; bottom: 0; left: 50%; translate: -50% 0; background: linear-gradient(90deg, transparent, var(--c) 32%, color-mix(in srgb, var(--c) 45%, #fff) 50%, var(--c) 68%, transparent); -webkit-mask-image: linear-gradient(transparent, #000 22%, #000 78%, transparent); mask-image: linear-gradient(transparent, #000 22%, #000 78%, transparent); mix-blend-mode: screen; opacity: 0; }
-.wp-logo { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.wp-ribbons i { position: absolute; top: 0; bottom: 0; left: 50%; translate: -50% 0; background: linear-gradient(90deg, transparent, var(--c) 32%, color-mix(in srgb, var(--c) 45%, #fff) 50%, var(--c) 68%, transparent); opacity: 0; will-change: transform, opacity; }
+/* Escurece em cima e embaixo, para as faixas de luz sumirem suaves perto das faixas pretas. */
+.wp-shade { position: absolute; inset: 0; background: linear-gradient(#000, transparent 24%, transparent 76%, #000); }
+.wp-logo { position: absolute; left: 50%; top: 50%; translate: -50% -50%; width: max-content; display: flex; flex-direction: column; align-items: center; text-align: center; will-change: transform, opacity; }
 .wp-mark { position: relative; display: grid; place-items: center; margin-bottom: clamp(8px, 2vh, 18px); }
-.wp-potato { width: clamp(96px, 24vw, 168px); filter: drop-shadow(0 14px 28px #000c) drop-shadow(0 0 46px #f5c04f66); opacity: 0; }
-.wp-ring { position: absolute; left: -10%; right: -10%; bottom: -14%; height: 34%; border: 2px solid #f5c04f; border-radius: 50%; box-shadow: 0 0 22px #f5c04f, inset 0 0 18px #f5c04f99; opacity: 0; }
-.wp-batata { margin-right: -.5em; color: #f5c04f; font-size: clamp(13px, 3.4vw, 24px); font-weight: 800; letter-spacing: .5em; text-shadow: 0 0 18px #f5c04f88; opacity: 0; }
-.wp-title { display: flex; perspective: 500px; color: #fff; font-size: clamp(36px, 11vw, 96px); font-weight: 800; line-height: 1.05; letter-spacing: -.015em; white-space: pre; text-shadow: 0 0 30px #ff3b5c66, 0 8px 30px #000; }
-.wp-title span { display: inline-block; transform-origin: 50% 100%; }
-/* Granulado de filme por cima de tudo, bem de leve. */
-.wp-grain { position: absolute; inset: -60px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); opacity: 0; animation: wp-grain .6s steps(1) infinite; }
-@keyframes wp-grain {
-  0% { transform: translate(0, 0); }
-  20% { transform: translate(-28px, 18px); }
-  40% { transform: translate(22px, -36px); }
-  60% { transform: translate(-44px, -10px); }
-  80% { transform: translate(36px, 26px); }
-}
-.wp-bar { position: absolute; top: 0; left: 0; right: 0; height: 9vh; background: #000; }
+.wp-potato { display: block; width: clamp(96px, 24vw, 168px); aspect-ratio: 142 / 100; transform-origin: 50% 100%; filter: drop-shadow(0 0 30px #f5c04f55); will-change: transform; }
+.wp-potato > * { display: block; width: 100%; height: 100%; }
+.wp-ring { position: absolute; left: -10%; right: -10%; bottom: -14%; height: 34%; border: 2px solid #f5c04f; border-radius: 50%; box-shadow: 0 0 22px #f5c04f, inset 0 0 18px #f5c04f99; opacity: 0; will-change: transform, opacity; }
+.wp-batata { display: flex; gap: .5em; color: #f5c04f; font-size: clamp(13px, 3.4vw, 24px); font-weight: 800; text-shadow: 0 0 12px #f5c04f88; }
+.wp-batata span, .wp-title span { display: inline-block; opacity: 0; will-change: transform, opacity; }
+.wp-title { display: flex; perspective: 500px; color: #fff; font-size: clamp(36px, 11vw, 96px); font-weight: 800; line-height: 1.05; letter-spacing: -.015em; white-space: pre; text-shadow: 0 0 24px #ff3b5c66; }
+.wp-title span { transform-origin: 50% 100%; }
+/* Só no encerramento: "até a próxima sessão" embaixo do nome. */
+.wp-bye { display: none; margin-top: clamp(8px, 1.6vh, 14px); color: #ffffffb3; font-size: clamp(12px, 3.2vw, 17px); font-weight: 600; letter-spacing: .06em; opacity: 0; will-change: transform, opacity; }
+.wp-intro.leaving .wp-bye { display: block; }
+.wp-bar { position: absolute; top: 0; left: 0; right: 0; height: 9vh; background: #000; will-change: transform; }
 .wp-bar.low { top: auto; bottom: 0; }
-.wp-flash { position: absolute; inset: 0; background: radial-gradient(circle, #fff, #fff1d6 35%, #ffb02000 75%); opacity: 0; }
+.wp-flash { position: absolute; inset: 0; background: radial-gradient(circle, #fff, #fff1d6 35%, #ffb02000 75%); opacity: 0; will-change: opacity; }
 
 /* Sala da Watch Party: cara de cinema, o vídeo grande e a conversa do lado (no celular, embaixo). */
 .app-shell.watching .conversation { background: radial-gradient(120% 80% at 30% 0%, #24183a 0%, #0b0a10 55%, #060609 100%); }

@@ -17,6 +17,38 @@ const rand = (min, max) => min + Math.random() * (max - min);
 let cinemaTimeline = null;
 const pick = (list) => list[Math.floor(Math.random() * list.length)];
 
+// A batata das aberturas vira uma imagem pronta, desenhada uma vez só: a casca dela usa filtros SVG de ruído,
+// pesados demais para redesenhar a cada quadro enquanto ela cai, amassa e cresce (era o que travava a abertura).
+let potatoArt = null;
+function potatoPicture() {
+  potatoArt ??= new Promise((resolve) => {
+    const symbol = document.querySelector("#potato");
+    const sprite = symbol?.ownerSVGElement;
+    if (!symbol || !sprite) return resolve(null);
+    const xml = new XMLSerializer();
+    const parts = [...sprite.querySelectorAll("defs"), ...symbol.childNodes].map((node) => xml.serializeToString(node)).join("");
+    const image = new Image();
+    image.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 480;
+      canvas.height = 338;
+      canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+      resolve(canvas);
+    };
+    image.onerror = () => resolve(null);
+    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 142 100" width="480" height="338">${parts}</svg>`)}`;
+  });
+  return potatoArt;
+}
+// Prepara a batata e a fonte do nome (o peso 800 só aparece na Watch Party) com o navegador folgado, para a
+// primeira abertura já sair lisa, sem baixar fonte nem trocar letra no meio da animação.
+if (motion()) {
+  (window.requestIdleCallback || ((run) => setTimeout(run, 1500)))(() => {
+    potatoPicture();
+    document.fonts?.load('800 40px "Poppins"').catch(() => {});
+  });
+}
+
 export const fx = {
   intro() {
     if (!motion()) return;
@@ -204,94 +236,136 @@ export const fx = {
     }
   },
 
-  // Batata Watch Party: abertura de cinema. A tela escurece com faixas pretas de cinema, a batata cai e amassa no
-  // chão com o "ta-dum", o nome entra letra por letra e brilha. Então a câmera mergulha no logo: as faixas de luz
-  // abrem para os lados e passam pela tela (o vento sobe) até virar um clarão. O site vira sala por trás do clarão
-  // (swap) e as faixas pretas abrem. Um toque na tela acelera. Saindo, só escurece e clareia.
-  // cue(nome) toca os sons nos momentos certos: "cinema" (ta-dum) e "dive" (mergulho).
-  cinema(entering, swap, cue) {
+  // Batata Watch Party: abertura e encerramento de cinema. Só transform e opacidade em camadas prontas: nada é
+  // redesenhado a cada quadro (é o que deixa leve, até no celular).
+  // Entrando: faixas pretas de cinema, a batata cai e amassa no chão com o "ta-dum", o nome entra letra por letra e
+  // brilha; a câmera mergulha no logo, as faixas de luz passam pelos lados e tudo vira um clarão. Por trás do
+  // clarão o site vira sala (swap), a luz segura um instante enquanto o navegador monta a sala, e as faixas abrem.
+  // Saindo: as faixas pretas fecham, o logo volta com "até a próxima sessão", as letras caem, a batata dá tchau e
+  // a conversa aparece. Um toque na tela acelera. done() roda no fim (o que é pesado, como o player, entra depois).
+  // cue(nome) toca os sons: "cinema" (ta-dum), "dive" (mergulho), "outro" (saída) e "bye" (tchau da batata).
+  cinema(entering, swap, cue, done) {
     cinemaTimeline?.progress(1);
-    if (!motion()) return swap();
-    const overlay = document.createElement("div");
-    overlay.className = "wp-intro";
-    overlay.setAttribute("aria-hidden", "true");
-    overlay.innerHTML = '<i class="wp-black"></i><i class="wp-glow"></i><div class="wp-ribbons"></div><div class="wp-logo"><span class="wp-mark"><i class="wp-ring"></i><svg class="wp-potato" viewBox="0 0 142 100"><use href="#potato"></use></svg></span><span class="wp-batata">BATATA</span><span class="wp-title"></span></div><i class="wp-grain"></i><i class="wp-bar"></i><i class="wp-bar low"></i><i class="wp-flash"></i>';
-    const part = (name) => overlay.querySelector(`.wp-${name}`);
-    const title = part("title");
-    for (const char of "WATCH PARTY") {
-      const letter = document.createElement("span");
-      letter.textContent = char === " " ? " " : char;
-      title.append(letter);
+    if (!motion()) {
+      swap();
+      done?.();
+      return;
     }
+    const overlay = document.createElement("div");
+    overlay.className = entering ? "wp-intro" : "wp-intro leaving";
+    overlay.setAttribute("aria-hidden", "true");
+    overlay.innerHTML = '<i class="wp-black"></i><i class="wp-glow"></i><div class="wp-ribbons"></div><i class="wp-shade"></i><div class="wp-logo"><span class="wp-mark"><i class="wp-ring"></i><span class="wp-potato"></span></span><span class="wp-batata"></span><span class="wp-title"></span><span class="wp-bye">até a próxima sessão</span></div><i class="wp-bar"></i><i class="wp-bar low"></i><i class="wp-flash"></i>';
+    const part = (name) => overlay.querySelector(`.wp-${name}`);
+    const letters = (name, text) => {
+      for (const char of text) {
+        const letter = document.createElement("span");
+        letter.textContent = char === " " ? " " : char;
+        part(name).append(letter);
+      }
+      return part(name).children;
+    };
+    const small = letters("batata", "BATATA");
+    const big = letters("title", "WATCH PARTY");
+    const potato = part("potato");
+    potatoPicture().then((art) => {
+      if (!art) {
+        potato.innerHTML = '<svg viewBox="0 0 142 100"><use href="#potato"></use></svg>';
+        return;
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = art.width;
+      canvas.height = art.height;
+      canvas.getContext("2d").drawImage(art, 0, 0);
+      potato.append(canvas);
+    });
     // Faixas de luz: escondidas atrás do logo, num feixe estreito; no mergulho, cada uma vai para um lado.
     const ribbons = part("ribbons");
     const colors = ["#f5c04f", "#ffb020", "#ff7a1a", "#ff3b5c", "#e50914", "#ff2d95", "#bf5af2", "#7c3aed", "#5e5ce6", "#64d2ff"];
     const spread = [];
-    for (let i = 0; i < (innerWidth < 700 ? 32 : 52); i++) {
-      const ribbon = document.createElement("i");
-      ribbon.style.setProperty("--c", pick(colors));
-      ribbon.style.width = `${rand(3, 18).toFixed(1)}px`;
-      spread.push((i % 2 ? 1 : -1) * Math.random() ** 1.4);
-      ribbons.append(ribbon);
+    if (entering) {
+      for (let i = 0; i < (innerWidth < 700 ? 24 : 36); i++) {
+        const ribbon = document.createElement("i");
+        ribbon.style.setProperty("--c", pick(colors));
+        ribbon.style.width = `${rand(3, 18).toFixed(1)}px`;
+        spread.push((i % 2 ? 1 : -1) * Math.random() ** 1.4);
+        ribbons.append(ribbon);
+      }
     }
     document.body.append(overlay);
-    const [black, glow, ring, potato, batata, logo, grain, flash] = ["black", "glow", "ring", "potato", "batata", "logo", "grain", "flash"].map(part);
+    const [black, glow, shade, ring, logo, bye, flash] = ["black", "glow", "shade", "ring", "logo", "bye", "flash"].map(part);
     const bars = overlay.querySelectorAll(".wp-bar");
     const strips = ribbons.children;
     const away = (index) => (index ? 100 : -100);
     const hurry = () => timeline.timeScale(3);
     const timeline = cinemaTimeline = gsap.timeline({
+      paused: true,
       onComplete: () => {
         overlay.remove();
         removeEventListener("pointerdown", hurry);
         if (cinemaTimeline === timeline) cinemaTimeline = null;
+        done?.();
       }
     });
+    // Só começa depois do primeiro quadro: montar as camadas pesa uma vez e não pode comer o começo da animação.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (cinemaTimeline === timeline) timeline.play();
+    }));
     gsap.set(bars, { yPercent: away });
+    addEventListener("pointerdown", hurry, { once: true });
     if (!entering) {
+      gsap.set([small, big], { opacity: 1 });
       timeline
-        .fromTo(black, { opacity: 0 }, { opacity: 1, duration: 0.28, ease: "power2.in" })
-        .add(swap)
-        .to(black, { opacity: 0, duration: 0.35, ease: "power2.out" }, "+=0.05");
+        // As faixas pretas fecham e o logo volta, como o fim de um filme.
+        .add(() => cue?.("outro"), 0)
+        .to(bars, { yPercent: 0, duration: 0.5, ease: "expo.out" }, 0)
+        .to(black, { opacity: 1, duration: 0.4, ease: "power2.inOut" }, 0)
+        .fromTo(logo, { scale: 1.12, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.5, ease: "expo.out" }, 0.22)
+        .fromTo(glow, { scale: 0.6 }, { scale: 1, opacity: 0.8, duration: 0.6, ease: "expo.out" }, 0.22)
+        .add(swap, 0.42)
+        .fromTo(bye, { y: 8 }, { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" }, 0.5)
+        // As letras caem, a batata dá um pulinho e some com um tchau.
+        .to(big, { y: 40, rotateX: 90, opacity: 0, duration: 0.4, stagger: { each: 0.03, from: "edges" }, ease: "power2.in" }, 1.0)
+        .to([small, bye], { opacity: 0, duration: 0.3, stagger: 0.02 }, 1.05)
+        .to(potato, { y: -30, duration: 0.18, ease: "power2.out" }, 1.08)
+        .add(() => cue?.("bye"), 1.26)
+        .to(potato, { y: 0, scale: 0, rotate: 30, duration: 0.3, ease: "back.in(2)" }, 1.26)
+        .to(glow, { opacity: 0, duration: 0.3 }, 1.3)
+        .to(black, { opacity: 0, duration: 0.5, ease: "power2.out" }, 1.5)
+        .to(bars, { yPercent: away, duration: 0.6, ease: "expo.inOut" }, 1.55);
       return;
     }
-    addEventListener("pointerdown", hurry, { once: true });
     gsap.set(strips, { x: (index) => spread[index] * Math.min(innerWidth * 0.05, 44), scaleY: 0.25 });
     timeline
       // Escurece em formato de cinema.
       .to(black, { opacity: 1, duration: 0.35, ease: "power2.inOut" }, 0)
       .to(bars, { yPercent: 0, duration: 0.6, ease: "expo.out" }, 0)
-      .to(grain, { opacity: 0.09, duration: 0.4 }, 0.1)
       // A batata cai do alto, amassa no chão e volta: "ta-dum", com uma onda de luz no chão.
-      .fromTo(potato, { y: () => -innerHeight * 0.6, rotate: -28, opacity: 1 }, { y: 0, rotate: 0, duration: 0.42, ease: "power2.in" }, 0.15)
+      .fromTo(potato, { y: () => -innerHeight * 0.6, rotate: -28 }, { y: 0, rotate: 0, duration: 0.42, ease: "power2.in" }, 0.15)
       .add(() => cue?.("cinema"), 0.55)
-      .to(potato, { scaleX: 1.22, scaleY: 0.72, transformOrigin: "50% 100%", duration: 0.08, ease: "power1.out" }, 0.57)
+      .to(potato, { scaleX: 1.22, scaleY: 0.72, duration: 0.08, ease: "power1.out" }, 0.57)
       .to(potato, { scaleX: 1, scaleY: 1, duration: 0.75, ease: "elastic.out(1.1, 0.4)" }, 0.65)
       .fromTo(ring, { scale: 0.3, opacity: 0.9 }, { scale: 3.2, opacity: 0, duration: 0.9, ease: "expo.out", immediateRender: false }, 0.57)
       .fromTo(glow, { scale: 0.5 }, { scale: 1, opacity: 1, duration: 0.9, ease: "expo.out" }, 0.57)
-      .fromTo(batata, { letterSpacing: "1.5em", marginRight: "-1.5em" }, { opacity: 1, letterSpacing: "0.5em", marginRight: "-0.5em", duration: 0.8, ease: "expo.out" }, 0.62)
-      .fromTo(title.children, { opacity: 0, y: 46, rotateX: -100 }, { opacity: 1, y: 0, rotateX: 0, duration: 0.55, stagger: 0.028, ease: "back.out(1.8)" }, 0.68)
+      // BATATA chega do meio para fora; WATCH PARTY sobe letra por letra.
+      .fromTo(small, { x: (index) => (index - 2.5) * 26 }, { x: 0, opacity: 1, duration: 0.8, ease: "expo.out" }, 0.62)
+      .fromTo(big, { y: 46, rotateX: -100 }, { opacity: 1, y: 0, rotateX: 0, duration: 0.55, stagger: 0.028, ease: "back.out(1.8)" }, 0.68)
       // Um brilho dourado passa pelas letras.
-      .to(title.children, { color: "#ffe7a3", textShadow: "0 0 22px #ffd66b, 0 0 46px #f5c04f", duration: 0.14, stagger: 0.03, yoyo: true, repeat: 1, ease: "sine.inOut" }, 1.22)
+      .fromTo(big, { filter: "drop-shadow(0px 0px 0px rgba(255, 207, 90, 0))" }, { filter: "drop-shadow(0px 0px 14px rgba(255, 207, 90, 1))", duration: 0.16, stagger: 0.03, yoyo: true, repeat: 1, ease: "sine.inOut", immediateRender: false }, 1.22)
       .fromTo(logo, { scale: 0.94 }, { scale: 1.04, duration: 1, ease: "sine.inOut" }, 0.55)
       // Mergulho: a câmera entra no logo e as faixas de luz abrem para os lados, cada vez mais rápido.
       .add(() => cue?.("dive"), 1.5)
-      .to(logo, { scale: 16, duration: 0.7, ease: "power4.in" }, 1.55)
-      .to(logo, { opacity: 0, duration: 0.25, ease: "power2.in" }, 1.98)
+      .to(logo, { scale: 5, duration: 0.6, ease: "power3.in" }, 1.55)
+      .to(logo, { opacity: 0, duration: 0.22, ease: "power2.in" }, 1.88)
       .to(glow, { scale: 2.4, opacity: 0, duration: 0.7, ease: "power3.in" }, 1.55)
-      .to(strips, { opacity: () => rand(0.55, 1), duration: 0.25, stagger: { each: 0.006, from: "center" } }, 1.5)
+      .to(strips, { opacity: () => rand(0.55, 0.95), duration: 0.25, stagger: { each: 0.008, from: "center" } }, 1.5)
       .to(strips, { scaleY: 1.5, duration: 0.85, ease: "power2.out" }, 1.5)
       .to(strips, { x: (index) => spread[index] * innerWidth * 0.8, scaleX: () => rand(3, 9), duration: 0.75, ease: "power3.in" }, 1.6)
       .to(flash, { opacity: 1, duration: 0.2, ease: "power2.in" }, 2.1)
-      // O site já virou sala por trás do clarão: a luz baixa e as faixas pretas abrem.
+      // O site vira sala por trás do clarão; a luz segura um instante (o navegador monta a sala) e baixa.
       .add(swap, 2.3)
-      .set([logo, ribbons, glow, grain], { autoAlpha: 0 }, 2.3)
-      .to([flash, black], { opacity: 0, duration: 0.55, ease: "power2.out" }, 2.3)
-      .add(() => {
-        gsap.from(".watching .watch-panel", { scale: 1.06, opacity: 0, duration: 0.9, ease: "expo.out", clearProps: "transform,opacity" });
-        gsap.from(".watching .messages-wrap, .watching .composer", { x: 60, opacity: 0, duration: 0.7, stagger: 0.08, ease: "expo.out", clearProps: "transform,opacity" });
-      }, 2.32)
-      .to(bars, { yPercent: away, duration: 0.7, ease: "expo.inOut" }, 2.55);
+      .set([logo, ribbons, glow, shade], { autoAlpha: 0 }, 2.31)
+      .to([flash, black], { opacity: 0, duration: 0.55, ease: "power2.out" }, 2.45)
+      .to(bars, { yPercent: away, duration: 0.7, ease: "expo.inOut" }, 2.7);
   },
 
   toast(element) {
