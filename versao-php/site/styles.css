@@ -529,25 +529,23 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 /* Cor da música (a do Spotify ou a que mais aparece na capa): muda devagar de uma música para outra. */
 @property --tone { syntax: "<color>"; inherits: true; initial-value: #3b3428; }
 
-/* Barrinhas que dançam enquanto a música toca (botão do canto e cartão do chat). */
+/* Barrinhas que dançam enquanto a música toca (botão do canto e cartão do chat): cada uma no seu ritmo,
+   como um equalizador. Pausada, ficam baixinhas, cada uma numa altura. */
 .eq { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
-.eq i { display: block; width: 3px; height: 35%; border-radius: 2px; background: currentColor; transition: height .3s; }
-.eq i:nth-child(2) { animation-delay: -.45s; }
-.eq i:nth-child(3) { animation-delay: -.2s; }
-.eq i:nth-child(4) { animation-delay: -.65s; }
-.music-button.playing .eq i, .dj-card[data-state="playing"] .eq i { animation: eq .9s ease-in-out infinite; }
-@keyframes eq { 0%, 100% { height: 25%; } 50% { height: 100%; } }
+.eq i { display: block; width: 3px; height: 100%; border-radius: 2px; background: currentColor; transform-origin: 50% 100%; scale: 1 var(--eq-rest); transition: scale .3s; }
+.eq i:nth-child(1) { --eq-time: .82s; --eq-delay: -.37s; --eq-rest: .4; }
+.eq i:nth-child(2) { --eq-time: 1.13s; --eq-delay: -.71s; --eq-rest: .65; }
+.eq i:nth-child(3) { --eq-time: .67s; --eq-delay: -.12s; --eq-rest: .3; }
+.music-button.playing .eq i, .dj-card[data-state="playing"] .eq i { animation: eq var(--eq-time) ease-in-out var(--eq-delay) infinite alternate; }
+@keyframes eq { 0% { scale: 1 .28; } 25% { scale: 1 .9; } 45% { scale: 1 .45; } 70% { scale: 1 1; } 100% { scale: 1 .35; } }
 
-/* Botão no canto superior direito: a capa girando como um disco e, em volta, um anel com o andamento da música. */
+/* Botão no canto superior direito: uma pílula com a capinha e as barrinhas lado a lado. */
 .music-button { position: relative; }
-.music-button .eq { position: relative; z-index: 1; height: 15px; }
-.music-button.playing { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); color: var(--accent); box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 25%, transparent); }
-.music-button.has-art, .music-button.has-art:hover { border-color: transparent; color: #fff; background: conic-gradient(var(--accent) calc(var(--progress, 0) * 1turn), color-mix(in srgb, var(--ink) 16%, transparent) 0); }
-.music-button.has-art .eq { filter: drop-shadow(0 1px 2px #000c); }
-.mini-art { position: absolute; inset: 3px; display: none; border-radius: 50%; background: var(--tone) center / cover no-repeat; }
-.mini-art::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: radial-gradient(circle, #0006 0 30%, #0002 70%); }
+.music-button.playing { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); color: var(--accent); box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 22%, transparent); }
+.music-button.has-art { width: auto; display: inline-flex; align-items: center; gap: 8px; padding: 0 13px 0 5px; border-radius: 999px; }
+.mini-art { display: none; flex: none; width: 30px; height: 30px; border-radius: 50%; background: var(--tone) center / cover no-repeat; box-shadow: 0 2px 8px #0005; transition: filter .3s; }
 .music-button.has-art .mini-art { display: block; }
-.music-button.playing .mini-art { animation: spin 14s linear infinite; }
+.music-button:not(.playing) .mini-art { filter: grayscale(.5) brightness(.8); }
 .music-alert { position: absolute; top: 0; right: 0; z-index: 1; width: 11px; height: 11px; display: none; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 2px var(--bg); }
 .music-button.blocked .music-alert { display: block; animation: blink 1.2s ease-in-out infinite; }
 .toast.music .icon { color: var(--accent); }
@@ -697,49 +695,53 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .music-hint b { color: var(--muted); font-weight: 600; }
 .music-hint i { display: inline-block; width: 3px; height: 3px; margin: 0 7px; border-radius: 50%; background: currentColor; vertical-align: middle; }
 
-/* Cartão do Potato DJ no chat, no estilo do cartão do Spotify: na cor da música e com o estado ao vivo
-   (tocando, pausada, na fila ou já tocou). O .dj-card não tem caixa própria: os pedaços dele se encaixam
-   na grade do balão, junto com a hora. */
-.message.music-note { align-self: center; width: min(92%, 390px); max-width: none; }
+/* Cartão do Potato DJ no chat: compacto, com a capa desfocada no fundo e a cor da música por cima.
+   Mostra ao vivo se está tocando, pausada, na fila ou se já tocou. O .dj-card não tem caixa própria:
+   os pedaços dele se encaixam na grade do balão, junto com a hora. */
+.message.music-note { align-self: center; width: min(92%, 360px); max-width: none; }
 .message.music-note .bubble { flex: 1; }
 .bubble.music-card, .mine .bubble.music-card {
-  display: grid; grid-template-columns: 84px minmax(0, 1fr) auto;
-  grid-template-areas: "art head brand" "art body body" "art state action" "bar bar foot";
-  align-items: center; column-gap: 12px; min-width: 0; padding: 12px; overflow: hidden;
-  border: 0; border-radius: 18px;
-  background: linear-gradient(135deg, color-mix(in oklab, var(--tone), #fff 7%), color-mix(in oklab, var(--tone) 72%, #000));
-  color: #fff; box-shadow: 0 12px 30px #0006, inset 0 0 0 1px #ffffff14; white-space: normal;
+  isolation: isolate;
+  display: grid; grid-template-columns: 56px minmax(0, 1fr) auto;
+  grid-template-areas: "art title action" "art artist action" "art state foot";
+  align-items: center; align-content: center; column-gap: 11px; min-width: 0; padding: 9px 12px 11px 9px; overflow: hidden;
+  border: 0; border-radius: 16px;
+  background: color-mix(in oklab, var(--tone) 75%, #000);
+  color: #fff; text-shadow: 0 1px 2px #0006; box-shadow: 0 10px 26px #0006, inset 0 0 0 1px #ffffff17; white-space: normal;
   transition: --tone .8s, box-shadow .3s;
 }
 .dj-card { display: contents; cursor: pointer; }
-.dj-art { grid-area: art; align-self: start; position: relative; width: 84px; height: 84px; display: grid; place-items: center; overflow: hidden; border-radius: 10px; background: #0003; color: #ffffff80; box-shadow: 0 8px 20px #0007; }
-.dj-art .icon { width: 30px; height: 30px; }
-.dj-head { grid-area: head; display: flex; align-items: center; gap: 6px; min-width: 0; color: #ffffffc2; font-size: 11.5px; font-weight: 600; }
-.dj-head .icon { width: 13px; height: 13px; flex: none; }
-.dj-head span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dj-card .brand { grid-area: brand; width: 20px; height: 20px; justify-self: end; }
-.dj-body { grid-area: body; display: grid; gap: 1px; min-width: 0; margin: 4px 0 6px; }
-.dj-title { overflow: hidden; font-size: 15px; font-weight: 700; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.dj-artist { overflow: hidden; color: #ffffffb3; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
-.dj-state { grid-area: state; display: inline-flex; align-items: center; gap: 7px; min-width: 0; color: #ffffffcc; font-size: 12px; font-weight: 600; }
-.dj-state .eq { display: none; height: 12px; }
+/* Fundo: a capa ampliada e desfocada; por cima, uma sombra e a cor da música, para o texto ficar legível. */
+.dj-backdrop { position: absolute; inset: 0; z-index: -1; overflow: hidden; border-radius: inherit; pointer-events: none; }
+.dj-backdrop img { width: 100%; height: 100%; object-fit: cover; scale: 1.4; filter: blur(10px) saturate(1.5); }
+.dj-backdrop::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, #0000008c, #0000004d 55%, #00000026), color-mix(in oklab, var(--tone) 32%, transparent); }
+.dj-art { grid-area: art; position: relative; width: 56px; height: 56px; display: grid; place-items: center; overflow: hidden; border-radius: 8px; background: #0003; color: #ffffff80; box-shadow: 0 6px 16px #0008; }
+.dj-art .icon { width: 24px; height: 24px; }
+.dj-title { grid-area: title; align-self: end; overflow: hidden; font-size: 14.5px; font-weight: 700; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.dj-artist { grid-area: artist; display: flex; align-items: center; gap: 5px; min-width: 0; color: #ffffffd6; font-size: 12.5px; line-height: 1.35; }
+.dj-artist span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dj-artist .brand { width: 14px; height: 14px; filter: drop-shadow(0 1px 1px #0006); }
+.dj-state { grid-area: state; align-self: start; display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: #ffffffb8; font-size: 11.5px; font-weight: 600; line-height: 1.4; }
+.dj-state-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dj-state .eq { display: none; flex: none; height: 11px; }
 .dj-state .eq i { width: 2.5px; }
 .dj-card:is([data-state="playing"], [data-state="paused"]) .dj-state .eq { display: inline-flex; }
 .dj-card[data-state="playing"] .dj-state { color: #fff; }
-.dj-action { grid-area: action; width: 40px; height: 40px; display: grid; place-items: center; border: 0; border-radius: 50%; background: #fff; color: #111; box-shadow: 0 6px 16px #0006; transition: transform .15s, background .2s; }
+.dj-action { grid-area: action; width: 36px; height: 36px; display: grid; place-items: center; border: 0; border-radius: 50%; background: #fff; color: #111; box-shadow: 0 6px 14px #0006; transition: transform .15s, background .2s; }
 .dj-action:hover { transform: scale(1.07); }
 .dj-action:active { transform: scale(.92); }
-.dj-action .icon { display: none; width: 18px; height: 18px; }
+.dj-action .icon { display: none; width: 16px; height: 16px; }
 .dj-card:is([data-state="paused"], [data-state="queued"]) .when-play,
 .dj-card[data-state="playing"] .when-pause,
 .dj-card[data-state="done"] .when-again { display: block; }
 .dj-action .when-play { margin-left: 2px; }
-.dj-card[data-state="done"] .dj-action { background: #ffffff29; color: #fff; box-shadow: none; }
+.dj-card[data-state="done"] .dj-action { background: #ffffff2e; color: #fff; box-shadow: none; }
 .dj-card[data-state="done"] .dj-art img { filter: saturate(.75) brightness(.9); }
-.dj-progress { grid-area: bar; display: none; height: 4px; margin-top: 12px; overflow: hidden; border-radius: 999px; background: #ffffff38; }
-.dj-progress i { display: block; width: calc(var(--p, 0) * 100%); height: 100%; border-radius: inherit; background: #fff; transition: width .5s linear; }
+/* Andamento: uma linha fina na borda de baixo do cartão. */
+.dj-progress { position: absolute; left: 0; right: 0; bottom: 0; display: none; height: 3px; background: #ffffff26; }
+.dj-progress i { display: block; width: calc(var(--p, 0) * 100%); height: 100%; background: #fff; box-shadow: 0 0 8px #ffffff80; transition: width .5s linear; }
 .dj-card:is([data-state="playing"], [data-state="paused"]) .dj-progress { display: block; }
-.bubble.music-card .foot { grid-area: foot; float: none; justify-self: end; margin: 12px 0 0; color: #fff; opacity: .75; }
+.bubble.music-card .foot { grid-area: foot; align-self: start; justify-self: end; float: none; margin: 1px 0 0; color: #fff; opacity: .7; }
 .bubble.music-card .status[data-state="read"] { color: #7cc4ff; }
 
 /* Menu dos comandos (ao digitar "/"). */
@@ -1011,6 +1013,8 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
   .music-ctl.big { width: 70px; height: 70px; }
   .music-ctl.big .icon { width: 28px; height: 28px; }
   .music-glow { height: 75vh; }
+  .music-button.has-art { gap: 7px; padding: 0 11px 0 4px; }
+  .mini-art { width: 26px; height: 26px; }
   .music-empty { margin-top: 14vh; }
   .profile-scroll { padding: 26px 16px 28px; }
   .topbar { min-height: 64px; padding: 10px 12px; }
@@ -1050,6 +1054,8 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
   .icon-button { width: 33px; height: 33px; }
   .icon-button .icon { width: 15px; height: 15px; }
   .topbar { gap: 8px; padding: 10px 8px 10px 10px; }
+  .music-button.has-art { gap: 6px; padding: 0 9px 0 4px; }
+  .mini-art { width: 23px; height: 23px; }
 }
 @media (max-height: 560px) { .lead { display: none; } .hero-potato { width: 84px; } }
 @media (max-width: 480px) { .login-shell { padding: 12px; } }
@@ -1058,5 +1064,5 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
   /* Animações que repetem para sempre ficariam piscando: aqui elas param de vez. */
   .message.show-tools .bubble, .message.show-tools .bubble::after,
   button.person.active, button.person.active::before, button.person.active .avatar::before,
-  .typing.on .typing-bubble, .typing.on .typing-bubble i, .eq i, .mini-art, .music-unblock, .music-empty-art, .marquee > span { animation: none !important; }
+  .typing.on .typing-bubble, .typing.on .typing-bubble i, .eq i, .music-unblock, .music-empty-art, .marquee > span { animation: none !important; }
 }

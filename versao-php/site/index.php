@@ -232,7 +232,7 @@ function asset(string $file): string
             </button>
             <button id="music-button" class="icon-button music-button hidden" type="button" title="Música tocando" aria-label="Abrir o tocador de música" aria-expanded="false" aria-controls="music-panel">
               <span id="music-mini-art" class="mini-art" aria-hidden="true"></span>
-              <span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+              <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
               <span class="music-alert" aria-hidden="true"></span>
             </button>
           </div>

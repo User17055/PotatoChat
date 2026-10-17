@@ -2089,9 +2089,9 @@ const MUSIC_NOTICE = {
 const SOURCE_NAME = { youtube: "YouTube", spotify: "Spotify" };
 // Cartão do chat: texto, o que o botão faz e o nome do botão, em cada estado da música.
 const CARD_STATE = {
-  playing: ["Tocando agora", "pause", "Pausar para os dois"],
+  playing: ["Tocando", "pause", "Pausar para os dois"],
   paused: ["Pausada", "resume", "Tocar para os dois"],
-  queued: ["Na fila", "jump", "Tocar agora"],
+  queued: ["na fila", "jump", "Tocar agora"],
   done: ["Já tocou", "again", "Tocar de novo"]
 };
 const DEFAULT_TONE = "#3b3428";
@@ -2356,8 +2356,9 @@ function paintCard(card) {
   const index = music.queue.findIndex((item) => item.uid === uid);
   const state = uid && music.now?.uid === uid ? (music.playing ? "playing" : "paused") : index >= 0 ? "queued" : "done";
   const [text, action, label] = CARD_STATE[state];
+  const by = card.dataset.by;
   card.dataset.state = state;
-  card.querySelector(".dj-state-text").textContent = state === "queued" ? `${text} · ${index + 1}ª` : text;
+  card.querySelector(".dj-state-text").textContent = [state === "queued" ? `${index + 1}ª ${text}` : text, by && (by === me ? "você pediu" : `${by} pediu`)].filter(Boolean).join(" · ");
   const button = card.querySelector(".dj-action");
   button.dataset.musicAction = action;
   button.title = label;
@@ -2366,19 +2367,27 @@ function paintCard(card) {
 
 const paintCards = () => messagesEl.querySelectorAll(".dj-card").forEach(paintCard);
 
-// Cartão do Potato DJ no chat, no estilo do cartão do Spotify: mostra se está tocando, na fila ou se já tocou.
+// Cartão do Potato DJ no chat: compacto, com a capa desfocada no fundo. Mostra se está tocando, na fila ou se já tocou.
 function musicCard(message) {
   const track = message.music;
-  const who = message.sender === me ? "Você" : message.sender;
   const card = el("div", "dj-card");
   card.dataset.openMusic = "";
   card.dataset.musicUid = track.uid || "";
-  const head = el("span", "dj-head");
-  head.append(icon("headphones"), el("span", "", track.queued ? `${who} colocou na fila` : `${who} colocou para tocar`));
-  const body = el("span", "dj-body");
+  card.dataset.by = track.by || message.sender;
+  const backdrop = el("span", "dj-backdrop");
+  const cover = smallCover(track);
+  if (cover) {
+    const image = el("img");
+    image.alt = "";
+    image.loading = "lazy";
+    image.decoding = "async";
+    image.src = cover;
+    backdrop.append(image);
+  }
   const title = el("strong", "dj-title", track.title);
   title.title = track.full || track.title;
-  body.append(title, el("span", "dj-artist", track.artist || SOURCE_NAME[track.source]));
+  const artist = el("span", "dj-artist");
+  artist.append(brand(track.source), el("span", "", track.artist || SOURCE_NAME[track.source]));
   const state = el("span", "dj-state");
   state.append(equalizer(), el("span", "dj-state-text"));
   const action = el("button", "dj-action");
@@ -2386,7 +2395,7 @@ function musicCard(message) {
   action.append(icon("play", "icon when-play"), icon("pause", "icon when-pause"), icon("rotate-ccw", "icon when-again"));
   const progress = el("span", "dj-progress");
   progress.append(el("i"));
-  card.append(musicArt(track, "dj-art"), head, brand(track.source), body, state, action, progress);
+  card.append(backdrop, musicArt(track, "dj-art"), title, artist, state, action, progress);
   // A cor vai no balão (o cartão não tem caixa própria: os pedaços dele se encaixam no balão).
   trackTone(track).then((tone) => card.closest(".bubble")?.style.setProperty("--tone", tone || DEFAULT_TONE));
   paintCard(card);
@@ -2498,7 +2507,6 @@ function paintMusicTime() {
   const progress = length ? Math.min(1, Math.max(0, at / length)) : 0;
   $("#music-time").textContent = clockTime(at);
   $("#music-length").textContent = length ? clockTime(length) : "–:––";
-  musicButton.style.setProperty("--progress", progress.toFixed(4));
   messagesEl.querySelector(`.dj-card[data-music-uid="${CSS.escape(music.now.uid)}"]`)?.style.setProperty("--p", progress.toFixed(4));
   // Spotify sem login: o player só toca a prévia de 30 s.
   const full = music.now.duration;
