@@ -110,6 +110,12 @@ async function api(action, body, url = baseUrl) {
   return { status: response.status, body: await response.json() };
 }
 
+// Foto ou arquivo: corpo cru, sessão e nome nos cabeçalhos (como o app.js faz).
+async function upload(token, name, data, type = "application/octet-stream") {
+  const response = await fetch(`${baseUrl}/api.php?action=upload`, { method: "POST", headers: { "Content-Type": type, "X-Potato-Token": token, "X-Potato-Name": encodeURIComponent(name) }, body: data });
+  return { status: response.status, body: await response.json() };
+}
+
 const login = (name, password, confirm) => api("login", confirm === undefined ? { name, password } : { name, password, confirm });
 const welcome = async () => (await fetch(`${baseUrl}/api.php?action=welcome`)).json();
 
@@ -175,7 +181,8 @@ try {
   const columns = sql("SHOW COLUMNS FROM {p}users").map((row) => row.Field);
   for (const column of ["pass_hash", "avatar", "avatar_type", "avatar_key", "theme"]) assert.ok(columns.includes(column), column);
   assert.ok(sql("SHOW COLUMNS FROM {p}messages").some((row) => row.Field === "media"), "media");
-  assert.equal(sql("SELECT value FROM {p}settings WHERE name = 'schema'")[0].value, "4");
+  assert.equal(sql("SELECT value FROM {p}settings WHERE name = 'schema'")[0].value, "5");
+  assert.ok(sql("SHOW COLUMNS FROM {p}files").some((row) => row.Field === "data"), "tabela de arquivos");
   assert.deepEqual(await welcome(), { open: 2 });
 
   // Primeiro acesso: o servidor pede a senha de novo antes de guardar, e não aceita senha curta.
@@ -290,6 +297,66 @@ try {
   const gifDeleted = await gifGone;
   assert.equal(gifDeleted.deleted, true);
   assert.equal(gifDeleted.gif, null);
+
+  // Fotos e arquivos: o arquivo sobe primeiro e a mensagem vai depois, só com a chave dele.
+  const fileMax = first.history.fileMax;
+  assert.ok(fileMax > 0 && fileMax <= 10000000, `fileMax ${fileMax}`);
+  const photoBytes = makePng(64, 48);
+  const photoUp = await upload(firstLogin.body.token, "férias/praia.png", photoBytes, "image/png");
+  assert.equal(photoUp.status, 200);
+  const photoKey = photoUp.body.file.key;
+  assert.match(photoKey, /^[0-9a-f]{32}$/);
+  assert.deepEqual(photoUp.body.file, { key: photoKey, kind: "image", type: "image/png", width: 64, height: 48, name: "férias_praia.png", size: photoBytes.length });
+  assert.equal((await upload("sessao-falsa", "oi.txt", Buffer.from("oi"))).status, 401);
+  assert.equal((await upload(firstLogin.body.token, "vazio.txt", Buffer.alloc(0))).status, 400);
+  assert.equal((await upload(firstLogin.body.token, "grande.bin", Buffer.alloc(fileMax + 1))).status, 413);
+  // A chave é de quem enviou: a outra pessoa não consegue mandar.
+  assert.equal((await withAck(second, "message", { file: photoKey, clientId: "arquivo-alheio" })).error, "Arquivo não encontrado. Tente enviar de novo.");
+  const photoArrived2 = next(second, "message");
+  assert.equal((await withAck(first, "message", { file: photoKey, clientId: "cliente-foto" })).ok, true);
+  const photoMessage = await photoArrived2;
+  assert.deepEqual(photoMessage.file, { url: `api.php?action=file&k=${photoKey}`, name: "férias_praia.png", type: "image/png", kind: "image", size: photoBytes.length, width: 64, height: 48 });
+  assert.equal(photoMessage.gif, null);
+  // Reenvio após queda devolve a mesma mensagem; a mesma chave não vale para outra.
+  assert.equal((await withAck(first, "message", { file: photoKey, clientId: "cliente-foto" })).message.id, photoMessage.id);
+  assert.equal((await withAck(first, "message", { file: photoKey, clientId: "cliente-foto-2" })).error, "Arquivo não encontrado. Tente enviar de novo.");
+  // Imagem abre no chat (com proteção); faixa de bytes funciona; ?dl=1 baixa.
+  const photoUrl = `${baseUrl}/${photoMessage.file.url}`;
+  let served = await fetch(photoUrl);
+  assert.equal(served.status, 200);
+  assert.equal(served.headers.get("content-type"), "image/png");
+  assert.match(served.headers.get("content-disposition"), /^inline; filename="f_rias_praia\.png"; filename\*=UTF-8''f%C3%A9rias_praia\.png$/);
+  assert.match(served.headers.get("content-security-policy"), /sandbox/);
+  assert.equal(served.headers.get("x-content-type-options"), "nosniff");
+  assert.ok(Buffer.from(await served.arrayBuffer()).equals(photoBytes));
+  served = await fetch(photoUrl, { headers: { Range: "bytes=0-9" } });
+  assert.equal(served.status, 206);
+  assert.equal(served.headers.get("content-range"), `bytes 0-9/${photoBytes.length}`);
+  assert.ok(Buffer.from(await served.arrayBuffer()).equals(photoBytes.subarray(0, 10)));
+  assert.equal((await fetch(photoUrl, { headers: { Range: `bytes=${photoBytes.length + 5}-` } })).status, 416);
+  assert.match((await fetch(`${photoUrl}&dl=1`)).headers.get("content-disposition"), /^attachment;/);
+  const photoReply = await withAck(second, "message", { text: "Que foto linda", clientId: "cliente-foto-3", replyTo: photoMessage.id });
+  assert.equal(photoReply.message.replyTo.text, "Foto");
+  // HTML disfarçado vira arquivo comum: sempre baixa, nunca abre dentro do site.
+  const htmlUp = await upload(firstLogin.body.token, "pagina.html", Buffer.from("<script>alert(1)</script>"), "text/html");
+  assert.equal(htmlUp.body.file.kind, "file");
+  assert.equal(htmlUp.body.file.type, "application/octet-stream");
+  const htmlSent = await withAck(first, "message", { file: htmlUp.body.file.key, clientId: "cliente-html" });
+  served = await fetch(`${baseUrl}/${htmlSent.message.file.url}`);
+  assert.equal(served.headers.get("content-type"), "application/octet-stream");
+  assert.match(served.headers.get("content-disposition"), /^attachment;/);
+  assert.equal((await withAck(second, "message", { text: "?", clientId: "cliente-html-2", replyTo: htmlSent.message.id })).message.replyTo.text, "pagina.html");
+  // Apagar a mensagem apaga o arquivo.
+  const photoGone2 = next(second, "message:update");
+  first.emit("delete", { id: photoMessage.id });
+  assert.equal((await photoGone2).file, null);
+  assert.equal((await fetch(photoUrl)).status, 404);
+  assert.equal(sql(`SELECT COUNT(*) AS n FROM {p}files WHERE file_key = '${photoKey}'`)[0].n, 0);
+  // Arquivo que nunca virou mensagem some depois de um dia.
+  const orphan = await upload(firstLogin.body.token, "esquecido.txt", Buffer.from("tchau"));
+  rawSql(`UPDATE {p}files SET created_at = 1 WHERE file_key = '${orphan.body.file.key}';`);
+  await fetch(`${baseUrl}/api.php?action=health`);
+  assert.equal(sql(`SELECT COUNT(*) AS n FROM {p}files WHERE file_key = '${orphan.body.file.key}'`)[0].n, 0);
 
   // Foto de perfil: fica no banco, aparece na presença da outra pessoa e é servida pela API.
   const png = makePng(40, 40);
@@ -410,15 +477,19 @@ try {
   assert.deepEqual(health, { ok: true, people: 0 });
 
   const stored = sql("SELECT * FROM {p}messages ORDER BY n");
-  assert.equal(stored.length, 6);
+  assert.equal(stored.length, 10);
   assert.equal(JSON.parse(stored[0].reactions)["❤️"][0], "Pessoa 2");
   assert.equal(stored[1].deleted, 1);
   assert.equal(stored[1].text, "");
   assert.equal(stored[2].deleted, 1);
   assert.equal(stored[2].media, null);
   assert.equal(JSON.parse(stored[3].reply_to).text, "GIF");
-  assert.equal(stored[4].source, "extension");
-  assert.equal(stored[5].text, "Acordou?");
+  // Foto apagada não deixa nada no banco; o arquivo enviado fica guardado na mensagem.
+  assert.equal(stored[4].deleted, 1);
+  assert.equal(stored[4].media, null);
+  assert.equal(JSON.parse(stored[6].media).file.name, "pagina.html");
+  assert.equal(stored[8].source, "extension");
+  assert.equal(stored[9].text, "Acordou?");
   const status = Object.fromEntries(sql("SELECT name, last_seen FROM {p}status").map((row) => [row.name, row.last_seen]));
   assert.ok(status["Pessoa 1"]);
   assert.ok(status["Pessoa 2"]);
@@ -445,7 +516,7 @@ try {
   assert.equal(again.history.hasMore, true);
   assert.equal(again.history.items.at(-1).text, "Mensagem 64");
   const before = await withAck(again, "history:before", { before: again.history.items[0].id });
-  assert.equal(before.items.length, 11);
+  assert.equal(before.items.length, 15);
   assert.equal(before.hasMore, false);
   assert.equal(before.items[0].text, "Mensagem de integração");
   again.disconnect();
@@ -466,7 +537,7 @@ try {
   for (let i = 0; i < 14; i += 1) if ((await login("Pessoa 1", "errada")).status === 429) blocked += 1;
   assert.ok(blocked >= 1);
 
-  console.log("Integração PHP + MySQL aprovada: atualização do banco antigo, página, contas com senha própria, sala de duas pessoas, GIFs, foto de perfil (também em GIF), tema, extensão, confirmação, deduplicação, respostas, reações, leitura, apagar, digitando, chamadas, long polling, sessões da versão Node, paginação, senha esquecida e persistência.");
+  console.log("Integração PHP + MySQL aprovada: atualização do banco antigo, página, contas com senha própria, sala de duas pessoas, GIFs, fotos e arquivos (envio, entrega protegida, faixas de bytes, limpeza), foto de perfil (também em GIF), tema, extensão, confirmação, deduplicação, respostas, reações, leitura, apagar, digitando, chamadas, long polling, sessões da versão Node, paginação, senha esquecida e persistência.");
 } finally {
   servers.forEach((server) => server.kill());
   try {

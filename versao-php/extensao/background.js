@@ -124,6 +124,11 @@ async function siteTabIsActive(siteUrl) {
   }
 }
 
+// Foto ou arquivo sem legenda: o aviso diz o que chegou.
+function fileLabel(file) {
+  return { image: "📷 Foto", video: "🎥 Vídeo", audio: "🎵 Áudio" }[file.kind] || `📎 ${file.name}`;
+}
+
 async function onMessage(message) {
   if (message.sender === me || panels.size) return;
   const { siteUrl, notify } = await settings();
@@ -134,7 +139,7 @@ async function onMessage(message) {
     type: "basic",
     iconUrl: "icons/icon128.png",
     title: message.sender,
-    message: message.deleted ? "Mensagem apagada" : message.gif ? "GIF" : message.text.slice(0, 200),
+    message: message.deleted ? "Mensagem apagada" : message.gif ? "GIF" : message.file && !message.text ? fileLabel(message.file) : message.text.slice(0, 200),
     contextMessage: "Potato Chat",
     priority: 1
   });

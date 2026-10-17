@@ -101,6 +101,11 @@ function asset(string $file): string
       <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
       <symbol id="i-reply" viewBox="0 0 24 24"><path d="m9 17-5-5 5-5"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></symbol>
       <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></symbol>
+      <symbol id="i-paperclip" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></symbol>
+      <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></symbol>
+      <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
+      <symbol id="i-pip" viewBox="0 0 24 24"><path d="M21 9V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4"/><rect x="12" y="13" width="10" height="7" rx="2"/></symbol>
       <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="14" height="14" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
       <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
       <symbol id="i-check-check" viewBox="0 0 24 24"><path d="M18 6 7 17l-5-5"/><path d="m22 10-7.5 7.5L13 16"/></symbol>
@@ -222,6 +227,9 @@ function asset(string $file): string
                   <svg class="icon"><use href="#i-volume" /></svg>
                   <input id="stream-volume" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume da transmissão" />
                 </label>
+                <button id="stream-pip" class="tile-button hidden" type="button" title="Janelinha flutuante (assistir enquanto faz outra coisa)" aria-label="Janelinha flutuante">
+                  <svg class="icon"><use href="#i-pip" /></svg>
+                </button>
                 <button id="stream-full" class="tile-button" type="button" title="Tela cheia (ou duplo clique)" aria-label="Tela cheia">
                   <svg class="icon"><use href="#i-maximize" /></svg>
                 </button>
@@ -241,10 +249,16 @@ function asset(string $file): string
                 <span class="tile-name"><svg class="icon"><use href="#i-mic-off" /></svg><span id="peer-tile-name"></span><b class="live-tag">AO VIVO</b></span>
               </div>
             </div>
+            <!-- Sua transmissão: prévia pequena no canto (para conferir o que a outra pessoa está vendo). -->
+            <div id="my-stream" class="my-stream hidden">
+              <video autoplay playsinline muted></video>
+              <span class="live-badge"><i></i>VOCÊ AO VIVO</span>
+              <button id="stop-stream" class="stop-stream" type="button" title="Parar a transmissão"><svg class="icon"><use href="#i-monitor-off" /></svg>Parar</button>
+            </div>
           </div>
           <audio id="remote-audio" autoplay></audio>
           <div class="call-bar">
-            <div class="call-info"><span class="call-dot"></span><span id="call-status">Preparando chamada…</span><span id="call-timer" class="call-timer"></span></div>
+            <div class="call-info"><span class="call-dot"></span><span id="call-status">Preparando chamada…</span><span id="call-timer" class="call-timer"></span><span id="live-pill" class="live-pill hidden"></span></div>
             <div class="call-buttons">
               <button id="toggle-mic" class="round swap" type="button" title="Silenciar microfone" aria-label="Microfone">
                 <svg class="icon when-on"><use href="#i-mic" /></svg>
@@ -254,18 +268,10 @@ function asset(string $file): string
                 <svg class="icon when-on"><use href="#i-video" /></svg>
                 <svg class="icon when-off"><use href="#i-video-off" /></svg>
               </button>
-              <div class="live-wrap">
-                <button id="toggle-live" class="round swap is-off" type="button" title="Transmitir tela" aria-label="Transmitir tela">
-                  <svg class="icon when-on"><use href="#i-monitor-off" /></svg>
-                  <svg class="icon when-off"><use href="#i-monitor-up" /></svg>
-                </button>
-                <div id="quality-menu" class="quality-menu hidden" role="menu">
-                  <p>Qualidade da transmissão</p>
-                  <button type="button" data-quality="720p" role="menuitem">720p · 30 fps<small>Leve, para internet mais fraca</small></button>
-                  <button type="button" data-quality="1080p" role="menuitem">1080p · 30 fps<small>Nítido para textos e telas</small></button>
-                  <button type="button" data-quality="1080p60" role="menuitem">1080p · 60 fps<small>Suave para jogos e vídeos</small></button>
-                </div>
-              </div>
+              <button id="toggle-live" class="round swap is-off" type="button" title="Transmitir tela" aria-label="Transmitir tela">
+                <svg class="icon when-on"><use href="#i-monitor-off" /></svg>
+                <svg class="icon when-off"><use href="#i-monitor-up" /></svg>
+              </button>
               <button id="toggle-chat" class="round swap" type="button" title="Esconder o chat" aria-label="Mostrar ou esconder o chat">
                 <svg class="icon when-on"><use href="#i-message" /></svg>
                 <svg class="icon when-off"><use href="#i-message-off" /></svg>
@@ -282,6 +288,8 @@ function asset(string $file): string
             <button id="load-more" class="load-more hidden" type="button">Carregar mensagens anteriores</button>
           </div>
           <div id="day-float" class="day day-float hidden" aria-hidden="true"></div>
+          <!-- Arrastar arquivos para cima da conversa envia. -->
+          <div id="drop-zone" class="drop-zone hidden" aria-hidden="true"><span><svg class="icon"><use href="#i-paperclip" /></svg>Solte para enviar</span></div>
           <button id="jump" class="jump hidden" type="button" aria-label="Ir para a última mensagem">
             <svg class="icon"><use href="#i-chevron-down" /></svg>
             <span id="jump-count" class="jump-count hidden">0</span>
@@ -316,6 +324,16 @@ function asset(string $file): string
           <div class="quick-emojis" role="group" aria-label="Enviar emoji rápido">
             <button type="button" data-emoji="❤️" title="Enviar ❤️">❤️</button><button type="button" data-emoji="😂" title="Enviar 😂">😂</button><button type="button" data-emoji="🥔" title="Enviar 🥔">🥔</button>
           </div>
+          <!-- Fotos e arquivos: o menu escolhe entre a galeria (foto/vídeo, com câmera no celular) e qualquer arquivo. -->
+          <div id="attach-menu" class="attach-menu hidden" role="menu" aria-label="Anexar">
+            <button type="button" role="menuitem" data-pick="#pick-media"><span class="attach-icon media"><svg class="icon"><use href="#i-image" /></svg></span>Foto ou vídeo</button>
+            <button type="button" role="menuitem" data-pick="#pick-file"><span class="attach-icon doc"><svg class="icon"><use href="#i-file" /></svg></span>Arquivo</button>
+          </div>
+          <input id="pick-media" type="file" accept="image/*,video/*" multiple hidden />
+          <input id="pick-file" type="file" multiple hidden />
+          <button id="attach-button" class="attach-button" type="button" title="Enviar foto ou arquivo" aria-label="Enviar foto ou arquivo" aria-haspopup="menu" aria-expanded="false" aria-controls="attach-menu">
+            <svg class="icon"><use href="#i-paperclip" /></svg>
+          </button>
           <button id="gif-button" class="gif-button" type="button" title="Enviar GIF" aria-label="Enviar GIF" aria-haspopup="dialog" aria-expanded="false" aria-controls="gif-panel">GIF</button>
           <textarea id="message-input" rows="1" maxlength="2000" placeholder="Escreva uma mensagem…" aria-label="Mensagem"></textarea>
           <button class="send" type="submit" aria-label="Enviar mensagem" title="Enviar">
@@ -404,6 +422,40 @@ function asset(string $file): string
           <button id="decline-call" class="pill decline" type="button"><svg class="icon"><use href="#i-hangup" /></svg>Recusar</button>
           <button id="accept-call" class="pill accept" type="button"><svg class="icon"><use href="#i-phone" /></svg>Atender</button>
         </div>
+      </div>
+    </div>
+
+    <!-- Antes de transmitir: qualidade e som. O clique em Transmitir abre a escolha de tela do navegador. -->
+    <div id="share-sheet" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="share-title">
+      <div class="modal-card share-card">
+        <div class="modal-icon share-icon"><svg class="icon"><use href="#i-monitor-up" /></svg></div>
+        <h3 id="share-title">Transmitir sua tela</h3>
+        <p class="muted">Escolha a qualidade. Depois o navegador pergunta qual tela, janela ou aba mostrar.</p>
+        <div id="share-options" class="share-options" role="radiogroup" aria-label="Qualidade da transmissão">
+          <button type="button" role="radio" data-quality="720p"><strong>Leve</strong><small>720p · para internet mais fraca</small></button>
+          <button type="button" role="radio" data-quality="1080p"><strong>Nítida</strong><small>1080p · textos, sites e filmes</small></button>
+          <button type="button" role="radio" data-quality="1080p60"><strong>Fluida</strong><small>1080p a 60 fps · jogos e vídeos rápidos</small></button>
+        </div>
+        <button id="share-audio" class="setting-row swap" type="button" role="switch" aria-checked="true">
+          <svg class="icon when-on"><use href="#i-volume" /></svg>
+          <svg class="icon when-off"><use href="#i-volume-off" /></svg>
+          <span class="setting-text"><strong>Incluir o som</strong><small>Do filme, jogo ou música que estiver tocando</small></span>
+          <span class="switch" aria-hidden="true"></span>
+        </button>
+        <div class="modal-actions">
+          <button id="share-cancel" class="pill ghost" type="button">Cancelar</button>
+          <button id="share-go" class="pill share-go" type="button"><svg class="icon"><use href="#i-monitor-up" /></svg>Transmitir</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Foto em tela cheia. -->
+    <div id="viewer" class="viewer hidden" role="dialog" aria-modal="true" aria-label="Foto">
+      <img id="viewer-img" alt="" />
+      <div class="viewer-bar">
+        <span id="viewer-name"></span>
+        <a id="viewer-download" class="viewer-button" title="Baixar" aria-label="Baixar"><svg class="icon"><use href="#i-download" /></svg></a>
+        <button id="viewer-close" class="viewer-button" type="button" title="Fechar" aria-label="Fechar"><svg class="icon"><use href="#i-x" /></svg></button>
       </div>
     </div>
 

@@ -13,7 +13,7 @@ O mesmo site (mesmo HTML, CSS, animações, sons, chamadas e extensão), adaptad
 | Uma senha da sala para os dois | Cada pessoa tem nome e senha próprios, guardados no banco |
 | Avatar com a inicial do nome | Foto de perfil, que cada um escolhe e troca quando quiser |
 | Um visual só | Temas (Escuro, Escuro total, Rosa, Roxo, Azul, Verde e Claro), salvos na conta de cada um |
-| Só texto e emoji | GIFs, com busca do GIPHY direto no campo de mensagem |
+| Só texto e emoji | GIFs (busca do GIPHY), fotos, vídeos, áudios e arquivos, direto no campo de mensagem |
 
 As sessões têm o mesmo formato da versão Node. Se o chat continuar no mesmo endereço e com a mesma `token_secret`, ninguém precisa entrar de novo.
 
@@ -46,15 +46,15 @@ versao-php/
 6. **Abra o site.** No primeiro acesso as tabelas (prefixo `potato_`) são criadas sozinhas. Se preferir, importe antes o `banco.sql` pelo phpMyAdmin.
 7. **Criem as duas contas logo.** As duas primeiras pessoas que entrarem escolhem nome e senha (o site pede a senha duas vezes). Depois disso eles valem para sempre e ninguém mais cria conta. Enquanto sobrar uma vaga, quem abrir o link pode ficar com ela.
 
-Para atualizar o site depois, envie de novo só os arquivos alterados. Os navegadores pegam a versão nova sozinhos, sem precisar limpar o cache. Se o banco veio de uma versão anterior, as colunas novas (senha, foto e tema em `potato_users`, GIF em `potato_messages`) são acrescentadas sozinhas no primeiro acesso. Quem já estava registrado sem senha escolhe uma ao entrar de novo.
+Para atualizar o site depois, envie de novo só os arquivos alterados. Os navegadores pegam a versão nova sozinhos, sem precisar limpar o cache. Se o banco veio de uma versão anterior, o que faltar (senha, foto e tema em `potato_users`, GIF em `potato_messages`, a tabela `potato_files` das fotos e arquivos) é criado sozinho no primeiro acesso. Quem já estava registrado sem senha escolhe uma ao entrar de novo.
 
-## Configurações: conta, foto e tema
+## Perfil: conta, foto e tema
 
-Foto, tema, notificações, sons e *Sair* ficam juntos na janela **Configurações**: no computador, pelo botão no pé da barra lateral (ou clicando no seu nome); no celular, pelo seu avatar no topo.
+Foto, tema, notificações, sons e *Sair* ficam juntos na aba **Perfil**, separada da conversa: no computador, em *Ver seu perfil*, no pé da barra lateral; no celular (e no painel da extensão), na sua foto, na barra de baixo. O perfil também mostra quantas mensagens você mandou, quantas reações deu e há quantos dias vocês conversam.
 
 - **Senha:** fica no banco só como *hash* (`pass_hash` na tabela `potato_users`), nunca o texto da senha.
-- **Foto:** em Configurações, clique na foto ou em *Trocar foto* e escolha uma imagem. O navegador recorta o centro num quadrado, reduz e envia. GIF animado também vale (até 700 KB): ele vai inteiro, sem recorte, para não perder a animação. A foto fica no banco e aparece para a outra pessoa na conversa, nas chamadas e nas notificações.
-- **Tema:** também em Configurações. Cada pessoa escolhe o seu, e ele só muda para ela. A escolha fica na conta (coluna `theme`), então vale em qualquer aparelho em que ela entrar, e as outras abas abertas mudam na hora. O navegador guarda uma cópia para o tema aparecer já na tela de login, sem piscar. No tema Claro, a chamada continua escura, porque o vídeo fica melhor assim.
+- **Foto:** no Perfil, clique na foto ou em *Trocar foto* e escolha uma imagem. O navegador recorta o centro num quadrado, reduz e envia. GIF animado também vale (até 700 KB): ele vai inteiro, sem recorte, para não perder a animação. A foto fica no banco e aparece para a outra pessoa na conversa, nas chamadas e nas notificações.
+- **Tema:** também no Perfil. Cada pessoa escolhe o seu, e ele só muda para ela. A escolha fica na conta (coluna `theme`), então vale em qualquer aparelho em que ela entrar, e as outras abas abertas mudam na hora. O navegador guarda uma cópia para o tema aparecer já na tela de login, sem piscar. No tema Claro, a chamada continua escura, porque o vídeo fica melhor assim.
 - **Esqueceu a senha?** No phpMyAdmin, abra a tabela `potato_users`, edite a linha da pessoa e marque `pass_hash` como `NULL`. As sessões dela caem, e no próximo login ela escolhe uma senha nova com o mesmo nome. As mensagens não mudam.
 
 ## GIFs
@@ -67,6 +67,24 @@ O botão **GIF**, ao lado do campo de mensagem, abre os GIFs em alta e uma busca
 Sem a chave, o botão continua lá, mas avisa que os GIFs ainda não foram ativados. A chave começa como *beta*, com limite de 100 buscas por hora, o que sobra para duas pessoas. Se um dia não bastar, peça a chave de produção no próprio painel do GIPHY.
 
 A busca é feita direto pelo navegador, como o GIPHY pede, então a chave chega a quem está logado no chat (ela foi feita para isso). No banco fica só o endereço do GIF (coluna `media` em `potato_messages`), e o servidor só aceita endereços de imagem do próprio GIPHY.
+
+## Fotos e arquivos
+
+O clipe, ao lado do botão GIF, abre duas opções: **Foto ou vídeo** (no celular, oferece também a câmera) e **Arquivo** (qualquer tipo). Também dá para arrastar arquivos para cima da conversa ou colar uma imagem (um print, por exemplo) no campo de mensagem. A mensagem aparece na hora, com uma barrinha mostrando o envio.
+
+- **Fotos** abrem em tela cheia ao clicar, com botão para baixar. Foto grande é reduzida no navegador antes de subir (lado maior até 2048 px), então chega rápido. GIF vai inteiro.
+- **Vídeos e áudios** tocam direto na conversa. **Outros arquivos** aparecem como um cartão com nome e tamanho; clicar baixa.
+- **Onde ficam:** no próprio banco, na tabela `potato_files` (nada é gravado em pastas do servidor). Apagar a mensagem apaga o arquivo. Arquivo que subiu mas nunca virou mensagem (envio cancelado no meio) é apagado sozinho depois de um dia.
+- **Tamanho máximo:** 10 MB por arquivo, ou menos se a hospedagem limitar. O site confere sozinho o `post_max_size` do PHP e o `max_allowed_packet` do MySQL e usa o menor; quem passar do limite vê o máximo no aviso. Para aceitar arquivos maiores, aumente esses dois valores no painel da hospedagem (até 10 MB).
+- **Segurança:** o servidor descobre o tipo pelo conteúdo do arquivo, não pelo nome. Só imagem, vídeo e áudio de verdade abrem dentro do chat; o resto sempre baixa, para que uma página disfarçada nunca rode dentro do site. O endereço de cada arquivo usa uma chave aleatória e só chega a quem está logado.
+
+## Chamadas e transmissão de tela
+
+Os botões do topo da conversa ligam por voz, por vídeo ou já transmitindo a tela; durante a chamada, a barra de baixo liga e desliga microfone, câmera e transmissão.
+
+- **Transmitir a tela:** antes de começar, uma janela pergunta a qualidade (*Leve* 720p, *Nítida* 1080p, *Fluida* 1080p a 60 fps) e se o som do que estiver tocando vai junto. Depois o navegador pergunta qual tela, janela ou aba mostrar. Quem transmite vê a própria tela só como uma prévia pequena no canto, com o botão *Parar*; quem assiste vê a transmissão grande, com volume, tela cheia e **janelinha flutuante** (para continuar assistindo enquanto usa outras coisas).
+- **No celular dá para assistir, mas não para transmitir:** os navegadores de celular (Chrome no Android, Safari no iPhone) não deixam nenhum site capturar a tela. O botão continua lá e explica isso; para transmitir, use o Chrome, o Edge ou o Firefox no computador.
+- **Enquadramento:** cada câmera aparece no formato dela (celular em pé fica em pé), sem cortar o rosto.
 
 **Requisitos:** PHP 7.4 ou superior com a extensão `pdo_mysql` (vem ativa em praticamente todas as hospedagens), e MySQL 5.6+ ou MariaDB 10.1+.
 
@@ -110,3 +128,4 @@ Teste automático (Node 20+ e PHP no PATH): `npm test`. Por padrão ele usa o My
 - Uma sala, só duas pessoas. Cada pessoa pode ter várias abas, aparelhos e a extensão conectados.
 - Cada aba aberta mantém uma requisição PHP esperando por até `poll_wait` segundos. Para duas pessoas isso é pouco, mas planos muito limitados podem pedir um `poll_wait` menor.
 - As chamadas usam WebRTC com servidores STUN públicos. Redes muito restritas podem precisar de um servidor TURN.
+- Fotos e arquivos: até 10 MB cada (ou o limite da hospedagem, se for menor). Ficam no banco, então ocupam o espaço do MySQL do plano.

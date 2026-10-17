@@ -58,6 +58,8 @@ let peerTypingTimer;
 let chatShown = false;
 // Chave da busca de GIFs (vem com o histórico; vazia = GIFs ainda não ativados no config.php).
 let gifKey = "";
+// Maior foto ou arquivo que o servidor aceita (também vem com o histórico; 0 = ainda não chegou).
+let fileMax = 0;
 
 let call = null;
 let peerConnection = null;
@@ -160,8 +162,9 @@ function isJumbo(text) {
   return count <= 3;
 }
 
-// Texto curto da mensagem (citação da resposta, notificação): GIF não tem texto.
-const previewText = (message) => (message.gif ? "GIF" : message.text);
+// Texto curto da mensagem (citação da resposta, notificação): GIF e arquivo sem legenda não têm texto.
+const FILE_LABEL = { image: "Foto", video: "Vídeo", audio: "Áudio" };
+const previewText = (message) => (message.gif ? "GIF" : message.file && !message.text ? FILE_LABEL[message.file.kind] || message.file.name : message.text);
 
 function richText(text) {
   const fragment = document.createDocumentFragment();
@@ -409,6 +412,7 @@ function connect(token, animate) {
     reads = payload.reads || {};
     hasMore = payload.hasMore;
     gifKey = payload.gifKey || "";
+    fileMax = payload.fileMax || 0;
     syncTheme(payload.theme);
     renderAll();
     scrollToLatest();
@@ -467,6 +471,8 @@ function receive(message, live) {
 
   if (local) {
     pending.delete(message.clientId);
+    // A foto continua vindo da cópia local: trocar pelo endereço do servidor faria a imagem piscar.
+    if (local.file?.preview && message.file) message.file.preview = local.file.preview;
     const node = messagesEl.querySelector(`[data-client-id="${message.clientId}"]`);
     if (node) {
       fill(node, message);
@@ -590,7 +596,22 @@ function fill(article, message) {
     bubble.append(quote);
   }
 
-  if (message.gif && !message.deleted) {
+  if (message.file && !message.deleted) {
+    bubble.classList.add("attachment", `is-${message.file.kind}`);
+    bubble.append(fileView(message.file));
+    if (message.upload && !message.id) {
+      const bar = el("span", "upload-bar");
+      bar.style.setProperty("--p", message.upload.progress);
+      bar.append(el("i"));
+      bubble.append(bar);
+    }
+    if (message.text) {
+      bubble.classList.add("has-caption");
+      const caption = el("div", "text caption");
+      caption.append(richText(message.text));
+      bubble.append(caption);
+    }
+  } else if (message.gif && !message.deleted) {
     bubble.classList.add("gif");
     bubble.append(gifImage(message.gif));
   } else {
@@ -631,6 +652,14 @@ function fill(article, message) {
       copy.title = "Copiar texto";
       copy.append(icon("copy"));
       tools.append(copy);
+    }
+    if (message.file) {
+      const save = el("button", "tool");
+      save.type = "button";
+      save.dataset.action = "download";
+      save.title = "Baixar";
+      save.append(icon("download"));
+      tools.append(save);
     }
     if (mine) {
       const remove = el("button", "tool danger-tool");
@@ -691,16 +720,19 @@ function refreshStatuses() {
   messagesEl.querySelectorAll(".message.mine").forEach((article) => paintStatus(article, readIndex));
 }
 
-// Mensagem de texto, ou de GIF (gif = { url, width, height, title }, sem texto).
-function send(text, gif = null) {
-  const clean = gif ? "" : text.trim();
-  if ((!clean && !gif) || !me) return;
+// Mensagem de texto, de GIF (gif = { url, width, height, title }, sem texto) ou com foto/arquivo
+// (upload = o arquivo escolhido, que sobe antes da mensagem; ver uploadFile).
+function send(text, gif = null, upload = null) {
+  const clean = gif || upload ? "" : text.trim();
+  if ((!clean && !gif && !upload) || !me) return;
   const message = {
     id: null,
     clientId: uid(),
     sender: me,
     text: clean.slice(0, 2000),
     gif,
+    file: upload && { url: null, preview: URL.createObjectURL(upload.blob), name: upload.blob.name, type: upload.blob.type, kind: fileKind(upload.blob.type), size: upload.blob.size, width: upload.width, height: upload.height },
+    upload: upload && { blob: upload.blob, key: null, progress: 0, xhr: null },
     createdAt: new Date().toISOString(),
     replyTo: replyTo ? { id: replyTo.id, sender: replyTo.sender, text: previewText(replyTo).slice(0, 160) } : null,
     reactions: {},
@@ -719,10 +751,11 @@ function send(text, gif = null) {
 
 function deliver(message) {
   if (!socket?.connected) return;
+  if (message.upload && !message.upload.key) return uploadFile(message);
   const node = () => messagesEl.querySelector(`[data-client-id="${message.clientId}"]`);
   message.status = "pending";
   if (node()) paintStatus(node());
-  socket.timeout(10000).emit("message", { text: message.text, gif: message.gif, clientId: message.clientId, replyTo: message.replyTo?.id }, (error, result) => {
+  socket.timeout(10000).emit("message", { text: message.text, gif: message.gif, file: message.upload?.key, clientId: message.clientId, replyTo: message.replyTo?.id }, (error, result) => {
     if (!pending.has(message.clientId)) return;
     if (!error && result?.ok) return receive(result.message, true);
     message.status = "failed";
@@ -730,6 +763,42 @@ function deliver(message) {
     if (result?.error) toast(result.error, "error");
     sound.play("error");
   });
+}
+
+// Sobe o arquivo (a barra do balão mostra o progresso) e depois manda a mensagem com a chave dele.
+function uploadFile(message) {
+  const upload = message.upload;
+  if (upload.xhr) return;
+  const node = () => messagesEl.querySelector(`[data-client-id="${message.clientId}"]`);
+  const fail = (error) => {
+    upload.xhr = null;
+    message.status = "failed";
+    if (node()) paintStatus(node());
+    toast(error, "error");
+    sound.play("error");
+  };
+  message.status = "pending";
+  if (node()) paintStatus(node());
+  const xhr = upload.xhr = new XMLHttpRequest();
+  xhr.open("POST", apiUrl("upload"));
+  xhr.setRequestHeader("Content-Type", upload.blob.type || "application/octet-stream");
+  xhr.setRequestHeader("X-Potato-Token", socket.auth.token);
+  xhr.setRequestHeader("X-Potato-Name", encodeURIComponent(upload.blob.name || "arquivo"));
+  xhr.upload.onprogress = (event) => {
+    if (!event.lengthComputable) return;
+    upload.progress = event.loaded / event.total;
+    node()?.querySelector(".upload-bar")?.style.setProperty("--p", upload.progress);
+  };
+  xhr.onload = () => {
+    let result = null;
+    try { result = JSON.parse(xhr.responseText); } catch {}
+    if (xhr.status !== 200 || !result?.ok) return fail(result?.error || "Não foi possível enviar o arquivo.");
+    upload.xhr = null;
+    upload.key = result.file.key;
+    deliver(message);
+  };
+  xhr.onerror = () => fail("O arquivo não subiu. Toque no aviso vermelho da mensagem para tentar de novo.");
+  xhr.send(upload.blob);
 }
 
 messageForm.addEventListener("submit", (event) => {
@@ -910,6 +979,7 @@ function onGifKey(event) {
 }
 
 function openGifs() {
+  closeAttach();
   fx.show(gifPanel, { y: 10, scale: 0.98 });
   gifButton.setAttribute("aria-expanded", "true");
   document.addEventListener("keydown", onGifKey, true);
@@ -967,6 +1037,225 @@ document.addEventListener("click", (event) => {
   if (!event.target.closest("#gif-panel, #gif-button")) closeGifs();
 });
 
+// ---------- fotos e arquivos ----------
+
+const attachButton = $("#attach-button");
+const attachMenu = $("#attach-menu");
+const viewer = $("#viewer");
+const dropZone = $("#drop-zone");
+const conversationEl = $(".conversation");
+// Foto com lado maior que isso é reduzida no navegador antes de subir.
+const PHOTO_SIDE = 2048;
+const MEDIA_MAX_WIDTH = 300;
+const MEDIA_MAX_HEIGHT = 360;
+
+function fileKind(type) {
+  if (/^image\/(jpeg|png|gif|webp)$/.test(type)) return "image";
+  if (type.startsWith("video/")) return "video";
+  if (type.startsWith("audio/")) return "audio";
+  return "file";
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1048576) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1048576).toFixed(1).replace(".", ",")} MB`;
+}
+
+// Foto, vídeo, áudio ou cartão de arquivo dentro do balão. O tamanho da foto fica reservado antes de carregar.
+function fileView(file) {
+  const src = file.preview || file.url;
+  if (file.kind === "image") {
+    const image = el("img", "photo-media");
+    image.src = src;
+    image.alt = file.name;
+    image.decoding = "async";
+    image.draggable = false;
+    image.dataset.view = "";
+    if (file.width && file.height) {
+      const scale = Math.min(1, MEDIA_MAX_WIDTH / file.width, MEDIA_MAX_HEIGHT / file.height);
+      image.style.width = `${Math.round(file.width * scale)}px`;
+      image.style.aspectRatio = `${file.width} / ${file.height}`;
+    }
+    return image;
+  }
+  if (file.kind === "video" || file.kind === "audio") {
+    const media = el(file.kind, file.kind === "video" ? "photo-media" : "audio-media");
+    media.src = src;
+    media.controls = true;
+    media.preload = "metadata";
+    if (file.kind === "video") media.playsInline = true;
+    return media;
+  }
+  const card = el("div", "file-card");
+  card.dataset.download = "";
+  card.title = `Baixar ${file.name}`;
+  const badge = el("span", "file-icon");
+  badge.append(icon("file"), el("b", "", (file.name.match(/\.([a-z0-9]{1,5})$/i)?.[1] || "").toUpperCase()));
+  const info = el("span", "file-info");
+  info.append(el("strong", "", file.name), el("small", "", formatSize(file.size)));
+  card.append(badge, info, icon("download", "icon file-get"));
+  return card;
+}
+
+function downloadFile(file) {
+  if (!file?.url) return;
+  const link = el("a");
+  link.href = new URL(`${file.url}&dl=1`, document.baseURI).href;
+  link.download = file.name;
+  link.click();
+}
+
+// Foto grande: reduz no navegador antes de subir (lado maior até PHOTO_SIDE). GIF vai inteiro, para não perder a animação.
+async function preparePhoto(file) {
+  if (!/^image\/(jpeg|png|webp)$/.test(file.type)) return { blob: file };
+  let image;
+  try {
+    image = await readImage(file);
+  } catch {
+    return { blob: file };
+  }
+  const { naturalWidth: width, naturalHeight: height } = image;
+  const scale = Math.min(1, PHOTO_SIDE / Math.max(width, height));
+  if (scale === 1 && file.size < 1.5e6) return { blob: file, width, height };
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(width * scale);
+  canvas.height = Math.round(height * scale);
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#fff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.imageSmoothingQuality = "high";
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.86));
+  if (!blob || blob.size >= file.size) return { blob: file, width, height };
+  return { blob: new File([blob], `${file.name.replace(/\.[^.]+$/, "") || "foto"}.jpg`, { type: "image/jpeg" }), width: canvas.width, height: canvas.height };
+}
+
+// Cada arquivo vira uma mensagem.
+async function sendFiles(files) {
+  closeAttach();
+  for (const file of files) {
+    if (!file.size) {
+      toast(`“${file.name}” está vazio.`, "error");
+      continue;
+    }
+    const upload = await preparePhoto(file);
+    if (fileMax && upload.blob.size > fileMax) {
+      toast(`“${file.name}” é grande demais (máximo de ${formatSize(fileMax)}).`, "error");
+      sound.play("error");
+      continue;
+    }
+    send("", null, upload);
+  }
+}
+
+function closeAttach() {
+  if (attachMenu.classList.contains("hidden")) return;
+  attachMenu.classList.add("hidden");
+  attachButton.setAttribute("aria-expanded", "false");
+}
+
+attachButton.addEventListener("click", () => {
+  fx.press(attachButton);
+  if (!attachMenu.classList.contains("hidden")) return closeAttach();
+  closeGifs();
+  fx.show(attachMenu, { y: 10, scale: 0.96 });
+  attachButton.setAttribute("aria-expanded", "true");
+});
+
+attachMenu.addEventListener("click", (event) => {
+  const option = event.target.closest("[data-pick]");
+  if (!option) return;
+  closeAttach();
+  $(option.dataset.pick).click();
+});
+
+for (const input of [$("#pick-media"), $("#pick-file")]) {
+  input.addEventListener("change", () => {
+    const files = [...input.files];
+    input.value = "";
+    sendFiles(files);
+  });
+}
+
+document.addEventListener("click", (event) => {
+  if (!event.target.closest("#attach-menu, #attach-button")) closeAttach();
+});
+
+window.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || attachMenu.classList.contains("hidden")) return;
+  event.stopPropagation();
+  closeAttach();
+}, true);
+
+// Colar uma imagem (um print, por exemplo) no campo de mensagem envia a imagem.
+messageInput.addEventListener("paste", (event) => {
+  const files = [...(event.clipboardData?.files || [])];
+  if (!files.length) return;
+  event.preventDefault();
+  sendFiles(files);
+});
+
+// Arrastar arquivos para cima da conversa.
+let dragDepth = 0;
+const dragsFiles = (event) => [...(event.dataTransfer?.types || [])].includes("Files");
+
+conversationEl.addEventListener("dragenter", (event) => {
+  if (!dragsFiles(event)) return;
+  event.preventDefault();
+  if (dragDepth++ === 0) fx.show(dropZone, { scale: 0.98 });
+});
+conversationEl.addEventListener("dragover", (event) => {
+  if (!dragsFiles(event)) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "copy";
+});
+conversationEl.addEventListener("dragleave", (event) => {
+  if (!dragsFiles(event) || --dragDepth > 0) return;
+  dragDepth = 0;
+  dropZone.classList.add("hidden");
+});
+conversationEl.addEventListener("drop", (event) => {
+  if (!dragsFiles(event)) return;
+  event.preventDefault();
+  dragDepth = 0;
+  dropZone.classList.add("hidden");
+  sendFiles([...event.dataTransfer.files]);
+});
+
+// Foto em tela cheia.
+function onViewerKey(event) {
+  if (event.key !== "Escape") return;
+  event.stopPropagation();
+  closeViewer();
+}
+
+function openViewer(file) {
+  if (!file) return;
+  closeTools();
+  const image = $("#viewer-img");
+  image.src = file.preview || file.url;
+  image.alt = file.name;
+  $("#viewer-name").textContent = file.name;
+  const link = $("#viewer-download");
+  link.classList.toggle("hidden", !file.url);
+  if (file.url) {
+    link.href = `${file.url}&dl=1`;
+    link.download = file.name;
+  }
+  fx.show(viewer, { scale: 0.96 });
+  document.addEventListener("keydown", onViewerKey, true);
+}
+
+function closeViewer() {
+  fx.hide(viewer, { scale: 0.96 });
+  document.removeEventListener("keydown", onViewerKey, true);
+}
+
+viewer.addEventListener("click", (event) => {
+  if (event.target === viewer || event.target.closest("#viewer-close")) closeViewer();
+});
+
 // Ações sobre as mensagens (delegação de eventos).
 messagesEl.addEventListener("click", (event) => {
   const article = event.target.closest(".message");
@@ -980,6 +1269,8 @@ messagesEl.addEventListener("click", (event) => {
 
   const quote = event.target.closest(".reply-quote");
   if (quote) return focusMessage(quote.dataset.target);
+  if (event.target.closest("[data-view]")) return openViewer(message.file);
+  if (event.target.closest("[data-download]")) return downloadFile(message.file);
 
   const reactButton = event.target.closest("[data-react], .chip");
   if (reactButton && message.id) {
@@ -995,6 +1286,10 @@ messagesEl.addEventListener("click", (event) => {
   if (action === "reply") {
     closeTools();
     return startReply(message);
+  }
+  if (action === "download") {
+    closeTools();
+    return downloadFile(message.file);
   }
   if (action === "copy") {
     closeTools();
@@ -1023,9 +1318,10 @@ function closeTools() {
   messagesEl.querySelectorAll(".show-tools").forEach((node) => node.classList.remove("show-tools"));
 }
 
-// Devolve a mensagem que pode receber ações, ou null (links mantêm o menu do navegador).
+// Devolve a mensagem que pode receber ações, ou null (links mantêm o menu do navegador;
+// em vídeo e áudio o toque é dos controles, para arrastar a barra sem abrir o menu nem responder).
 function actionableMessage(target) {
-  if (!target.closest(".bubble") || target.closest("a")) return null;
+  if (!target.closest(".bubble") || target.closest("a, video, audio")) return null;
   const article = target.closest(".message");
   return article?.msg?.id && !article.msg.deleted ? article : null;
 }
@@ -1640,7 +1936,12 @@ const streamVideo = $("#stream-video");
 const tileMe = $("#tile-me");
 const tilePeer = $("#tile-peer");
 const remoteAudio = $("#remote-audio");
-const qualityMenu = $("#quality-menu");
+const myStream = $("#my-stream");
+const myStreamVideo = myStream.querySelector("video");
+const shareSheet = $("#share-sheet");
+const SHARE_AUDIO_KEY = "potato.shareAudio";
+const QUALITY_LABEL = { "720p": "720p", "1080p": "1080p", "1080p60": "1080p 60fps" };
+const canPip = Boolean(document.pictureInPictureEnabled && streamVideo.requestPictureInPicture);
 const callInfo = $(".call-info");
 const SPEAKING_LEVEL = 0.025;
 
@@ -1698,40 +1999,62 @@ function attach(slot) {
   return transceiver.sender.replaceTrack(call.local[slot] || null).catch(() => {});
 }
 
+// Enquadramento: o quadro de cada vídeo segue o formato real da câmera (celular em pé fica em pé), sem cortar o rosto.
+function watchShape(tile, video) {
+  const update = () => {
+    if (!video.videoWidth || !video.videoHeight) return;
+    tile.style.setProperty("--ar", `${video.videoWidth} / ${video.videoHeight}`);
+    tile.style.setProperty("--ar-n", (video.videoWidth / video.videoHeight).toFixed(4));
+  };
+  video.addEventListener("loadedmetadata", update);
+  video.addEventListener("resize", update);
+}
+
+function setVideo(element, track) {
+  const id = track?.id || "";
+  if (element.dataset.track === id) return;
+  element.srcObject = track ? new MediaStream([track]) : null;
+  element.dataset.track = id;
+}
+
 function paintTile(tile, { video, muted, live }) {
-  const element = tile.querySelector("video");
-  const id = video?.id || "";
-  if (element.dataset.track !== id) {
-    element.srcObject = video ? new MediaStream([video]) : null;
-    element.dataset.track = id;
-  }
+  setVideo(tile.querySelector("video"), video);
+  if (!video) ["--ar", "--ar-n"].forEach((name) => tile.style.removeProperty(name));
   tile.classList.toggle("has-video", Boolean(video));
   tile.classList.toggle("muted", muted);
   tile.classList.toggle("live", live);
+}
+
+function leavePip() {
+  if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {});
 }
 
 function paintStage() {
   if (!call) return;
   const { local, remote, remoteState } = call;
   const peerLive = Boolean(remoteState.screen && remote.screen);
-  const owner = peerLive ? "peer" : local.screen ? "me" : null;
 
-  stage.classList.toggle("has-stream", Boolean(owner));
-  streamTile.classList.toggle("hidden", !owner);
-  if (owner) {
-    const tracks = (owner === "peer" ? [remote.screen, remote.screenAudio] : [local.screen]).filter(Boolean);
+  // A transmissão da outra pessoa ocupa o palco; a sua aparece só como prévia no canto.
+  stage.classList.toggle("has-stream", peerLive);
+  streamTile.classList.toggle("hidden", !peerLive);
+  if (peerLive) {
+    const tracks = [remote.screen, remote.screenAudio].filter(Boolean);
     const ids = tracks.map((track) => track.id).join();
     if (streamVideo.dataset.tracks !== ids) {
       streamVideo.srcObject = new MediaStream(tracks);
       streamVideo.dataset.tracks = ids;
     }
-    streamVideo.muted = owner === "me";
-    $("#stream-owner").textContent = owner === "me" ? "Sua transmissão" : `Transmissão de ${call.name}`;
-    $("#stream-volume-wrap").classList.toggle("hidden", owner === "me");
+    $("#stream-owner").textContent = `Transmissão de ${call.name}`;
   } else if (streamVideo.srcObject) {
+    leavePip();
     streamVideo.srcObject = null;
     delete streamVideo.dataset.tracks;
   }
+  myStream.classList.toggle("hidden", !local.screen);
+  setVideo(myStreamVideo, local.screen);
+  const pill = $("#live-pill");
+  pill.classList.toggle("hidden", !local.screen);
+  pill.textContent = local.screen ? `Transmitindo · ${QUALITY_LABEL[call.quality] || "tela"}` : "";
 
   paintTile(tileMe, { video: local.cam, muted: !micOn(), live: Boolean(local.screen) });
   paintTile(tilePeer, { video: remoteState.cam ? remote.cam : null, muted: !remoteState.mic, live: peerLive });
@@ -1754,7 +2077,6 @@ function openCallPanel(status) {
   tilePeer.classList.add("ringing");
   setToggle($("#toggle-chat"), true, "Esconder o chat", "Mostrar o chat");
   messageInput.placeholder = "Mensagem…";
-  $("#toggle-live").classList.toggle("hidden", !canStream);
   // A chamada fica na aba da conversa.
   showTab("chat");
   chatView.classList.add("in-call");
@@ -1890,7 +2212,8 @@ async function tuneScreen() {
   }
 }
 
-async function startLive(key = currentQuality()) {
+// key = qualidade (QUALITY); audio = levar junto o som do que estiver tocando.
+async function startLive(key = currentQuality(), audio = shareAudio()) {
   const active = call;
   if (!active || !canStream) return false;
   const quality = QUALITY[key] || QUALITY["1080p"];
@@ -1898,8 +2221,8 @@ async function startLive(key = currentQuality()) {
   try {
     display = await navigator.mediaDevices.getDisplayMedia({
       video: { width: { ideal: quality.width }, height: { ideal: quality.height }, frameRate: { ideal: quality.frameRate, max: quality.frameRate } },
-      audio: true,
-      systemAudio: "include",
+      audio,
+      systemAudio: audio ? "include" : "exclude",
       surfaceSwitching: "include",
       selfBrowserSurface: "exclude"
     });
@@ -1941,10 +2264,11 @@ function stopLive(notify = true) {
   sound.play("leave");
 }
 
-async function startCall(media) {
+// share = { quality, audio }, escolhidos na janela de transmitir (só para media "screen").
+async function startCall(media, share = {}) {
   if (call) {
     if (media === "video" && !call.local.cam) return toggleCam();
-    if (media === "screen" && !call.local.screen) return startLive();
+    if (media === "screen" && !call.local.screen) return startLive(share.quality, share.audio);
     return toast("Você já está numa chamada.");
   }
   if (!peerOnline()) {
@@ -1953,7 +2277,7 @@ async function startCall(media) {
   }
   const active = call = newCall({ media, role: "caller", name: peerName });
   // A tela é escolhida primeiro, enquanto o clique ainda vale para o navegador.
-  if (media === "screen" && !(await startLive())) return teardown(false);
+  if (media === "screen" && !(await startLive(share.quality, share.audio))) return teardown(false);
   if (active !== call) return;
   await acquireMic(active);
   if (media === "video") await toggleCam();
@@ -2083,18 +2407,20 @@ function teardown(notifyPeer) {
     delete media.dataset.tracks;
   }
   incoming.classList.add("hidden");
-  qualityMenu.classList.add("hidden");
+  closeShare();
+  leavePip();
+  myStream.classList.add("hidden");
+  $("#live-pill").classList.add("hidden");
   chatView.classList.remove("call-expanded", "in-call");
   callInfo.classList.remove("live");
   messageInput.placeholder = "Escreva uma mensagem…";
-  [tileMe, tilePeer].forEach((tile) => tile.classList.remove("speaking", "has-video", "live", "muted", "ringing"));
+  [tileMe, tilePeer].forEach((tile) => {
+    tile.classList.remove("speaking", "has-video", "live", "muted", "ringing");
+    ["--ar", "--ar-n"].forEach((name) => tile.style.removeProperty(name));
+  });
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   fx.hide(callPanel, { y: -20, scale: 0.97 });
   requestAnimationFrame(() => scrollToLatest());
-}
-
-function paintQualityMenu() {
-  qualityMenu.querySelectorAll("[data-quality]").forEach((option) => option.classList.toggle("selected", option.dataset.quality === currentQuality()));
 }
 
 function toggleFullscreen() {
@@ -2102,27 +2428,88 @@ function toggleFullscreen() {
   streamTile.requestFullscreen?.().catch(() => {});
 }
 
+// ---------- transmitir a tela ----------
+
+const shareAudio = () => store.get("localStorage", SHARE_AUDIO_KEY) !== false;
+
+// Navegador de celular (Android e iPhone) não deixa site nenhum capturar a tela: o botão fica, e explica.
+function explainNoShare() {
+  const phone = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || matchMedia("(pointer: coarse)").matches;
+  toast(!window.isSecureContext ? "Para transmitir a tela, o site precisa abrir com https://."
+    : inExtension ? mediaDeniedText()
+    : phone ? "O celular não deixa transmitir a tela pelo navegador. Transmita pelo computador; pelo celular dá para assistir."
+    : "Este navegador não deixa transmitir a tela. Use o Chrome, o Edge ou o Firefox no computador.");
+  sound.play("error");
+}
+
+function paintShare(quality) {
+  shareSheet.dataset.choice = quality;
+  shareSheet.querySelectorAll("[data-quality]").forEach((option) => option.setAttribute("aria-checked", String(option.dataset.quality === quality)));
+  const audio = $("#share-audio");
+  audio.classList.toggle("is-off", !shareAudio());
+  audio.setAttribute("aria-checked", String(shareAudio()));
+}
+
+function onShareKey(event) {
+  if (event.key !== "Escape") return;
+  event.stopPropagation();
+  closeShare();
+}
+
+function openShare() {
+  if (!canStream) return explainNoShare();
+  if (!call && !peerOnline()) {
+    sound.play("error");
+    return toast(`${peerName || "A outra pessoa"} não está online agora.`);
+  }
+  paintShare(currentQuality());
+  shareSheet.classList.remove("hidden");
+  fx.incoming(shareSheet.querySelector(".modal-card"));
+  document.addEventListener("keydown", onShareKey, true);
+  $("#share-go").focus();
+}
+
+function closeShare() {
+  shareSheet.classList.add("hidden");
+  document.removeEventListener("keydown", onShareKey, true);
+}
+
+shareSheet.addEventListener("click", (event) => {
+  const option = event.target.closest("#share-options [data-quality]");
+  if (option) {
+    paintShare(option.dataset.quality);
+    fx.press(option);
+    sound.play("tap");
+  } else if (event.target.closest("#share-audio")) {
+    store.set("localStorage", SHARE_AUDIO_KEY, !shareAudio());
+    paintShare(shareSheet.dataset.choice);
+    fx.press($("#share-audio"));
+  } else if (event.target.closest("#share-go")) {
+    // O clique em Transmitir abre a escolha de tela do navegador (precisa ser direto do clique).
+    const share = { quality: shareSheet.dataset.choice, audio: shareAudio() };
+    closeShare();
+    if (call) startLive(share.quality, share.audio);
+    else startCall("screen", share);
+  } else if (event.target === shareSheet || event.target.closest("#share-cancel")) {
+    closeShare();
+  }
+});
+
 $("#audio-call").addEventListener("click", () => startCall("audio"));
 $("#video-call").addEventListener("click", () => startCall("video"));
-$("#share-screen").addEventListener("click", () => startCall("screen"));
-$("#share-screen").classList.toggle("hidden", !canStream);
+$("#share-screen").addEventListener("click", () => (call?.local.screen ? toast("Você já está transmitindo.") : openShare()));
 $("#toggle-mic").addEventListener("click", toggleMic);
 $("#toggle-cam").addEventListener("click", toggleCam);
-$("#toggle-live").addEventListener("click", (event) => {
-  event.stopPropagation();
-  if (call?.local.screen) return stopLive();
-  paintQualityMenu();
-  qualityMenu.classList.toggle("hidden");
+$("#toggle-live").addEventListener("click", () => (call?.local.screen ? stopLive() : openShare()));
+$("#stop-stream").addEventListener("click", () => stopLive());
+$("#stream-pip").classList.toggle("hidden", !canPip);
+$("#stream-pip").addEventListener("click", () => {
+  const request = document.pictureInPictureElement ? document.exitPictureInPicture() : streamVideo.requestPictureInPicture();
+  request.catch(() => toast("Não deu para abrir a janelinha flutuante."));
 });
-qualityMenu.addEventListener("click", (event) => {
-  const option = event.target.closest("[data-quality]");
-  if (!option) return;
-  qualityMenu.classList.add("hidden");
-  startLive(option.dataset.quality);
-});
-document.addEventListener("click", (event) => {
-  if (!event.target.closest(".live-wrap")) qualityMenu.classList.add("hidden");
-});
+watchShape(tileMe, tileMe.querySelector("video"));
+watchShape(tilePeer, tilePeer.querySelector("video"));
+watchShape(myStream, myStreamVideo);
 $("#toggle-chat").addEventListener("click", () => {
   const hidden = chatView.classList.toggle("call-expanded");
   setToggle($("#toggle-chat"), !hidden, "Esconder o chat", "Mostrar o chat");

@@ -3,6 +3,8 @@
 //   welcome → diz à tela de login se ainda dá para criar conta;
 //   login   → entra (ou cria a conta, nos dois primeiros acessos);
 //   avatar  → foto de perfil;
+//   upload  → recebe a foto ou o arquivo de uma mensagem (a mensagem vai depois, pelo ops);
+//   file    → entrega a foto ou o arquivo de uma mensagem;
 //   connect → entra na sala e recebe o histórico;
 //   ops     → envia ações (mensagem, reação, leitura, digitando, sinalização da chamada…);
 //   poll    → espera por novidades (long polling) e recebe os eventos da conversa.
@@ -160,6 +162,62 @@ function avatar(string $key): void
     exit;
 }
 
+// Foto ou arquivo de uma mensagem: o corpo da requisição é o próprio arquivo; a sessão e o nome vão nos cabeçalhos.
+// Depois o navegador manda a mensagem com a chave devolvida aqui.
+function upload(): array
+{
+    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') throw new HttpError(405, 'Use POST.');
+    return transaction(function () {
+        $session = authenticate(['token' => $_SERVER['HTTP_X_POTATO_TOKEN'] ?? '']);
+        $max = file_max();
+        $length = (int) ($_SERVER['CONTENT_LENGTH'] ?? 0);
+        if ($length > $max) throw new HttpError(413, 'Arquivo grande demais (máximo de ' . round($max / 1048576, 1) . ' MB).');
+        $raw = (string) file_get_contents('php://input', false, null, 0, $max + 1);
+        // Corpo vazio com tamanho declarado: o PHP descartou (passou do post_max_size da hospedagem).
+        if ($raw === '' || strlen($raw) !== $length) throw new HttpError($length > 0 ? 413 : 400, $length > 0 ? 'Arquivo grande demais para o servidor.' : 'Arquivo vazio.');
+        return save_file($session['name'], rawurldecode((string) ($_SERVER['HTTP_X_POTATO_NAME'] ?? '')), $raw);
+    });
+}
+
+// Entrega o arquivo. Imagem, vídeo e áudio abrem no chat; o resto sempre baixa.
+// O endereço só chega a quem está logado e a chave é aleatória (igual à foto de perfil).
+// Faixas de bytes (Range) deixam o vídeo avançar e tocar no iPhone.
+function serve_file(string $key, bool $download): void
+{
+    $file = find_file($key);
+    if (!$file) throw new HttpError(404, 'Arquivo não encontrado (talvez a mensagem tenha sido apagada).');
+    $data = (string) $file['data'];
+    $size = strlen($data);
+    $inline = !$download && in_array($file['kind'], ['image', 'video', 'audio'], true);
+    $ascii = preg_replace('/[^A-Za-z0-9._ -]/u', '_', $file['name']) ?? 'arquivo';
+    header('Content-Type: ' . ($inline ? $file['type'] : 'application/octet-stream'));
+    header('Content-Disposition: ' . ($inline ? 'inline' : 'attachment') . "; filename=\"$ascii\"; filename*=UTF-8''" . rawurlencode($file['name']));
+    // Mesmo que alguém mande um HTML disfarçado, ele não roda dentro do site.
+    header("Content-Security-Policy: default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; sandbox");
+    header('Cache-Control: private, max-age=31536000, immutable');
+    header('Accept-Ranges: bytes');
+    $start = 0;
+    $end = $size - 1;
+    if (preg_match('/^bytes=(\d*)-(\d*)$/', (string) ($_SERVER['HTTP_RANGE'] ?? ''), $range) && ($range[1] !== '' || $range[2] !== '')) {
+        if ($range[1] === '') {
+            $start = max(0, $size - (int) $range[2]);
+        } else {
+            $start = (int) $range[1];
+            if ($range[2] !== '') $end = min($end, (int) $range[2]);
+        }
+        if ($start > $end) {
+            http_response_code(416);
+            header("Content-Range: bytes */$size");
+            exit;
+        }
+        http_response_code(206);
+        header("Content-Range: bytes $start-$end/$size");
+    }
+    header('Content-Length: ' . ($end - $start + 1));
+    echo substr($data, $start, $end - $start + 1);
+    exit;
+}
+
 // Aviso de saída (aba fechada ou recarregada), enviado com navigator.sendBeacon.
 function disconnect(array $input): void
 {
@@ -179,6 +237,10 @@ try {
             respond(200, welcome());
         case 'avatar':
             avatar(str($_GET['k'] ?? ''));
+        case 'file':
+            serve_file(str($_GET['k'] ?? ''), isset($_GET['dl']));
+        case 'upload':
+            respond(200, upload());
         case 'login':
             respond(200, login(input(), (string) ($_SERVER['REMOTE_ADDR'] ?? '?')));
         case 'connect':

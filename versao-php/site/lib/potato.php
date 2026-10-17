@@ -11,11 +11,14 @@ const PAGE_SIZE = 60;
 const REACTIONS = ['❤️', '😂', '😮', '😢', '👍', '🔥'];
 const MAX_BODY = 1000000;
 const EVENT_KEEP_MS = 120000;
-const SCHEMA_VERSION = '4';
+const SCHEMA_VERSION = '5';
 const MIN_PASSWORD = 4;
 const AVATAR_MAX = 400000;
 // GIF animado vai sem recortar (o recorte tiraria a animação): limite maior, que ainda cabe numa requisição.
 const AVATAR_GIF_MAX = 700000;
+// Fotos e arquivos das mensagens: até 10 MB (menos, se o PHP ou o MySQL da hospedagem não aguentarem; veja file_max).
+const FILE_MAX = 10000000;
+const FILE_UPLOADS_PER_10_MIN = 60;
 // Mesma lista do app.js (THEMES). O primeiro é o padrão.
 const THEMES = ['escuro', 'preto', 'rosa', 'roxo', 'azul', 'verde', 'claro'];
 
@@ -218,6 +221,22 @@ function schema(): array
   ip VARCHAR(45) $ascii NOT NULL,
   at BIGINT NOT NULL,
   KEY login_ip (ip, at)
+) $table",
+        // Fotos e arquivos das mensagens. message_id fica vazio entre o envio do arquivo e o da mensagem.
+        'CREATE TABLE IF NOT EXISTS ' . t('files') . " (
+  file_key CHAR(32) $ascii NOT NULL PRIMARY KEY,
+  owner VARCHAR(64) $exact NOT NULL,
+  name VARCHAR(200) NOT NULL,
+  type VARCHAR(100) $ascii NOT NULL,
+  kind VARCHAR(8) $ascii NOT NULL,
+  size INT UNSIGNED NOT NULL,
+  width INT UNSIGNED NULL,
+  height INT UNSIGNED NULL,
+  data MEDIUMBLOB NOT NULL,
+  message_id CHAR(36) $ascii NULL,
+  created_at BIGINT NOT NULL,
+  KEY file_message (message_id, created_at),
+  KEY file_owner (owner, created_at)
 ) $table",
     ];
 }
@@ -510,19 +529,120 @@ function find_avatar(string $key): ?array
     return $row ? ['type' => $row['avatar_type'], 'data' => (string) base64_decode($row['avatar'])] : null;
 }
 
+// ---------- fotos e arquivos ----------
+
+// "8M", "512K", "1G" → bytes. 0 = sem limite.
+function ini_bytes(string $value): int
+{
+    $value = trim($value);
+    $number = (int) $value;
+    switch (strtolower(substr($value, -1))) {
+        case 'g': return $number * 1073741824;
+        case 'm': return $number * 1048576;
+        case 'k': return $number * 1024;
+    }
+    return $number;
+}
+
+// Maior arquivo aceito: FILE_MAX, mas nunca mais do que o PHP (post_max_size) e o MySQL (max_allowed_packet) da hospedagem aguentam.
+function file_max(): int
+{
+    static $max = null;
+    if ($max !== null) return $max;
+    $max = FILE_MAX;
+    $post = ini_bytes((string) ini_get('post_max_size'));
+    if ($post > 0) $max = min($max, $post - 65536);
+    $packet = (int) query('SELECT @@max_allowed_packet')->fetchColumn();
+    if ($packet > 0) $max = min($max, $packet - 65536);
+    return $max = max(0, $max);
+}
+
+function file_url(string $key): string
+{
+    return 'api.php?action=file&k=' . $key;
+}
+
+// O que o arquivo realmente é, pelos primeiros bytes (o tipo informado pelo navegador não vale).
+// Só imagem, vídeo e áudio reconhecidos abrem no chat; o resto vira arquivo para baixar.
+function sniff_file(string $raw): array
+{
+    $info = @getimagesizefromstring($raw);
+    if ($info && in_array($info['mime'], ['image/jpeg', 'image/png', 'image/gif', 'image/webp'], true) && $info[0] > 0 && $info[1] > 0) {
+        return ['kind' => 'image', 'type' => $info['mime'], 'width' => $info[0], 'height' => $info[1]];
+    }
+    $head = substr($raw, 0, 12);
+    if (substr($head, 4, 4) === 'ftyp') {
+        $brand = substr($head, 8, 4);
+        if (in_array($brand, ['M4A ', 'M4B '], true)) return ['kind' => 'audio', 'type' => 'audio/mp4'];
+        return ['kind' => 'video', 'type' => $brand === 'qt  ' ? 'video/quicktime' : 'video/mp4'];
+    }
+    if (strncmp($head, "\x1A\x45\xDF\xA3", 4) === 0) return ['kind' => 'video', 'type' => 'video/webm'];
+    if (strncmp($head, 'OggS', 4) === 0) return ['kind' => 'audio', 'type' => 'audio/ogg'];
+    if (strncmp($head, 'RIFF', 4) === 0 && substr($head, 8, 4) === 'WAVE') return ['kind' => 'audio', 'type' => 'audio/wav'];
+    if (strncmp($head, 'ID3', 3) === 0 || (strlen($head) > 1 && ord($head[0]) === 0xFF && (ord($head[1]) & 0xE0) === 0xE0)) {
+        return ['kind' => 'audio', 'type' => 'audio/mpeg'];
+    }
+    return ['kind' => 'file', 'type' => 'application/octet-stream'];
+}
+
+function clean_file_name(string $name): string
+{
+    $name = preg_replace('/[\x00-\x1F\x7F\/\\\\:*?"<>|]+/u', '_', $name) ?? '';
+    $name = text_slice(text_trim($name), 120);
+    return trim($name, '. ') === '' ? 'arquivo' : $name;
+}
+
+// Arquivo recebido em api.php?action=upload. Fica sem mensagem até a pessoa mandar a mensagem com ele.
+function save_file(string $owner, string $name, string $raw): array
+{
+    $recent = (int) query('SELECT COUNT(*) FROM ' . t('files') . ' WHERE owner = ? AND created_at > ?', [$owner, now_ms() - 600000])->fetchColumn();
+    if ($recent >= FILE_UPLOADS_PER_10_MIN) return ['ok' => false, 'error' => 'Calma! Muitos arquivos em pouco tempo.'];
+    $file = sniff_file($raw) + ['width' => null, 'height' => null, 'name' => clean_file_name($name), 'size' => strlen($raw)];
+    $key = bin2hex(random_bytes(16));
+    query(
+        'INSERT INTO ' . t('files') . ' (file_key, owner, name, type, kind, size, width, height, data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [$key, $owner, $file['name'], $file['type'], $file['kind'], $file['size'], $file['width'], $file['height'], $raw, now_ms()]
+    );
+    return ['ok' => true, 'file' => ['key' => $key] + $file];
+}
+
+function find_file(string $key): ?array
+{
+    if (!preg_match('/^[0-9a-f]{32}$/', $key)) return null;
+    $row = query('SELECT name, type, kind, data FROM ' . t('files') . ' WHERE file_key = ?', [$key])->fetch();
+    return $row ?: null;
+}
+
+// Dados do arquivo guardados na mensagem (coluna media), com o endereço para baixar.
+function file_info(array $file): array
+{
+    return [
+        'url' => file_url((string) $file['key']),
+        'name' => (string) $file['name'],
+        'type' => (string) $file['type'],
+        'kind' => (string) $file['kind'],
+        'size' => (int) $file['size'],
+        'width' => isset($file['width']) ? (int) $file['width'] : null,
+        'height' => isset($file['height']) ? (int) $file['height'] : null,
+    ];
+}
+
 // ---------- mensagens ----------
 
 function to_message(array $row): array
 {
     $deleted = (bool) $row['deleted'];
     $reactions = json_decode((string) $row['reactions'], true);
-    $gif = $deleted || empty($row['media']) ? null : json_decode((string) $row['media'], true);
+    // A coluna media guarda o GIF ({url, width, height, title}) ou o arquivo ({file: {...}}).
+    $media = $deleted || empty($row['media']) ? null : json_decode((string) $row['media'], true);
+    $file = is_array($media) && isset($media['file']) ? file_info($media['file']) : null;
     return [
         'id' => $row['id'],
         'clientId' => $row['client_id'] !== null && $row['client_id'] !== '' ? $row['client_id'] : null,
         'sender' => $row['sender'],
         'text' => $deleted ? '' : $row['text'],
-        'gif' => is_array($gif) ? $gif : null,
+        'gif' => is_array($media) && !$file ? $media : null,
+        'file' => $file,
         'createdAt' => $row['created_at'],
         'replyTo' => $row['reply_to'] ? json_decode($row['reply_to'], true) : null,
         // Reações sempre como objeto JSON ({}), igual à versão Node.
@@ -572,6 +692,7 @@ function history(string $me): array
         'me' => $me,
         'theme' => find_account($me)['theme'] ?? null,
         'gifKey' => str(config()['giphy_key']),
+        'fileMax' => file_max(),
     ];
 }
 
@@ -700,6 +821,8 @@ function sweep(): void
     foreach ($stale as $conn) drop((string) $conn);
     query('DELETE FROM ' . t('gone') . ' WHERE at < ?', [$now - EVENT_KEEP_MS]);
     query('DELETE FROM ' . t('events') . ' WHERE at < ? AND seq < ?', [$now - EVENT_KEEP_MS, last_seq()]);
+    // Arquivo enviado que nunca virou mensagem (envio cancelado, aba fechada no meio).
+    query('DELETE FROM ' . t('files') . ' WHERE message_id IS NULL AND created_at < ?', [$now - DAY_MS]);
 }
 
 // ---------- ações vindas do navegador ----------
@@ -749,6 +872,8 @@ function act(array $me, string $event, $data)
             if (!$row || $row['sender'] !== $name || $row['deleted']) return null;
             $row = array_merge($row, ['deleted' => 1, 'text' => '', 'media' => null, 'reactions' => '{}']);
             query('UPDATE ' . t('messages') . " SET deleted = 1, text = '', media = NULL, reactions = '{}' WHERE n = ?", [$row['n']]);
+            // A foto ou o arquivo some junto (o endereço para de funcionar).
+            query('DELETE FROM ' . t('files') . ' WHERE message_id = ?', [$row['id']]);
             emit('message:update', to_message($row));
             return null;
 
@@ -829,17 +954,22 @@ function clean_gif($gif)
 function preview_text(array $row): string
 {
     if ($row['deleted']) return '';
-    return $row['text'] !== '' ? text_slice($row['text'], 160) : (empty($row['media']) ? '' : 'GIF');
+    if ($row['text'] !== '') return text_slice($row['text'], 160);
+    $media = empty($row['media']) ? null : json_decode((string) $row['media'], true);
+    if (isset($media['file'])) return ['image' => 'Foto', 'video' => 'Vídeo', 'audio' => 'Áudio'][$media['file']['kind']] ?? text_slice((string) $media['file']['name'], 160);
+    return $media ? 'GIF' : '';
 }
 
 function send_message(array $me, array $body): array
 {
-    $gif = clean_gif($body['gif'] ?? null);
+    // Foto ou arquivo já enviado em api.php?action=upload (chave).
+    $fileKey = str($body['file'] ?? '');
+    $gif = $fileKey === '' ? clean_gif($body['gif'] ?? null) : null;
     if ($gif === false) return ['ok' => false, 'error' => 'GIF inválido.'];
     // Mensagem com GIF não leva texto.
     $text = $gif ? '' : text_slice(text_trim(str($body['text'] ?? '')), 2000);
     $clientId = text_slice(str($body['clientId'] ?? ''), 64) ?: null;
-    if ($text === '' && !$gif) return ['ok' => false, 'error' => 'Mensagem vazia.'];
+    if ($text === '' && !$gif && $fileKey === '') return ['ok' => false, 'error' => 'Mensagem vazia.'];
 
     $hits = json_decode((string) query('SELECT hits FROM ' . t('clients') . ' WHERE conn = ?', [$me['conn']])->fetchColumn(), true) ?: [];
     $allowed = allow($hits, 25, 10 * 1000);
@@ -850,6 +980,13 @@ function send_message(array $me, array $body): array
     if ($clientId) {
         $duplicate = query('SELECT * FROM ' . t('messages') . ' WHERE sender = ? AND client_id = ? LIMIT 1', [$me['name'], $clientId])->fetch();
         if ($duplicate) return ['ok' => true, 'message' => to_message($duplicate)];
+    }
+
+    // O arquivo precisa ser de quem manda e ainda não estar em outra mensagem.
+    $file = null;
+    if ($fileKey !== '') {
+        $file = query('SELECT file_key AS `key`, name, type, kind, size, width, height FROM ' . t('files') . ' WHERE file_key = ? AND owner = ? AND message_id IS NULL', [$fileKey, $me['name']])->fetch();
+        if (!$file) return ['ok' => false, 'error' => 'Arquivo não encontrado. Tente enviar de novo.'];
     }
 
     $original = find_message(str($body['replyTo'] ?? ''));
@@ -866,12 +1003,13 @@ function send_message(array $me, array $body): array
         'reactions' => '{}',
         'deleted' => 0,
         'source' => $me['client'],
-        'media' => $gif ? encode($gif) : null,
+        'media' => $file ? encode(['file' => $file]) : ($gif ? encode($gif) : null),
     ];
     query(
         'INSERT INTO ' . t('messages') . ' (id, client_id, sender, text, created_at, reply_to, reactions, deleted, source, media) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         array_values($row)
     );
+    if ($file) query('UPDATE ' . t('files') . ' SET message_id = ? WHERE file_key = ?', [$row['id'], $file['key']]);
     set_read($me['name'], $row['id'], $row['created_at']);
     $message = to_message($row);
     emit('message', $message);

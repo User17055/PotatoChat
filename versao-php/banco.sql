@@ -2,7 +2,8 @@
 -- Opcional: o site cria tudo sozinho no primeiro acesso. Use este arquivo só se preferir importar pelo phpMyAdmin.
 -- Se mudar o prefixo em config.php, troque "potato_" aqui também.
 -- Já importou a versão anterior deste arquivo? Não precisa fazer nada: no primeiro acesso o site
--- acrescenta sozinho as colunas novas (senha, foto e tema em potato_users, GIF em potato_messages).
+-- acrescenta sozinho as colunas novas (senha, foto e tema em potato_users, GIF em potato_messages)
+-- e a tabela potato_files (fotos e arquivos das mensagens).
 
 CREATE TABLE IF NOT EXISTS `potato_settings` (
   name VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
@@ -76,4 +77,21 @@ CREATE TABLE IF NOT EXISTS `potato_logins` (
   ip VARCHAR(45) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   at BIGINT NOT NULL,
   KEY login_ip (ip, at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Fotos e arquivos das mensagens (até 10 MB cada). message_id fica vazio entre o envio do arquivo e o da mensagem.
+CREATE TABLE IF NOT EXISTS `potato_files` (
+  file_key CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
+  owner VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  name VARCHAR(200) NOT NULL,
+  type VARCHAR(100) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  kind VARCHAR(8) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  size INT UNSIGNED NOT NULL,
+  width INT UNSIGNED NULL,
+  height INT UNSIGNED NULL,
+  data MEDIUMBLOB NOT NULL,
+  message_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  created_at BIGINT NOT NULL,
+  KEY file_message (message_id, created_at),
+  KEY file_owner (owner, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

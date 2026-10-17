@@ -191,14 +191,13 @@ export const fx = {
     gsap.to(element, { opacity: 0, ...to, duration: 0.22, ease: "power2.in", onComplete: () => { element.classList.add("hidden"); gsap.set(element, { clearProps: "all" }); } });
   },
 
+  // As bolinhas pulam em onda pelo CSS (.typing.on em styles.css); aqui só a entrada e a saída.
   typing(element, active) {
-    const dots = element.querySelectorAll(".typing-bubble i");
     if (!motion()) return element.classList.toggle("on", active);
-    gsap.killTweensOf([element, ...dots]);
+    gsap.killTweensOf(element);
     if (active) {
       element.classList.add("on");
       gsap.fromTo(element, { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.25 });
-      gsap.to(dots, { y: -5, duration: 0.32, ease: "sine.inOut", stagger: { each: 0.12, repeat: -1, yoyo: true } });
     } else {
       gsap.to(element, { opacity: 0, duration: 0.2, onComplete: () => element.classList.remove("on") });
     }
