@@ -14,6 +14,7 @@ O mesmo site (mesmo HTML, CSS, animações, sons, chamadas e extensão), adaptad
 | Avatar com a inicial do nome | Foto de perfil, que cada um escolhe e troca quando quiser |
 | Um visual só | Temas (Escuro, Escuro total, Rosa, Roxo, Azul, Verde e Claro) e papel de parede com foto, salvos na conta de cada um |
 | Só texto e emoji | GIFs (busca do GIPHY), fotos, vídeos, áudios e arquivos, direto no campo de mensagem |
+| Sem música | Bot de música: `/play` com nome ou link do YouTube ou do Spotify, tocando junto para os dois |
 
 As sessões têm o mesmo formato da versão Node. Se o chat continuar no mesmo endereço e com a mesma `token_secret`, ninguém precisa entrar de novo.
 
@@ -79,6 +80,29 @@ O clipe, ao lado do botão GIF, abre duas opções: **Foto ou vídeo** (no celul
 - **Tamanho máximo:** 10 MB por arquivo, ou menos se a hospedagem limitar. O site confere sozinho o `post_max_size` do PHP e o `max_allowed_packet` do MySQL e usa o menor; quem passar do limite vê o máximo no aviso. Para aceitar arquivos maiores, aumente esses dois valores no painel da hospedagem (até 10 MB).
 - **Segurança:** o servidor descobre o tipo pelo conteúdo do arquivo, não pelo nome. Só imagem, vídeo e áudio de verdade abrem dentro do chat; o resto sempre baixa, para que uma página disfarçada nunca rode dentro do site. O endereço de cada arquivo usa uma chave aleatória e só chega a quem está logado.
 
+## Bot de música (/play)
+
+Escreva no campo de mensagem e aperte Enter (ao digitar `/`, aparece a lista dos comandos):
+
+| Comando | O que faz |
+| --- | --- |
+| `/play nome da música` | Procura no YouTube e toca para os dois |
+| `/play link` | Toca um link do YouTube (vídeo, shorts, YouTube Music) ou do Spotify (música, álbum, playlist, podcast) |
+| `/play` sozinho | Continua a música pausada |
+| `/pause` | Pausa para os dois |
+| `/skip` (ou `/pular`) | Pula para a próxima da fila |
+| `/stop` (ou `/parar`) | Para e limpa a fila |
+| `/fila` | Abre o tocador |
+
+- Se já tiver música tocando, o `/play` coloca a nova **na fila**, que avança sozinha quando cada música acaba.
+- Cada pedido aparece na conversa como um cartão do **Potato DJ**, com a capa. Enquanto toca, um ícone com barrinhas dançando fica no **canto superior direito** da conversa; ele abre o tocador, com o vídeo, a barra de tempo (dá para avançar), tocar/pausar, pular, parar, volume (só para você) e a fila (dá para tirar uma música dela).
+- **Os dois ouvem a mesma parte ao mesmo tempo.** A fila fica no servidor (na tabela `potato_settings`, sem tabela nova), e cada aparelho acerta o tempo sozinho se ficar mais de 2 segundos fora. Pausar, pular ou avançar vale para os dois, com um aviso para a outra pessoa.
+- **Spotify:** toca a música inteira para quem estiver logado no Spotify naquele navegador; sem login, o próprio Spotify só deixa ouvir uma prévia de 30 segundos. Em alguns navegadores é preciso tocar uma vez no ▶ do Spotify, dentro do tocador.
+- **Som bloqueado:** se o navegador não deixar a música começar sozinha (acontece quando a pessoa ainda não tocou na página), o ícone ganha um pontinho vermelho e o tocador mostra **Toque para ouvir junto**.
+- Vídeos cujo dono proíbe tocar fora do YouTube são pulados com um aviso. Na busca pelo nome, eles já ficam de fora.
+- **Busca pelo nome:** funciona sem configurar nada (o servidor lê a página de resultados do YouTube). Se um dia ela parar, configure a chave oficial: em [console.cloud.google.com](https://console.cloud.google.com), crie um projeto, ative a **YouTube Data API v3**, crie uma chave em *Credenciais* e coloque em `youtube_key` no `config.php`. A cota grátis dá cerca de 100 buscas por dia.
+- O servidor precisa conseguir acessar a internet (YouTube e Spotify) pelo PHP, o que as hospedagens comuns permitem.
+
 ## Chamadas e transmissão de tela
 
 Os botões do topo da conversa ligam por voz, por vídeo ou já transmitindo a tela; durante a chamada, a barra de baixo liga e desliga microfone, câmera e transmissão.
@@ -104,12 +128,14 @@ Os atalhos continuam iguais: botão direito → *Enviar para o nosso chat*, `pc`
 | `token_secret` | Chave das sessões. Vazio = gerada uma vez e guardada no banco |
 | `poll_wait` | Segundos que cada consulta espera por novidades (padrão 20). Use `0` se a hospedagem derrubar requisições demoradas: o chat passa a consultar a cada 1,5 s |
 | `giphy_key` | Chave do GIPHY para a busca de GIFs. Vazio = GIFs desligados |
+| `youtube_key` | Opcional: chave da YouTube Data API para o `/play` buscar pelo nome do jeito oficial. Vazio = busca pela página de resultados do YouTube |
 
 ## Problemas comuns
 
 - **"Não foi possível conectar ao banco de dados"**: confira os dados de `db` no `config.php`. Em algumas hospedagens o nome do banco e o do usuário têm um prefixo, como `u123456_potato`.
 - **"A extensão pdo_mysql do PHP não está ativada"**: ative-a no painel (*Selecionar versão do PHP → Extensões*).
 - **Mensagens demorando ou caindo a conexão**: diminua `poll_wait` (por exemplo para `10`) ou use `0`.
+- **`/play` diz que não achou nada, mas com link funciona** (ou nem o título aparece): o PHP da hospedagem não está conseguindo acessar o YouTube. Confira se a hospedagem libera conexões de saída (cURL) e, se o PHP reclamar de certificado SSL, peça ao suporte para configurar o `curl.cainfo`. Configurar a `youtube_key` também ajuda.
 - **Servidor Nginx sem `.htaccess`**: bloqueie o acesso à pasta `lib/` na configuração do Nginx. O `config.php` já não mostra nada quando aberto no navegador.
 
 ## Testar no seu computador

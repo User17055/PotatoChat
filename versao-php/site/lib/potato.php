@@ -21,6 +21,7 @@ const FILE_MAX = 10000000;
 const FILE_UPLOADS_PER_10_MIN = 60;
 // Papel de parede: foto reduzida no navegador (lado maior até 1600 px). Cabe numa requisição mesmo em base64.
 const WALLPAPER_MAX = 650000;
+const MUSIC_QUEUE_MAX = 50;
 // Mesma lista do app.js (THEMES). O primeiro é o padrão.
 const THEMES = ['escuro', 'preto', 'rosa', 'roxo', 'azul', 'verde', 'claro'];
 
@@ -48,6 +49,10 @@ function config(): array
             'token_secret' => '',
             'poll_wait' => 20,
             'giphy_key' => '',
+            // Bot de música: chave da YouTube Data API (opcional; sem ela, a busca pelo nome lê a página de resultados do YouTube).
+            'youtube_key' => '',
+            // false = não consulta YouTube nem Spotify (só para os testes automáticos, que rodam sem internet).
+            'music_lookup' => true,
         ], $custom);
         $config['db'] = array_merge([
             'host' => 'localhost',
@@ -535,6 +540,254 @@ function find_avatar(string $key): ?array
     return $row ? ['type' => $row['avatar_type'], 'data' => (string) base64_decode($row['avatar'])] : null;
 }
 
+// ---------- bot de música (/play) ----------
+// Uma fila só, para os dois: o que está tocando, desde quando (no relógio do servidor) e o que vem depois.
+// Fica na tabela de configurações (nome "music"), sem tabela nova.
+
+function http_get(string $url, int $timeout = 6): array
+{
+    $agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
+    if (function_exists('curl_init')) {
+        $curl = curl_init($url);
+        curl_setopt_array($curl, [
+            CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_MAXREDIRS => 3,
+            CURLOPT_TIMEOUT => $timeout, CURLOPT_CONNECTTIMEOUT => $timeout, CURLOPT_USERAGENT => $agent,
+            CURLOPT_HTTPHEADER => ['Accept-Language: pt-BR,pt;q=0.9'],
+        ]);
+        $body = curl_exec($curl);
+        return [(int) curl_getinfo($curl, CURLINFO_HTTP_CODE), is_string($body) ? $body : ''];
+    }
+    $context = stream_context_create(['http' => ['timeout' => $timeout, 'ignore_errors' => true, 'header' => "User-Agent: $agent\r\nAccept-Language: pt-BR,pt;q=0.9\r\n"]]);
+    $body = @file_get_contents($url, false, $context);
+    $status = isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $match) ? (int) $match[1] : 0;
+    return [$status, is_string($body) ? $body : ''];
+}
+
+function http_json(string $url): ?array
+{
+    [$status, $body] = http_get($url);
+    $data = $status === 200 ? json_decode($body, true) : null;
+    return is_array($data) ? $data : null;
+}
+
+// Link do YouTube (vídeo, shorts, YouTube Music) ou do Spotify (música, álbum, playlist, podcast). null = não é link.
+function parse_music_link(string $query): ?array
+{
+    if (preg_match('~(?:youtube\.com/(?:watch\?(?:[^#\s]*&)?v=|shorts/|embed/|live/)|youtu\.be/)([A-Za-z0-9_-]{11})~', $query, $match)) {
+        return ['source' => 'youtube', 'type' => 'video', 'id' => $match[1]];
+    }
+    if (preg_match('~open\.spotify\.com/(?:intl-[a-z-]+/)?(?:embed/)?(track|album|playlist|episode|show)/([A-Za-z0-9]{22})~', $query, $match)
+        || preg_match('~^spotify:(track|album|playlist|episode|show):([A-Za-z0-9]{22})$~', $query, $match)) {
+        return ['source' => 'spotify', 'type' => $match[1], 'id' => $match[2]];
+    }
+    return null;
+}
+
+function https_url($url): ?string
+{
+    return is_string($url) && preg_match('~^https://[^\s"\'<>]+$~', $url) ? text_slice($url, 500) : null;
+}
+
+// Vídeos que o dono deixa tocar fora do YouTube respondem ao oEmbed; os bloqueados, não.
+function youtube_meta(string $id): ?array
+{
+    return http_json('https://www.youtube.com/oembed?' . http_build_query(['url' => "https://www.youtube.com/watch?v=$id", 'format' => 'json']));
+}
+
+// Busca pelo nome. Com a chave da API, pelo jeito oficial; sem ela, lendo a página de resultados do YouTube.
+function youtube_search(string $query): array
+{
+    $key = str(config()['youtube_key']);
+    $found = [];
+    if ($key !== '') {
+        $data = http_json('https://www.googleapis.com/youtube/v3/search?' . http_build_query([
+            'part' => 'snippet', 'type' => 'video', 'videoEmbeddable' => 'true', 'videoSyndicated' => 'true',
+            'maxResults' => 5, 'regionCode' => 'BR', 'relevanceLanguage' => 'pt', 'q' => $query, 'key' => $key,
+        ]));
+        foreach ($data['items'] ?? [] as $item) {
+            if (empty($item['id']['videoId'])) continue;
+            $found[] = [
+                'id' => $item['id']['videoId'],
+                'title' => html_entity_decode((string) ($item['snippet']['title'] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8'),
+                'artist' => html_entity_decode((string) ($item['snippet']['channelTitle'] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8'),
+                'checked' => true,
+            ];
+        }
+        return $found;
+    }
+    [$status, $html] = http_get('https://www.youtube.com/results?' . http_build_query(['search_query' => $query, 'sp' => 'EgIQAQ==', 'hl' => 'pt-BR', 'gl' => 'BR']));
+    if ($status !== 200 || !preg_match('/var ytInitialData = (\{.*?\});<\/script>/s', $html, $match)) return [];
+    $walk = function ($node) use (&$walk, &$found) {
+        if (!is_array($node) || count($found) >= 6) return;
+        if (isset($node['videoRenderer']['videoId'])) {
+            $video = $node['videoRenderer'];
+            // Sem duração = transmissão ao vivo: fica de fora.
+            if (!empty($video['lengthText'])) {
+                $found[] = ['id' => $video['videoId'], 'title' => $video['title']['runs'][0]['text'] ?? '', 'artist' => $video['ownerText']['runs'][0]['text'] ?? '', 'checked' => false];
+            }
+            return;
+        }
+        foreach ($node as $child) $walk($child);
+    };
+    $walk(json_decode($match[1], true));
+    return $found;
+}
+
+// Nome ou link → música pronta para a fila ({source, type, id, title, artist, thumb}).
+function resolve_track(string $query): array
+{
+    $lookup = (bool) config()['music_lookup'];
+    $link = parse_music_link($query);
+    if (!$link) {
+        if (!$lookup) return ['ok' => false, 'error' => 'A busca pelo nome está desligada.'];
+        foreach (array_slice(youtube_search($query), 0, 4) as $video) {
+            $meta = $video['checked'] ? null : youtube_meta($video['id']);
+            if (!$video['checked'] && !$meta) continue;
+            return ['ok' => true, 'track' => [
+                'source' => 'youtube', 'type' => 'video', 'id' => $video['id'],
+                'title' => text_slice($video['title'] ?: (string) ($meta['title'] ?? 'Vídeo do YouTube'), 200),
+                'artist' => text_slice($video['artist'] ?: (string) ($meta['author_name'] ?? ''), 120),
+                'thumb' => "https://i.ytimg.com/vi/{$video['id']}/mqdefault.jpg",
+            ]];
+        }
+        return ['ok' => false, 'error' => "Não achei nada que dê para tocar com “{$query}”. Tente outro nome ou cole o link."];
+    }
+    if ($link['source'] === 'youtube') {
+        $meta = $lookup ? youtube_meta($link['id']) : null;
+        return ['ok' => true, 'track' => $link + [
+            'title' => text_slice((string) ($meta['title'] ?? 'Vídeo do YouTube'), 200),
+            'artist' => text_slice((string) ($meta['author_name'] ?? ''), 120),
+            'thumb' => "https://i.ytimg.com/vi/{$link['id']}/mqdefault.jpg",
+        ]];
+    }
+    $meta = $lookup ? http_json('https://open.spotify.com/oembed?' . http_build_query(['url' => "https://open.spotify.com/{$link['type']}/{$link['id']}"])) : null;
+    $label = ['track' => 'Música', 'album' => 'Álbum', 'playlist' => 'Playlist', 'episode' => 'Episódio', 'show' => 'Podcast'][$link['type']];
+    return ['ok' => true, 'track' => $link + [
+        'title' => text_slice((string) ($meta['title'] ?? "$label do Spotify"), 200),
+        'artist' => $link['type'] === 'track' ? '' : $label,
+        'thumb' => https_url($meta['thumbnail_url'] ?? null),
+    ]];
+}
+
+function music_blank(): array
+{
+    return ['now' => null, 'queue' => [], 'playing' => false, 'position' => 0, 'updatedAt' => 0];
+}
+
+function music_state(bool $lock = false): array
+{
+    if ($lock) query('INSERT IGNORE INTO ' . t('settings') . " (name, value) VALUES ('music', '{}')");
+    $raw = query('SELECT value FROM ' . t('settings') . " WHERE name = 'music'" . ($lock ? ' FOR UPDATE' : ''))->fetchColumn();
+    $state = $raw ? json_decode((string) $raw, true) : null;
+    return is_array($state) ? array_merge(music_blank(), $state) : music_blank();
+}
+
+function save_music(array $state): void
+{
+    query('INSERT INTO ' . t('settings') . " (name, value) VALUES ('music', ?) ON DUPLICATE KEY UPDATE value = VALUES(value)", [encode($state)]);
+}
+
+// serverNow: o navegador compara com o próprio relógio para saber em que segundo a música está.
+function music_public(array $state): array
+{
+    return $state + ['serverNow' => now_ms()];
+}
+
+// Cartão do Potato DJ no chat (mensagem de quem pediu a música).
+function post_music_card(array $me, array $track, int $queued): void
+{
+    $row = [
+        'id' => uuid(), 'client_id' => null, 'sender' => $me['name'], 'text' => '', 'created_at' => iso(), 'reply_to' => null,
+        'reactions' => '{}', 'deleted' => 0, 'source' => 'music', 'media' => encode(['music' => $track + ['queued' => $queued]]),
+    ];
+    query('INSERT INTO ' . t('messages') . ' (id, client_id, sender, text, created_at, reply_to, reactions, deleted, source, media) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', array_values($row));
+    emit('message', to_message($row));
+}
+
+// Comandos: play (com query = pede música; sem = continua), pause, resume, seek, skip, ended (a música acabou), stop, remove.
+function music_act(array $me, array $body): array
+{
+    $op = str($body['op'] ?? '');
+    $query = text_slice(text_trim(str($body['query'] ?? '')), 300);
+    $track = null;
+    if ($op === 'play' && $query !== '') {
+        $resolved = resolve_track($query);
+        if (!$resolved['ok']) return $resolved;
+        $track = $resolved['track'] + ['uid' => bin2hex(random_bytes(8)), 'by' => $me['name']];
+    }
+    $state = music_state(true);
+    $now = now_ms();
+    $action = ['op' => $op, 'by' => $me['name']];
+    $advance = function () use (&$state, $now, &$action) {
+        $state['now'] = array_shift($state['queue']) ?: null;
+        $state['playing'] = (bool) $state['now'];
+        $state['position'] = 0;
+        $state['updatedAt'] = $now;
+        $action['track'] = $state['now'];
+    };
+    switch ($op) {
+        case 'play':
+            if ($track) {
+                if (count($state['queue']) >= MUSIC_QUEUE_MAX) return ['ok' => false, 'error' => 'A fila está cheia.'];
+                if ($state['now']) {
+                    $state['queue'][] = $track;
+                    $action['queued'] = count($state['queue']);
+                } else {
+                    $state = ['now' => $track, 'queue' => $state['queue'], 'playing' => true, 'position' => 0, 'updatedAt' => $now];
+                    $action['queued'] = 0;
+                }
+                $action['track'] = $track;
+                break;
+            }
+            // /play sozinho: continua o que estava pausado.
+            $action['op'] = 'resume';
+            // no break
+        case 'resume':
+            if (!$state['now']) return ['ok' => false, 'error' => 'Nada tocando. Use /play com o nome ou o link de uma música.'];
+            if (!$state['playing']) {
+                $state['playing'] = true;
+                $state['updatedAt'] = $now;
+            }
+            break;
+        case 'pause':
+            if (!$state['now']) return ['ok' => false, 'error' => 'Nada tocando agora.'];
+            if ($state['playing']) {
+                $state['position'] += ($now - $state['updatedAt']) / 1000;
+                $state['playing'] = false;
+                $state['updatedAt'] = $now;
+            }
+            break;
+        case 'seek':
+            if (!$state['now']) return ['ok' => false, 'error' => 'Nada tocando agora.'];
+            $state['position'] = max(0, min(86400, (float) ($body['position'] ?? 0)));
+            $state['updatedAt'] = $now;
+            break;
+        case 'ended':
+            // Os dois aparelhos avisam que acabou: só o primeiro aviso vale.
+            if (($state['now']['uid'] ?? '') !== str($body['uid'] ?? '')) return ['ok' => true, 'state' => music_public($state)];
+            $advance();
+            break;
+        case 'skip':
+            if (!$state['now']) return ['ok' => false, 'error' => 'Nada tocando agora.'];
+            $advance();
+            break;
+        case 'stop':
+            $state = music_blank();
+            break;
+        case 'remove':
+            $uid = str($body['uid'] ?? '');
+            $state['queue'] = array_values(array_filter($state['queue'], fn($item) => ($item['uid'] ?? '') !== $uid));
+            break;
+        default:
+            return ['ok' => false, 'error' => 'Comando de música desconhecido.'];
+    }
+    save_music($state);
+    if ($track) post_music_card($me, $track, $action['queued']);
+    $public = music_public($state);
+    emit('music', ['state' => $public, 'action' => $action]);
+    return ['ok' => true, 'state' => $public, 'action' => $action];
+}
+
 // ---------- papel de parede ----------
 
 // Iluminação (-100 escurece, +100 clareia), desfoque (px) e quanto da cor do tema vai por cima (%).
@@ -704,13 +957,15 @@ function to_message(array $row): array
     // A coluna media guarda o GIF ({url, width, height, title}) ou o arquivo ({file: {...}}).
     $media = $deleted || empty($row['media']) ? null : json_decode((string) $row['media'], true);
     $file = is_array($media) && isset($media['file']) ? file_info($media['file']) : null;
+    $music = is_array($media) && isset($media['music']) ? $media['music'] : null;
     return [
         'id' => $row['id'],
         'clientId' => $row['client_id'] !== null && $row['client_id'] !== '' ? $row['client_id'] : null,
         'sender' => $row['sender'],
         'text' => $deleted ? '' : $row['text'],
-        'gif' => is_array($media) && !$file ? $media : null,
+        'gif' => is_array($media) && !$file && !$music ? $media : null,
         'file' => $file,
+        'music' => $music,
         'createdAt' => $row['created_at'],
         'replyTo' => $row['reply_to'] ? json_decode($row['reply_to'], true) : null,
         // Reações sempre como objeto JSON ({}), igual à versão Node.
@@ -762,6 +1017,7 @@ function history(string $me): array
         'wallpaper' => wallpaper_info(find_account($me)),
         'gifKey' => str(config()['giphy_key']),
         'fileMax' => file_max(),
+        'music' => music_public(music_state()),
     ];
 }
 
@@ -917,6 +1173,9 @@ function act(array $me, string $event, $data)
         case 'wallpaper':
             return set_wallpaper($me, $body);
 
+        case 'music':
+            return music_act($me, $body);
+
         // Tema escolhido: fica na conta e muda na hora nas outras abas da mesma pessoa.
         case 'theme':
             $theme = str($body['theme'] ?? '');
@@ -997,7 +1256,7 @@ function act(array $me, string $event, $data)
 // Números da tela de perfil: mensagens enviadas, reações dadas e desde quando a conversa existe.
 function stats(string $name): array
 {
-    $messages = (int) query('SELECT COUNT(*) FROM ' . t('messages') . ' WHERE sender = ? AND deleted = 0', [$name])->fetchColumn();
+    $messages = (int) query('SELECT COUNT(*) FROM ' . t('messages') . " WHERE sender = ? AND deleted = 0 AND source <> 'music'", [$name])->fetchColumn();
     $since = query('SELECT created_at FROM ' . t('messages') . ' ORDER BY n LIMIT 1')->fetchColumn();
     $reactions = 0;
     $rows = query('SELECT reactions FROM ' . t('messages') . " WHERE deleted = 0 AND reactions <> '{}'")->fetchAll(PDO::FETCH_COLUMN);
@@ -1029,6 +1288,7 @@ function preview_text(array $row): string
     if ($row['text'] !== '') return text_slice($row['text'], 160);
     $media = empty($row['media']) ? null : json_decode((string) $row['media'], true);
     if (isset($media['file'])) return ['image' => 'Foto', 'video' => 'Vídeo', 'audio' => 'Áudio'][$media['file']['kind']] ?? text_slice((string) $media['file']['name'], 160);
+    if (isset($media['music'])) return text_slice('🎵 ' . $media['music']['title'], 160);
     return $media ? 'GIF' : '';
 }
 

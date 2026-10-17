@@ -24,4 +24,8 @@ return [
     // Chave da busca de GIFs do GIPHY (grátis): https://developers.giphy.com → Create an App → API.
     // Vazio = o botão GIF continua no chat, mas avisa que a busca ainda não foi ativada.
     'giphy_key' => 'wHE7eEmagymnCaFOApKXmlHSg93Kp5tE',
+
+    // Bot de música (/play): chave da YouTube Data API, opcional. Vazio = a busca pelo nome funciona assim mesmo
+    // (lendo a página de resultados do YouTube); com a chave, fica no jeito oficial. Veja o LEIA-ME.
+    'youtube_key' => '',
 ];

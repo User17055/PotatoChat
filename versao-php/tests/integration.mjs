@@ -26,9 +26,10 @@ const prefix = `teste${Date.now().toString(36)}_`;
 const db = { host: env("HOST", "127.0.0.1"), port: Number(env("PORT", 3399)), name: env("NAME", "potato_teste"), user: env("USER", "potato"), pass: env("PASS", "senha-teste"), prefix };
 
 const giphyKey = "chave-de-teste-do-giphy";
-await fs.writeFile(configFile, `<?php return ${phpValue({ token_secret: secret, db, poll_wait: 3, giphy_key: giphyKey })};`);
+await fs.writeFile(configFile, `<?php return ${phpValue({ token_secret: secret, db, poll_wait: 3, giphy_key: giphyKey, music_lookup: false })};`);
 
 function phpValue(value) {
+  if (typeof value === "boolean") return value ? "true" : "false";
   if (typeof value === "string") return `'${value.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`;
   if (typeof value === "number") return String(value);
   if (Array.isArray(value)) return `[${value.map(phpValue).join(", ")}]`;
@@ -561,12 +562,72 @@ try {
   assert.equal((await api("connect", { token: secondLogin.body.token, conn: "sem-senha-2", client: "web" })).status, 200);
   await api("disconnect", { token: secondLogin.body.token, conn: "sem-senha-2" });
 
+  // Bot de música (/play): uma fila só para os dois, com o tempo marcado no relógio do servidor.
+  // (Sem internet nos testes: os links são reconhecidos, mas o título não é consultado.)
+  const dj1 = await connect(firstLogin.body.token);
+  const dj2 = await connect(secondLogin.body.token);
+  assert.equal(dj1.history.music.now, null);
+  assert.ok(dj1.history.music.serverNow > 0);
+  const musicSeen = next(dj2, "music");
+  const cardSeen = next(dj2, "message");
+  const played = await withAck(dj1, "music", { op: "play", query: "olha essa: https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=10s" });
+  assert.equal(played.ok, true);
+  assert.equal(played.state.now.source, "youtube");
+  assert.equal(played.state.now.id, "dQw4w9WgXcQ");
+  assert.equal(played.state.now.by, "Pessoa 1");
+  assert.equal(played.state.now.thumb, "https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg");
+  assert.equal(played.state.playing, true);
+  assert.deepEqual((await musicSeen).state.now, played.state.now);
+  const card = await cardSeen;
+  assert.equal(card.source, "music");
+  assert.equal(card.text, "");
+  assert.equal(card.music.id, "dQw4w9WgXcQ");
+  assert.equal(card.music.queued, 0);
+  // Com música tocando, a próxima vai para a fila.
+  const queued = await withAck(dj2, "music", { op: "play", query: "https://open.spotify.com/intl-pt/track/4cOdK2wGLETKBW3PvgPWqT?si=abc" });
+  assert.deepEqual([queued.state.queue.length, queued.state.queue[0].source, queued.state.queue[0].type, queued.state.queue[0].by, queued.action.queued], [1, "spotify", "track", "Pessoa 2", 1]);
+  assert.equal(queued.state.now.uid, played.state.now.uid);
+  // Pausar guarda em que segundo parou; /play sozinho continua.
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  const paused = await withAck(dj1, "music", { op: "pause" });
+  assert.equal(paused.state.playing, false);
+  assert.ok(paused.state.position >= 0.3, `posição ${paused.state.position}`);
+  const resumed = await withAck(dj2, "music", { op: "play" });
+  assert.deepEqual([resumed.action.op, resumed.state.playing], ["resume", true]);
+  assert.equal((await withAck(dj1, "music", { op: "seek", position: 42 })).state.position, 42);
+  // A música acaba nos dois aparelhos ao mesmo tempo: só um aviso faz pular.
+  const uid = played.state.now.uid;
+  const ends = await Promise.all([withAck(dj1, "music", { op: "ended", uid }), withAck(dj2, "music", { op: "ended", uid })]);
+  for (const end of ends) assert.deepEqual([end.state.now.source, end.state.queue.length, end.state.position], ["spotify", 0, 0]);
+  // Quem entra depois recebe a fila com o histórico.
+  const dj3 = await connect(firstLogin.body.token);
+  assert.equal(dj3.history.music.now.uid, ends[0].state.now.uid);
+  dj3.disconnect();
+  // Erros e o fim da fila.
+  assert.equal((await withAck(dj1, "music", { op: "play", query: "anavitoria trevo" })).error, "A busca pelo nome está desligada.");
+  assert.equal((await withAck(dj1, "music", { op: "dançar" })).error, "Comando de música desconhecido.");
+  const lastSkip = await withAck(dj2, "music", { op: "skip" });
+  assert.deepEqual([lastSkip.state.now, lastSkip.state.playing], [null, false]);
+  assert.equal((await withAck(dj1, "music", { op: "pause" })).error, "Nada tocando agora.");
+  assert.equal((await withAck(dj1, "music", { op: "play" })).error, "Nada tocando. Use /play com o nome ou o link de uma música.");
+  await withAck(dj1, "music", { op: "play", query: "https://youtu.be/dQw4w9WgXcQ" });
+  await withAck(dj1, "music", { op: "play", query: "spotify:album:4LH4d3cOWNNsVw41Gqt2kv" });
+  const stopped = await withAck(dj2, "music", { op: "stop" });
+  assert.deepEqual([stopped.state.now, stopped.state.queue], [null, []]);
+  // O cartão do bot não conta como mensagem no perfil.
+  const statsBefore = (await withAck(dj1, "stats")).messages;
+  await withAck(dj1, "music", { op: "play", query: "https://youtu.be/dQw4w9WgXcQ" });
+  assert.equal((await withAck(dj1, "stats")).messages, statsBefore);
+  await withAck(dj1, "music", { op: "stop" });
+  dj1.disconnect();
+  dj2.disconnect();
+
   // Muitas tentativas de senha: bloqueia.
   let blocked = 0;
   for (let i = 0; i < 14; i += 1) if ((await login("Pessoa 1", "errada")).status === 429) blocked += 1;
   assert.ok(blocked >= 1);
 
-  console.log("Integração PHP + MySQL aprovada: atualização do banco antigo, página, contas com senha própria, sala de duas pessoas, GIFs, fotos e arquivos (envio, entrega protegida, faixas de bytes, limpeza), foto de perfil (também em GIF), tema, papel de parede, extensão, confirmação, deduplicação, respostas, reações, leitura, apagar, digitando, chamadas, long polling, sessões da versão Node, paginação, senha esquecida e persistência.");
+  console.log("Integração PHP + MySQL aprovada: atualização do banco antigo, página, contas com senha própria, sala de duas pessoas, GIFs, fotos e arquivos (envio, entrega protegida, faixas de bytes, limpeza), foto de perfil (também em GIF), tema, papel de parede, bot de música, extensão, confirmação, deduplicação, respostas, reações, leitura, apagar, digitando, chamadas, long polling, sessões da versão Node, paginação, senha esquecida e persistência.");
 } finally {
   servers.forEach((server) => server.kill());
   try {

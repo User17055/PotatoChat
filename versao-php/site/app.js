@@ -1,6 +1,7 @@
 import { sound } from "./sound.js";
 import { fx, effectFor, motion } from "./fx.js";
 import { io, apiUrl } from "./realtime.js";
+import { createPlayer } from "./music.js";
 
 const $ = (selector) => document.querySelector(selector);
 const loginView = $("#login-view");
@@ -164,7 +165,10 @@ function isJumbo(text) {
 
 // Texto curto da mensagem (citação da resposta, notificação): GIF e arquivo sem legenda não têm texto.
 const FILE_LABEL = { image: "Foto", video: "Vídeo", audio: "Áudio" };
-const previewText = (message) => (message.gif ? "GIF" : message.file && !message.text ? FILE_LABEL[message.file.kind] || message.file.name : message.text);
+const previewText = (message) => (message.gif ? "GIF"
+  : message.music ? `🎵 ${message.music.title}`
+  : message.file && !message.text ? FILE_LABEL[message.file.kind] || message.file.name
+  : message.text);
 
 function richText(text) {
   const fragment = document.createDocumentFragment();
@@ -416,6 +420,7 @@ function connect(token, animate) {
     fileMax = payload.fileMax || 0;
     syncTheme(payload.theme);
     applyWallpaper(payload.wallpaper);
+    applyMusic(payload.music, true);
     renderAll();
     scrollToLatest();
     markSeen();
@@ -429,6 +434,11 @@ function connect(token, animate) {
   // Tema trocado em outra aba ou aparelho da mesma pessoa.
   // Papel de parede trocado em outra aba ou aparelho da mesma pessoa.
   socket.on("wallpaper", ({ wallpaper: next }) => applyWallpaper(next));
+  // Bot de música: alguém deu um comando (aqui ou no outro aparelho).
+  socket.on("music", ({ state, action }) => {
+    applyMusic(state);
+    musicNotice(action);
+  });
   socket.on("theme", ({ theme }) => {
     themeSaved = true;
     applyTheme(theme);
@@ -600,7 +610,11 @@ function fill(article, message) {
     bubble.append(quote);
   }
 
-  if (message.file && !message.deleted) {
+  if (message.music && !message.deleted) {
+    article.classList.add("music-note");
+    bubble.classList.add("music-card");
+    bubble.append(musicCard(message));
+  } else if (message.file && !message.deleted) {
     bubble.classList.add("attachment", `is-${message.file.kind}`);
     bubble.append(fileView(message.file));
     if (message.upload && !message.id) {
@@ -808,7 +822,9 @@ function uploadFile(message) {
 messageForm.addEventListener("submit", (event) => {
   event.preventDefault();
   if (!messageInput.value.trim()) return;
-  send(messageInput.value);
+  // Comandos do bot de música (/play…) não viram mensagem.
+  if (!runCommand(messageInput.value.trim())) send(messageInput.value);
+  commandMenu.classList.add("hidden");
   fx.sendButton(messageForm.querySelector(".send"));
   messageInput.value = "";
   messageInput.style.height = "auto";
@@ -818,6 +834,9 @@ messageForm.addEventListener("submit", (event) => {
 messageInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
     event.preventDefault();
+    // "/pl" + Enter completa o comando, em vez de mandar o texto.
+    const first = !commandMenu.classList.contains("hidden") && commandMenu.querySelector("[data-command]");
+    if (first && messageInput.value.trim() !== `/${first.dataset.command}`) return pickCommand(first.dataset.command);
     messageForm.requestSubmit();
   }
   if (event.key === "Escape" && !$("#reply-bar").classList.contains("hidden")) {
@@ -1274,6 +1293,7 @@ messagesEl.addEventListener("click", (event) => {
   const quote = event.target.closest(".reply-quote");
   if (quote) return focusMessage(quote.dataset.target);
   if (event.target.closest("[data-view]")) return openViewer(message.file);
+  if (event.target.closest("[data-open-music]")) return openMusic();
   if (event.target.closest("[data-download]")) return downloadFile(message.file);
 
   const reactButton = event.target.closest("[data-react], .chip");
@@ -2030,6 +2050,336 @@ wallEditor.addEventListener("click", (event) => {
     sound.play("tap");
   }
 });
+
+// ---------- bot de música (/play) ----------
+
+// O que vem do servidor: a música (now), a fila, se está tocando e em que segundo estava em updatedAt (relógio dele).
+let music = { now: null, queue: [], playing: false, position: 0, updatedAt: 0 };
+// Diferença entre o relógio do servidor e o daqui (ms), medida no histórico e nas respostas aos comandos.
+let musicClock = 0;
+// O navegador barrou o som (falta um toque na página): aparece o "Toque para ouvir junto".
+let musicBlocked = false;
+let musicSeeking = false;
+let blockTimer = 0;
+const MUSIC_VOLUME_KEY = "potato.musicVolume";
+const musicButton = $("#music-button");
+const musicPanel = $("#music-panel");
+const commandMenu = $("#command-menu");
+const MUSIC_COMMANDS = [
+  { name: "play", args: "nome ou link", text: "Toca do YouTube ou do Spotify (sozinho, continua a pausada)" },
+  { name: "pause", text: "Pausa a música para os dois" },
+  { name: "skip", text: "Pula para a próxima da fila" },
+  { name: "stop", text: "Para e limpa a fila" },
+  { name: "fila", text: "Abre o tocador com a fila" }
+];
+const COMMAND_ALIAS = { tocar: "play", continuar: "play", resume: "play", pausar: "pause", pular: "skip", next: "skip", proxima: "skip", parar: "stop", queue: "fila" };
+const MUSIC_NOTICE = { pause: "pausou a música", resume: "voltou a tocar a música", skip: "pulou a música", stop: "parou a música e limpou a fila" };
+
+const musicAt = () => (music.playing ? music.position + (Date.now() + musicClock - music.updatedAt) / 1000 : music.position);
+
+function clockTime(seconds) {
+  const total = Math.max(0, Math.floor(seconds || 0));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+const musicPlayer = createPlayer($("#music-stage"), {
+  onReady: () => {
+    syncMusic();
+    checkBlocked();
+  },
+  onUpdate: () => paintMusicTime(),
+  // Os dois aparelhos avisam; o servidor só aceita o primeiro aviso de cada música.
+  onEnded: (uid) => {
+    if (music.now?.uid === uid) socket?.emit("music", { op: "ended", uid });
+  },
+  onError: (uid, text) => {
+    if (music.now?.uid !== uid) return;
+    toast(`${text} Pulando para a próxima.`, "error");
+    socket?.emit("music", { op: "ended", uid });
+  }
+});
+const savedVolume = Number(store.get("localStorage", MUSIC_VOLUME_KEY) ?? 80);
+musicPlayer.setVolume(savedVolume);
+$("#music-volume").value = String(savedVolume);
+$("#music-volume").style.setProperty("--fill", `${savedVolume}%`);
+
+function checkBlocked() {
+  clearTimeout(blockTimer);
+  blockTimer = setTimeout(() => {
+    const blocked = Boolean(music.now && music.playing && musicPlayer.ready && !musicPlayer.playing());
+    if (blocked && !musicBlocked) toast("A música começou: toque no ícone dela, no canto de cima, para ouvir junto.");
+    musicBlocked = blocked;
+    paintMusic();
+  }, 2500);
+}
+
+// Acompanha o servidor: troca de música, play/pause e acerta o tempo se ficou mais de 2 s fora.
+function syncMusic() {
+  const track = music.now;
+  if (!track) return musicPlayer.destroy();
+  if (musicPlayer.uid !== track.uid) return musicPlayer.open(track, musicAt, () => music.playing);
+  if (!musicPlayer.ready) return;
+  if (music.playing) {
+    if (Math.abs(musicPlayer.time() - musicAt()) > 2) musicPlayer.seek(musicAt());
+    if (!musicPlayer.playing()) {
+      musicPlayer.play();
+      checkBlocked();
+    }
+  } else if (musicPlayer.playing()) {
+    musicPlayer.pause();
+    musicPlayer.seek(music.position);
+  }
+}
+
+function applyMusic(state, measured = false) {
+  if (!state) return;
+  if (measured && state.serverNow) musicClock = state.serverNow - Date.now();
+  const started = state.now && !music.now;
+  music = state;
+  if (!music.now) musicBlocked = false;
+  paintMusic();
+  // O ícone aparece no canto de cima da conversa quando a primeira música começa.
+  if (started) fx.pop(musicButton);
+  syncMusic();
+}
+
+function musicArt(track, className) {
+  const art = el("span", `${className} ${track.source}`);
+  if (track.thumb) art.style.backgroundImage = `url("${track.thumb}")`;
+  return art;
+}
+
+const requestedBy = (name) => `pedida por ${name === me ? "você" : name}`;
+
+function paintMusic() {
+  const track = music.now;
+  musicButton.classList.toggle("hidden", !track);
+  musicButton.classList.toggle("playing", Boolean(track && music.playing && !musicBlocked));
+  musicButton.classList.toggle("blocked", musicBlocked);
+  musicButton.title = track ? `${music.playing ? "Tocando" : "Pausada"}: ${track.title}` : "Música";
+  $("#music-now").classList.toggle("hidden", !track);
+  $("#music-stage").classList.toggle("hidden", !track);
+  $("#music-empty").classList.toggle("hidden", Boolean(track));
+  $("#music-unblock").classList.toggle("hidden", !musicBlocked);
+  const source = $("#music-source");
+  source.textContent = track ? (track.source === "youtube" ? "YouTube" : "Spotify") : "";
+  source.className = `music-source ${track?.source || ""}`;
+  if (track) {
+    $("#music-title").textContent = track.title;
+    $("#music-meta").textContent = [track.artist, requestedBy(track.by)].filter(Boolean).join(" · ");
+  }
+  const toggle = $("#music-toggle");
+  toggle.classList.toggle("is-off", !music.playing);
+  toggle.title = music.playing ? "Pausar para os dois" : "Tocar para os dois";
+  $("#music-volume-wrap").classList.toggle("hidden", track?.source !== "youtube");
+  $("#music-queue").replaceChildren(...music.queue.map((item, index) => {
+    const row = el("li", "music-item");
+    const text = el("span", "music-item-text");
+    text.append(el("strong", "", item.title), el("small", "", `${index + 1}ª · ${requestedBy(item.by)}`));
+    const remove = el("button", "music-remove");
+    remove.type = "button";
+    remove.dataset.remove = item.uid;
+    remove.title = "Tirar da fila";
+    remove.setAttribute("aria-label", `Tirar ${item.title} da fila`);
+    remove.append(icon("x"));
+    row.append(musicArt(item, "music-art"), text, remove);
+    return row;
+  }));
+  $("#music-next").classList.toggle("hidden", !music.queue.length);
+  paintMusicTime();
+}
+
+function paintMusicTime() {
+  if (!music.now) return;
+  const length = musicPlayer.duration();
+  const at = Math.min(musicAt(), length || Infinity);
+  $("#music-time").textContent = clockTime(at);
+  $("#music-length").textContent = length ? clockTime(length) : "–:––";
+  const seek = $("#music-seek");
+  seek.disabled = !length;
+  if (musicSeeking || !length) return;
+  seek.max = String(length);
+  seek.value = String(at);
+  seek.style.setProperty("--fill", `${(at / length) * 100}%`);
+}
+
+setInterval(paintMusicTime, 500);
+setInterval(() => {
+  if (!music.now) return;
+  syncMusic();
+  // Já devia ter acabado (por exemplo, ninguém estava com o chat aberto quando terminou).
+  const length = musicPlayer.duration();
+  if (music.playing && length && musicAt() > length + 4) socket?.emit("music", { op: "ended", uid: music.now.uid });
+}, 4000);
+
+function musicCommand(op, extra = {}) {
+  if (!socket?.connected) return toast("Sem conexão agora. Tente de novo em instantes.", "error");
+  if (op === "play" && extra.query) toast(`Procurando “${extra.query.slice(0, 60)}”…`);
+  socket.timeout(25000).emit("music", { op, ...extra }, (error, result) => {
+    if (error) return toast("O bot de música não respondeu. Tente de novo.", "error");
+    if (!result?.ok) {
+      sound.play("error");
+      return toast(result?.error || "Não deu certo.", "error");
+    }
+    applyMusic(result.state, true);
+    if (op === "play" && result.action?.queued) toast(`${result.action.queued}ª na fila: ${result.action.track.title}`, "ok");
+  });
+}
+
+function musicNotice(action) {
+  if (action && action.by !== me && MUSIC_NOTICE[action.op]) toast(`${action.by} ${MUSIC_NOTICE[action.op]}`);
+}
+
+// "/play …", "/pause", "/skip", "/stop", "/fila" (e apelidos em português). Outro texto com "/" vai como mensagem normal.
+function runCommand(text) {
+  const match = text.match(/^\/(\S+)(?:\s+([\s\S]*))?$/);
+  if (!match) return false;
+  const typed = match[1].toLowerCase();
+  const name = COMMAND_ALIAS[typed] || typed;
+  if (!MUSIC_COMMANDS.some((command) => command.name === name)) return false;
+  const query = (match[2] || "").trim();
+  if (name === "fila") openMusic();
+  else if (name === "play") musicCommand("play", query ? { query } : {});
+  else musicCommand(name);
+  sound.play("tap");
+  return true;
+}
+
+// Cartão do Potato DJ no chat, quando alguém pede uma música.
+function musicCard(message) {
+  const track = message.music;
+  const who = message.sender === me ? "Você" : message.sender;
+  const card = el("div", "dj-card");
+  card.dataset.openMusic = "";
+  card.title = "Abrir o tocador";
+  const text = el("span", "dj-text");
+  text.append(
+    el("span", "dj-line", track.queued ? `${who} colocou na fila (${track.queued}ª)` : `${who} colocou para tocar`),
+    el("strong", "", track.title),
+    el("small", "", [track.artist, track.source === "youtube" ? "YouTube" : "Spotify"].filter(Boolean).join(" · "))
+  );
+  card.append(el("span", "dj-head", "🎧 Potato DJ"), musicArt(track, "dj-art"), text);
+  return card;
+}
+
+// Menu dos comandos: aparece ao começar a mensagem com "/".
+function paintCommandMenu() {
+  const typed = messageInput.value.match(/^\/(\S*)$/)?.[1].toLowerCase();
+  const matches = typed === undefined ? [] : MUSIC_COMMANDS.filter((command) => command.name.startsWith(typed)
+    || (typed && Object.entries(COMMAND_ALIAS).some(([alias, target]) => target === command.name && alias.startsWith(typed))));
+  commandMenu.classList.toggle("hidden", !matches.length);
+  commandMenu.replaceChildren(...matches.map((command) => {
+    const option = el("button", "command");
+    option.type = "button";
+    option.setAttribute("role", "option");
+    option.dataset.command = command.name;
+    const name = el("span", "command-name", `/${command.name}`);
+    if (command.args) name.append(el("i", "", ` ${command.args}`));
+    option.append(icon("music"), name, el("small", "", command.text));
+    return option;
+  }));
+}
+
+function pickCommand(name) {
+  const command = MUSIC_COMMANDS.find((item) => item.name === name);
+  if (!command) return;
+  if (command.args) {
+    messageInput.value = `/${name} `;
+    messageInput.focus();
+  } else {
+    messageInput.value = "";
+    runCommand(`/${name}`);
+  }
+  paintCommandMenu();
+}
+
+messageInput.addEventListener("input", paintCommandMenu);
+messageInput.addEventListener("keydown", (event) => {
+  if (event.key !== "Tab" || commandMenu.classList.contains("hidden")) return;
+  event.preventDefault();
+  pickCommand(commandMenu.querySelector("[data-command]").dataset.command);
+});
+commandMenu.addEventListener("click", (event) => {
+  const option = event.target.closest("[data-command]");
+  if (option) pickCommand(option.dataset.command);
+});
+
+// Painel do tocador. Fechado, ele só sai da vista: a música continua tocando.
+function openMusic() {
+  closeGifs();
+  closeAttach();
+  musicPanel.classList.remove("closed");
+  musicButton.setAttribute("aria-expanded", "true");
+  paintMusic();
+}
+
+function closeMusic() {
+  musicPanel.classList.add("closed");
+  musicButton.setAttribute("aria-expanded", "false");
+}
+
+// O toque no ícone também libera o som, quando o navegador barrou o play automático.
+function unblockMusic() {
+  if (!musicBlocked) return;
+  musicPlayer.seek(musicAt());
+  musicPlayer.play();
+  musicBlocked = false;
+  paintMusic();
+  checkBlocked();
+}
+
+musicButton.addEventListener("click", () => {
+  fx.press(musicButton);
+  unblockMusic();
+  if (musicPanel.classList.contains("closed")) openMusic();
+  else closeMusic();
+});
+
+musicPanel.addEventListener("click", (event) => {
+  if (event.target.closest("#music-close")) return closeMusic();
+  if (event.target.closest("#music-unblock")) return unblockMusic();
+  if (event.target.closest("#music-toggle")) {
+    unblockMusic();
+    return musicCommand(music.playing ? "pause" : "resume");
+  }
+  if (event.target.closest("#music-skip")) return musicCommand("skip");
+  if (event.target.closest("#music-stop")) return musicCommand("stop");
+  const remove = event.target.closest("[data-remove]");
+  if (remove) musicCommand("remove", { uid: remove.dataset.remove });
+});
+
+$("#music-seek").addEventListener("input", (event) => {
+  const seek = event.target;
+  musicSeeking = true;
+  seek.style.setProperty("--fill", `${(seek.value / seek.max) * 100}%`);
+  $("#music-time").textContent = clockTime(Number(seek.value));
+});
+$("#music-seek").addEventListener("change", (event) => {
+  musicSeeking = false;
+  musicCommand("seek", { position: Number(event.target.value) });
+});
+
+$("#music-volume").addEventListener("input", (event) => {
+  const value = Number(event.target.value);
+  musicPlayer.setVolume(value);
+  store.set("localStorage", MUSIC_VOLUME_KEY, value);
+  event.target.style.setProperty("--fill", `${value}%`);
+});
+
+document.addEventListener("click", (event) => {
+  if (!musicPanel.classList.contains("closed") && !event.target.closest("#music-panel, #music-button, [data-open-music]")) closeMusic();
+});
+
+window.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  if (!commandMenu.classList.contains("hidden")) {
+    event.stopPropagation();
+    commandMenu.classList.add("hidden");
+  } else if (!musicPanel.classList.contains("closed")) {
+    event.stopPropagation();
+    closeMusic();
+  }
+}, true);
 
 // ---------- presença e digitação ----------
 

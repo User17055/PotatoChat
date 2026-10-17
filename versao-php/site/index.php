@@ -110,6 +110,11 @@ function asset(string $file): string
       <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
       <symbol id="i-droplet" viewBox="0 0 24 24"><path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"/></symbol>
       <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.65-.75 1.65-1.69 0-.44-.18-.84-.44-1.13-.29-.29-.44-.65-.44-1.13a1.64 1.64 0 0 1 1.67-1.67h2c3.05 0 5.55-2.5 5.55-5.55C21.96 6.01 17.46 2 12 2z"/><circle cx="13.5" cy="6.5" r="1"/><circle cx="17.5" cy="10.5" r="1"/><circle cx="8.5" cy="7.5" r="1"/><circle cx="6.5" cy="12.5" r="1"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M7 4.5v15a1 1 0 0 0 1.5.86l12.4-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5Z"/></symbol>
+      <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1.2" fill="currentColor" stroke="none"/><rect x="14" y="4" width="4" height="16" rx="1.2" fill="currentColor" stroke="none"/></symbol>
+      <symbol id="i-skip" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M5 5.5v13a1 1 0 0 0 1.55.83l9.6-6.5a1 1 0 0 0 0-1.66l-9.6-6.5A1 1 0 0 0 5 5.5Z"/><path d="M19 5v14"/></symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none"/></symbol>
+      <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></symbol>
       <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="14" height="14" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
       <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
       <symbol id="i-check-check" viewBox="0 0 24 24"><path d="M18 6 7 17l-5-5"/><path d="m22 10-7.5 7.5L13 16"/></symbol>
@@ -215,6 +220,10 @@ function asset(string $file): string
             </button>
             <button id="share-screen" class="icon-button" type="button" title="Transmitir tela" data-title="Transmitir tela" aria-label="Transmitir tela">
               <svg class="icon"><use href="#i-monitor-up" /></svg>
+            </button>
+            <button id="music-button" class="icon-button music-button hidden" type="button" title="Música tocando" aria-label="Abrir o tocador de música" aria-expanded="false" aria-controls="music-panel">
+              <span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+              <span class="music-alert" aria-hidden="true"></span>
             </button>
           </div>
         </header>
@@ -330,6 +339,7 @@ function asset(string $file): string
           <div class="quick-emojis" role="group" aria-label="Enviar emoji rápido">
             <button type="button" data-emoji="❤️" title="Enviar ❤️">❤️</button><button type="button" data-emoji="😂" title="Enviar 😂">😂</button><button type="button" data-emoji="🥔" title="Enviar 🥔">🥔</button>
           </div>
+          <div id="command-menu" class="command-menu hidden" role="listbox" aria-label="Comandos"></div>
           <!-- Fotos e arquivos: o menu escolhe entre a galeria (foto/vídeo, com câmera no celular) e qualquer arquivo. -->
           <div id="attach-menu" class="attach-menu hidden" role="menu" aria-label="Anexar">
             <button type="button" role="menuitem" data-pick="#pick-media"><span class="attach-icon media"><svg class="icon"><use href="#i-image" /></svg></span>Foto ou vídeo</button>
@@ -346,6 +356,48 @@ function asset(string $file): string
             <svg class="icon"><use href="#i-send" /></svg>
           </button>
         </form>
+      </section>
+
+      <!-- ===================== MÚSICA (bot do /play) ===================== -->
+      <section id="music-panel" class="music-panel closed" aria-label="Música">
+        <header class="music-head">
+          <span class="music-bot"><span class="music-bot-icon">🎧</span>Potato DJ</span>
+          <span id="music-source" class="music-source"></span>
+          <button id="music-close" class="close-x" type="button" aria-label="Fechar o tocador" title="Fechar (a música continua)">
+            <svg class="icon"><use href="#i-x" /></svg>
+          </button>
+        </header>
+        <div id="music-stage" class="music-stage"></div>
+        <button id="music-unblock" class="music-unblock hidden" type="button"><svg class="icon"><use href="#i-play" /></svg>Toque para ouvir junto</button>
+        <div id="music-now" class="music-now">
+          <div class="music-info"><strong id="music-title"></strong><small id="music-meta"></small></div>
+          <div class="music-progress">
+            <span id="music-time">0:00</span>
+            <input id="music-seek" type="range" min="0" max="100" step="0.1" value="0" aria-label="Posição da música" />
+            <span id="music-length">0:00</span>
+          </div>
+          <div class="music-controls">
+            <button id="music-toggle" class="music-ctl big swap" type="button" title="Pausar para os dois" aria-label="Tocar ou pausar">
+              <svg class="icon when-on"><use href="#i-pause" /></svg>
+              <svg class="icon when-off"><use href="#i-play" /></svg>
+            </button>
+            <button id="music-skip" class="music-ctl" type="button" title="Pular para a próxima" aria-label="Pular"><svg class="icon"><use href="#i-skip" /></svg></button>
+            <button id="music-stop" class="music-ctl" type="button" title="Parar e limpar a fila" aria-label="Parar"><svg class="icon"><use href="#i-stop" /></svg></button>
+            <label id="music-volume-wrap" class="music-volume" title="Volume (só para você)">
+              <svg class="icon"><use href="#i-volume" /></svg>
+              <input id="music-volume" type="range" min="0" max="100" step="1" value="80" aria-label="Volume" />
+            </label>
+          </div>
+        </div>
+        <div id="music-empty" class="music-empty">
+          <svg class="icon"><use href="#i-music" /></svg>
+          <p>Nada tocando. Escreva <b>/play</b> e o nome ou o link de uma música do YouTube ou do Spotify.</p>
+        </div>
+        <div id="music-next" class="music-next hidden">
+          <p class="picker-label">A seguir</p>
+          <ol id="music-queue" class="music-queue"></ol>
+        </div>
+        <p class="music-hint"><b>/play</b> nome ou link · <b>/pause</b> · <b>/skip</b> · <b>/stop</b></p>
       </section>
 
       <!-- ===================== PERFIL ===================== -->
@@ -539,7 +591,7 @@ function asset(string $file): string
 
     <script src="vendor/gsap.min.js"></script>
     <script type="importmap">
-      { "imports": { "./fx.js": "./<?= asset('fx.js') ?>", "./sound.js": "./<?= asset('sound.js') ?>", "./realtime.js": "./<?= asset('realtime.js') ?>" } }
+      { "imports": { "./fx.js": "./<?= asset('fx.js') ?>", "./sound.js": "./<?= asset('sound.js') ?>", "./realtime.js": "./<?= asset('realtime.js') ?>", "./music.js": "./<?= asset('music.js') ?>" } }
     </script>
     <script type="module" src="<?= asset('app.js') ?>"></script>
   </body>
