@@ -3,6 +3,7 @@
 //   welcome → diz à tela de login se ainda dá para criar conta;
 //   login   → entra (ou cria a conta, nos dois primeiros acessos);
 //   avatar  → foto de perfil;
+//   wallpaper → papel de parede da conversa;
 //   upload  → recebe a foto ou o arquivo de uma mensagem (a mensagem vai depois, pelo ops);
 //   file    → entrega a foto ou o arquivo de uma mensagem;
 //   connect → entra na sala e recebe o histórico;
@@ -218,6 +219,18 @@ function serve_file(string $key, bool $download): void
     exit;
 }
 
+// Papel de parede (só quem escolheu recebe o endereço, que muda a cada foto).
+function wallpaper(string $key): void
+{
+    $photo = find_wallpaper($key);
+    if (!$photo) throw new HttpError(404, 'Papel de parede não encontrado.');
+    header('Content-Type: ' . $photo['type']);
+    header('Content-Length: ' . strlen($photo['data']));
+    header('Cache-Control: private, max-age=31536000, immutable');
+    echo $photo['data'];
+    exit;
+}
+
 // Aviso de saída (aba fechada ou recarregada), enviado com navigator.sendBeacon.
 function disconnect(array $input): void
 {
@@ -237,6 +250,8 @@ try {
             respond(200, welcome());
         case 'avatar':
             avatar(str($_GET['k'] ?? ''));
+        case 'wallpaper':
+            wallpaper(str($_GET['k'] ?? ''));
         case 'file':
             serve_file(str($_GET['k'] ?? ''), isset($_GET['dl']));
         case 'upload':

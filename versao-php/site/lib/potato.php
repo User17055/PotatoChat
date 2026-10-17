@@ -11,7 +11,7 @@ const PAGE_SIZE = 60;
 const REACTIONS = ['❤️', '😂', '😮', '😢', '👍', '🔥'];
 const MAX_BODY = 1000000;
 const EVENT_KEEP_MS = 120000;
-const SCHEMA_VERSION = '5';
+const SCHEMA_VERSION = '6';
 const MIN_PASSWORD = 4;
 const AVATAR_MAX = 400000;
 // GIF animado vai sem recortar (o recorte tiraria a animação): limite maior, que ainda cabe numa requisição.
@@ -19,6 +19,8 @@ const AVATAR_GIF_MAX = 700000;
 // Fotos e arquivos das mensagens: até 10 MB (menos, se o PHP ou o MySQL da hospedagem não aguentarem; veja file_max).
 const FILE_MAX = 10000000;
 const FILE_UPLOADS_PER_10_MIN = 60;
+// Papel de parede: foto reduzida no navegador (lado maior até 1600 px). Cabe numa requisição mesmo em base64.
+const WALLPAPER_MAX = 650000;
 // Mesma lista do app.js (THEMES). O primeiro é o padrão.
 const THEMES = ['escuro', 'preto', 'rosa', 'roxo', 'azul', 'verde', 'claro'];
 
@@ -251,6 +253,10 @@ function user_columns(): array
         'avatar_type' => "avatar_type VARCHAR(16) $ascii NULL",
         'avatar_key' => "avatar_key CHAR(32) $ascii NULL",
         'theme' => "theme VARCHAR(16) $ascii NULL",
+        'wallpaper' => "wallpaper MEDIUMTEXT $ascii NULL",
+        'wallpaper_type' => "wallpaper_type VARCHAR(16) $ascii NULL",
+        'wallpaper_key' => "wallpaper_key CHAR(32) $ascii NULL",
+        'wallpaper_style' => "wallpaper_style VARCHAR(255) $ascii NULL",
     ];
 }
 
@@ -411,7 +417,7 @@ function issue_token(string $name): string
 // (A foto não entra aqui: ela só é lida quando alguém abre a imagem.)
 function accounts(): array
 {
-    return query('SELECT position, name, pass_hash, avatar_key, theme FROM ' . t('users') . ' ORDER BY position LIMIT ' . MAX_USERS)->fetchAll();
+    return query('SELECT position, name, pass_hash, avatar_key, theme, wallpaper_key, wallpaper_style FROM ' . t('users') . ' ORDER BY position LIMIT ' . MAX_USERS)->fetchAll();
 }
 
 function users(): array
@@ -527,6 +533,68 @@ function find_avatar(string $key): ?array
     if (!preg_match('/^[0-9a-f]{32}$/', $key)) return null;
     $row = query('SELECT avatar, avatar_type FROM ' . t('users') . ' WHERE avatar_key = ?', [$key])->fetch();
     return $row ? ['type' => $row['avatar_type'], 'data' => (string) base64_decode($row['avatar'])] : null;
+}
+
+// ---------- papel de parede ----------
+
+// Iluminação (-100 escurece, +100 clareia), desfoque (px) e quanto da cor do tema vai por cima (%).
+function clean_wallpaper_style($style): array
+{
+    $style = is_array($style) ? $style : [];
+    $number = function (string $key, int $min, int $max, int $default) use ($style): int {
+        $value = $style[$key] ?? $default;
+        return is_numeric($value) ? max($min, min($max, (int) round((float) $value))) : $default;
+    };
+    return ['light' => $number('light', -100, 100, -30), 'blur' => $number('blur', 0, 20, 0), 'tint' => $number('tint', 0, 80, 20)];
+}
+
+function wallpaper_info(?array $account): ?array
+{
+    if (!$account || empty($account['wallpaper_key'])) return null;
+    return [
+        'url' => 'api.php?action=wallpaper&k=' . $account['wallpaper_key'],
+        'style' => clean_wallpaper_style(json_decode((string) $account['wallpaper_style'], true)),
+    ];
+}
+
+// Só muda para a própria pessoa (em todos os aparelhos dela). Sem image = só os ajustes; image null = remove.
+function set_wallpaper(array $me, array $body): array
+{
+    $name = $me['name'];
+    if (array_key_exists('image', $body) && $body['image'] === null) {
+        query('UPDATE ' . t('users') . ' SET wallpaper = NULL, wallpaper_type = NULL, wallpaper_key = NULL, wallpaper_style = NULL WHERE name = ?', [$name]);
+        emit('wallpaper', ['wallpaper' => null], 'self', $me);
+        return ['ok' => true, 'wallpaper' => null];
+    }
+    $style = encode(clean_wallpaper_style($body['style'] ?? null));
+    if (isset($body['image'])) {
+        $image = $body['image'];
+        if (!is_string($image) || !preg_match('#^data:image/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$#', $image, $match)) {
+            return ['ok' => false, 'error' => 'Formato de imagem não aceito.'];
+        }
+        $raw = base64_decode($match[2], true);
+        if ($raw === false || strlen($raw) > WALLPAPER_MAX) return ['ok' => false, 'error' => 'Imagem grande demais.'];
+        $info = @getimagesizefromstring($raw);
+        if (!$info || $info['mime'] !== 'image/' . $match[1] || $info[0] < 64 || $info[1] < 64 || $info[0] > 4096 || $info[1] > 4096) {
+            return ['ok' => false, 'error' => 'Imagem inválida.'];
+        }
+        // Chave nova a cada foto: o endereço muda e o navegador não fica com a antiga no cache.
+        $key = bin2hex(random_bytes(16));
+        query('UPDATE ' . t('users') . ' SET wallpaper = ?, wallpaper_type = ?, wallpaper_key = ?, wallpaper_style = ? WHERE name = ?', [base64_encode($raw), $info['mime'], $key, $style, $name]);
+    } else {
+        if (empty(find_account($name)['wallpaper_key'])) return ['ok' => false, 'error' => 'Escolha uma foto primeiro.'];
+        query('UPDATE ' . t('users') . ' SET wallpaper_style = ? WHERE name = ?', [$style, $name]);
+    }
+    $wallpaper = wallpaper_info(find_account($name));
+    emit('wallpaper', ['wallpaper' => $wallpaper], 'self', $me);
+    return ['ok' => true, 'wallpaper' => $wallpaper];
+}
+
+function find_wallpaper(string $key): ?array
+{
+    if (!preg_match('/^[0-9a-f]{32}$/', $key)) return null;
+    $row = query('SELECT wallpaper, wallpaper_type FROM ' . t('users') . ' WHERE wallpaper_key = ?', [$key])->fetch();
+    return $row ? ['type' => $row['wallpaper_type'], 'data' => (string) base64_decode($row['wallpaper'])] : null;
 }
 
 // ---------- fotos e arquivos ----------
@@ -691,6 +759,7 @@ function history(string $me): array
         'reads' => (object) reads(),
         'me' => $me,
         'theme' => find_account($me)['theme'] ?? null,
+        'wallpaper' => wallpaper_info(find_account($me)),
         'gifKey' => str(config()['giphy_key']),
         'fileMax' => file_max(),
     ];
@@ -844,6 +913,9 @@ function act(array $me, string $event, $data)
 
         case 'stats':
             return stats($name);
+
+        case 'wallpaper':
+            return set_wallpaper($me, $body);
 
         // Tema escolhido: fica na conta e muda na hora nas outras abas da mesma pessoa.
         case 'theme':

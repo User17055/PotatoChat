@@ -179,9 +179,9 @@ try {
 
   // As tabelas da versão 1 ganharam as colunas novas, e a conta antiga continua lá (ainda sem senha).
   const columns = sql("SHOW COLUMNS FROM {p}users").map((row) => row.Field);
-  for (const column of ["pass_hash", "avatar", "avatar_type", "avatar_key", "theme"]) assert.ok(columns.includes(column), column);
+  for (const column of ["pass_hash", "avatar", "avatar_type", "avatar_key", "theme", "wallpaper", "wallpaper_type", "wallpaper_key", "wallpaper_style"]) assert.ok(columns.includes(column), column);
   assert.ok(sql("SHOW COLUMNS FROM {p}messages").some((row) => row.Field === "media"), "media");
-  assert.equal(sql("SELECT value FROM {p}settings WHERE name = 'schema'")[0].value, "5");
+  assert.equal(sql("SELECT value FROM {p}settings WHERE name = 'schema'")[0].value, "6");
   assert.ok(sql("SHOW COLUMNS FROM {p}files").some((row) => row.Field === "data"), "tabela de arquivos");
   assert.deepEqual(await welcome(), { open: 2 });
 
@@ -408,6 +408,35 @@ try {
   firstTab3.disconnect();
   assert.equal(sql("SELECT theme FROM {p}users WHERE name = 'Pessoa 1'")[0].theme, "rosa");
 
+  // Papel de parede: fica na conta, muda nas outras abas da mesma pessoa e não vai para a outra pessoa.
+  assert.equal(first.history.wallpaper, null);
+  const wallTab = await connect(firstLogin.body.token);
+  const wallArrived = next(wallTab, "wallpaper");
+  const wallNotForPeer = silent(second, "wallpaper", 2500);
+  const wallImage = `data:image/png;base64,${makePng(200, 120).toString("base64")}`;
+  const wallSaved = await withAck(first, "wallpaper", { image: wallImage, style: { light: -250, blur: 7.4, tint: "40", extra: 1 } });
+  assert.equal(wallSaved.ok, true);
+  assert.match(wallSaved.wallpaper.url, /^api\.php\?action=wallpaper&k=[0-9a-f]{32}$/);
+  assert.deepEqual(wallSaved.wallpaper.style, { light: -100, blur: 7, tint: 40 });
+  assert.deepEqual(await wallArrived, { wallpaper: wallSaved.wallpaper });
+  await wallNotForPeer;
+  const wallServed = await fetch(`${baseUrl}/${wallSaved.wallpaper.url}`);
+  assert.equal(wallServed.status, 200);
+  assert.equal(wallServed.headers.get("content-type"), "image/png");
+  // Só os ajustes: a foto continua a mesma.
+  const wallTuned = await withAck(first, "wallpaper", { style: { light: 30, blur: 0, tint: 0 } });
+  assert.equal(wallTuned.wallpaper.url, wallSaved.wallpaper.url);
+  assert.deepEqual(wallTuned.wallpaper.style, { light: 30, blur: 0, tint: 0 });
+  const wallTab2 = await connect(firstLogin.body.token);
+  assert.deepEqual(wallTab2.history.wallpaper, wallTuned.wallpaper);
+  wallTab2.disconnect();
+  assert.equal((await withAck(first, "wallpaper", { image: "data:image/svg+xml;base64,PHN2Zz4=" })).error, "Formato de imagem não aceito.");
+  assert.equal((await withAck(first, "wallpaper", { image: `data:image/png;base64,${makePng(20, 20).toString("base64")}` })).error, "Imagem inválida.");
+  assert.equal((await withAck(second, "wallpaper", { style: { light: 0 } })).error, "Escolha uma foto primeiro.");
+  assert.deepEqual(await withAck(first, "wallpaper", { image: null }), { ok: true, wallpaper: null });
+  assert.equal((await fetch(`${baseUrl}/${wallSaved.wallpaper.url}`)).status, 404);
+  wallTab.disconnect();
+
   // Mensagem enviada pela extensão chega para os dois lados.
   const fromExtension = next(second, "message");
   const sent = await api("ops", { ...extension, ops: [{ event: "message", data: { text: "Via extensão", clientId: "cliente-3" } }] });
@@ -537,7 +566,7 @@ try {
   for (let i = 0; i < 14; i += 1) if ((await login("Pessoa 1", "errada")).status === 429) blocked += 1;
   assert.ok(blocked >= 1);
 
-  console.log("Integração PHP + MySQL aprovada: atualização do banco antigo, página, contas com senha própria, sala de duas pessoas, GIFs, fotos e arquivos (envio, entrega protegida, faixas de bytes, limpeza), foto de perfil (também em GIF), tema, extensão, confirmação, deduplicação, respostas, reações, leitura, apagar, digitando, chamadas, long polling, sessões da versão Node, paginação, senha esquecida e persistência.");
+  console.log("Integração PHP + MySQL aprovada: atualização do banco antigo, página, contas com senha própria, sala de duas pessoas, GIFs, fotos e arquivos (envio, entrega protegida, faixas de bytes, limpeza), foto de perfil (também em GIF), tema, papel de parede, extensão, confirmação, deduplicação, respostas, reações, leitura, apagar, digitando, chamadas, long polling, sessões da versão Node, paginação, senha esquecida e persistência.");
 } finally {
   servers.forEach((server) => server.kill());
   try {

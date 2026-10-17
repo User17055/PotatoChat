@@ -106,6 +106,10 @@ function asset(string $file): string
       <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></symbol>
       <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
       <symbol id="i-pip" viewBox="0 0 24 24"><path d="M21 9V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4"/><rect x="12" y="13" width="10" height="7" rx="2"/></symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2m-7.07-17.07 1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+      <symbol id="i-droplet" viewBox="0 0 24 24"><path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"/></symbol>
+      <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.65-.75 1.65-1.69 0-.44-.18-.84-.44-1.13-.29-.29-.44-.65-.44-1.13a1.64 1.64 0 0 1 1.67-1.67h2c3.05 0 5.55-2.5 5.55-5.55C21.96 6.01 17.46 2 12 2z"/><circle cx="13.5" cy="6.5" r="1"/><circle cx="17.5" cy="10.5" r="1"/><circle cx="8.5" cy="7.5" r="1"/><circle cx="6.5" cy="12.5" r="1"/></symbol>
       <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="14" height="14" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
       <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
       <symbol id="i-check-check" viewBox="0 0 24 24"><path d="M18 6 7 17l-5-5"/><path d="m22 10-7.5 7.5L13 16"/></symbol>
@@ -192,6 +196,8 @@ function asset(string $file): string
       </aside>
 
       <section class="conversation">
+        <!-- Papel de parede da conversa (a foto, a iluminação e a cor do tema vêm do app.js). -->
+        <div class="wallpaper" aria-hidden="true"><i class="wall-photo"></i><i class="wall-shade"></i></div>
         <header class="topbar">
           <div class="peer">
             <div id="peer-avatar" class="avatar" aria-hidden="true">?</div>
@@ -374,6 +380,26 @@ function asset(string $file): string
             <div id="themes" class="themes" role="group" aria-label="Tema do chat"></div>
           </section>
 
+          <section class="profile-card">
+            <p class="picker-label">Papel de parede <small>· só muda para você</small></p>
+            <div class="wall-row">
+              <button id="wall-thumb" class="wall-thumb" type="button" aria-label="Papel de parede" title="Papel de parede">
+                <span class="wall-art" aria-hidden="true"><i class="wall-photo"></i><i class="wall-shade"></i></span>
+                <span class="wall-mini" aria-hidden="true"><i></i><i class="mine"></i><i></i></span>
+              </button>
+              <div class="wall-text">
+                <strong id="wall-state">Sem papel de parede</strong>
+                <small>Uma foto no fundo da conversa, com a iluminação do jeito que você preferir.</small>
+                <div class="photo-actions">
+                  <button id="wall-choose" class="pill gold small" type="button"><svg class="icon"><use href="#i-image" /></svg><span>Escolher foto</span></button>
+                  <button id="wall-adjust" class="text-button wall-adjust hidden" type="button">Ajustar</button>
+                  <button id="wall-remove" class="text-button hidden" type="button">Remover</button>
+                </div>
+              </div>
+            </div>
+            <input id="wall-input" type="file" accept="image/*" hidden />
+          </section>
+
           <section class="profile-card settings-list">
             <button id="toggle-notify" class="setting-row swap is-off" type="button" role="switch" aria-checked="false">
               <svg class="icon when-on"><use href="#i-bell" /></svg>
@@ -421,6 +447,46 @@ function asset(string $file): string
         <div class="modal-actions">
           <button id="decline-call" class="pill decline" type="button"><svg class="icon"><use href="#i-hangup" /></svg>Recusar</button>
           <button id="accept-call" class="pill accept" type="button"><svg class="icon"><use href="#i-phone" /></svg>Atender</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Papel de parede: prévia com balões de exemplo e os ajustes (iluminação, desfoque, cor do tema). -->
+    <div id="wall-editor" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="wall-title">
+      <div class="modal-card wall-card">
+        <div class="wall-head">
+          <h3 id="wall-title">Papel de parede</h3>
+          <p class="muted">Só você vê. Vale no computador, no celular e na extensão.</p>
+        </div>
+        <div id="wall-preview" class="wall-preview">
+          <span class="wall-art" aria-hidden="true"><i class="wall-photo"></i><i class="wall-shade"></i></span>
+          <div class="wall-sample" aria-hidden="true">
+            <span class="wall-day">Hoje</span>
+            <p class="wall-bubble">Olha essa foto nossa 😍<time>21:04</time></p>
+            <p class="wall-bubble mine">Virou o fundo do chat! 🥔<time>21:05</time></p>
+          </div>
+        </div>
+        <div class="wall-controls">
+          <label class="wall-slider light">
+            <span class="wall-label"><svg class="icon"><use href="#i-sun" /></svg>Iluminação<output id="wall-light-out"></output></span>
+            <input id="wall-light" type="range" min="-100" max="100" step="1" data-style="light" />
+          </label>
+          <label class="wall-slider">
+            <span class="wall-label"><svg class="icon"><use href="#i-droplet" /></svg>Desfoque<output id="wall-blur-out"></output></span>
+            <input id="wall-blur" type="range" min="0" max="20" step="1" data-style="blur" />
+          </label>
+          <label class="wall-slider">
+            <span class="wall-label"><svg class="icon"><use href="#i-palette" /></svg>Cor do tema por cima<output id="wall-tint-out"></output></span>
+            <input id="wall-tint" type="range" min="0" max="80" step="1" data-style="tint" />
+          </label>
+        </div>
+        <div class="wall-tools">
+          <button id="wall-repick" class="pill ghost small" type="button"><svg class="icon"><use href="#i-image" /></svg>Trocar foto</button>
+          <button id="wall-reset" class="text-button wall-reset" type="button">Voltar ao padrão</button>
+        </div>
+        <div class="modal-actions">
+          <button id="wall-cancel" class="pill ghost" type="button">Cancelar</button>
+          <button id="wall-apply" class="pill gold" type="button">Aplicar</button>
         </div>
       </div>
     </div>

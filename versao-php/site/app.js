@@ -332,6 +332,7 @@ function logout() {
   socket?.disconnect();
   store.remove("localStorage", SESSION_KEY);
   store.remove("sessionStorage", SESSION_KEY);
+  store.remove("localStorage", WALL_KEY);
   tellParent({ type: "potato:logout" });
   location.reload();
 }
@@ -414,6 +415,7 @@ function connect(token, animate) {
     gifKey = payload.gifKey || "";
     fileMax = payload.fileMax || 0;
     syncTheme(payload.theme);
+    applyWallpaper(payload.wallpaper);
     renderAll();
     scrollToLatest();
     markSeen();
@@ -425,6 +427,8 @@ function connect(token, animate) {
   socket.on("presence", updatePresence);
   socket.on("typing", ({ active }) => setPeerTyping(active));
   // Tema trocado em outra aba ou aparelho da mesma pessoa.
+  // Papel de parede trocado em outra aba ou aparelho da mesma pessoa.
+  socket.on("wallpaper", ({ wallpaper: next }) => applyWallpaper(next));
   socket.on("theme", ({ theme }) => {
     themeSaved = true;
     applyTheme(theme);
@@ -1646,9 +1650,9 @@ document.addEventListener("click", (event) => {
   if (target.classList.contains("tab")) fx.press(target);
 });
 
-// No perfil, Esc volta para a conversa.
+// No perfil, Esc volta para a conversa (a não ser que uma janela esteja aberta: aí o Esc é dela).
 window.addEventListener("keydown", (event) => {
-  if (event.key !== "Escape" || tab !== "profile") return;
+  if (event.key !== "Escape" || tab !== "profile" || document.querySelector(".modal:not(.hidden)")) return;
   event.stopPropagation();
   showTab("chat");
 }, true);
@@ -1844,6 +1848,188 @@ function renderThemes() {
     fx.reveal(() => applyTheme(choice.dataset.themeChoice), box.left + box.width / 2, box.top + box.height / 2).then(saveTheme, saveTheme);
   });
 }
+
+// ---------- papel de parede ----------
+
+const WALL_KEY = "potato.wallpaper";
+const WALL_DEFAULT = { light: -30, blur: 0, tint: 20 };
+const WALL_SIDE = 1600;
+// Abaixo do limite do servidor (WALLPAPER_MAX em lib/potato.php), com folga.
+const WALL_MAX = 600000;
+const wallEditor = $("#wall-editor");
+const wallPreview = $("#wall-preview");
+const WALL_LABEL = {
+  light: (value) => (value === 0 ? "Natural" : value < 0 ? `${-value}% mais escura` : `${value}% mais clara`),
+  blur: (value) => (value ? String(value) : "Nenhum"),
+  tint: (value) => `${value}%`
+};
+// Papel de parede atual ({ url, style }) e o rascunho aberto no editor ({ image, url, style }; image = foto nova).
+let wallpaper = null;
+let wallDraft = null;
+
+function clampWallStyle(style = {}) {
+  const number = (key, min, max) => {
+    const value = Math.round(Number(style[key] ?? WALL_DEFAULT[key]));
+    return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : WALL_DEFAULT[key];
+  };
+  return { light: number("light", -100, 100), blur: number("blur", 0, 20), tint: number("tint", 0, 80) };
+}
+
+// Iluminação negativa escurece (preto por cima), positiva clareia (branco); a cor do tema vem por baixo dela.
+function paintWall(target, url, style) {
+  const strength = Math.abs(style.light) / 100;
+  target.style.setProperty("--wall-image", url ? `url("${url}")` : "none");
+  target.style.setProperty("--wall-blur", `${style.blur}px`);
+  target.style.setProperty("--wall-shade", style.light < 0 ? `rgb(0 0 0 / ${(strength * 0.85).toFixed(3)})` : `rgb(255 255 255 / ${(strength * 0.65).toFixed(3)})`);
+  target.style.setProperty("--wall-tint", `color-mix(in srgb, var(--bg) ${style.tint}%, transparent)`);
+}
+
+function applyWallpaper(next) {
+  wallpaper = next?.url ? { url: new URL(next.url, document.baseURI).href, style: clampWallStyle(next.style) } : null;
+  // Cópia local para o papel de parede já aparecer ao abrir, antes de o servidor responder.
+  if (wallpaper) store.set("localStorage", WALL_KEY, wallpaper);
+  else store.remove("localStorage", WALL_KEY);
+  chatView.classList.toggle("has-wallpaper", Boolean(wallpaper));
+  if (wallpaper) paintWall(chatView, wallpaper.url, wallpaper.style);
+  $("#wall-state").textContent = wallpaper ? "Foto escolhida" : "Sem papel de parede";
+  $("#wall-choose span").textContent = wallpaper ? "Trocar foto" : "Escolher foto";
+  $("#wall-adjust").classList.toggle("hidden", !wallpaper);
+  $("#wall-remove").classList.toggle("hidden", !wallpaper);
+}
+
+// Reduz a foto no navegador (lado maior até WALL_SIDE) e baixa a qualidade até caber no limite.
+async function wallPhoto(file) {
+  if (!file.type.startsWith("image/")) throw new Error("Escolha um arquivo de imagem.");
+  if (file.size > 40e6) throw new Error("Essa imagem é grande demais.");
+  const image = await readImage(file);
+  const scale = Math.min(1, WALL_SIDE / Math.max(image.naturalWidth, image.naturalHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(64, Math.round(image.naturalWidth * scale));
+  canvas.height = Math.max(64, Math.round(image.naturalHeight * scale));
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#000";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.imageSmoothingQuality = "high";
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  for (const quality of [0.84, 0.74, 0.64, 0.54]) {
+    const url = canvas.toDataURL("image/jpeg", quality);
+    if (url.length * 0.75 <= WALL_MAX) return url;
+  }
+  throw new Error("Não deu para deixar essa foto leve o bastante. Tente outra.");
+}
+
+function paintWallEditor() {
+  paintWall(wallPreview, wallDraft.url, wallDraft.style);
+  for (const input of wallEditor.querySelectorAll("[data-style]")) {
+    const key = input.dataset.style;
+    input.value = wallDraft.style[key];
+    input.style.setProperty("--fill", `${((wallDraft.style[key] - input.min) / (input.max - input.min)) * 100}%`);
+    $(`#wall-${key}-out`).textContent = WALL_LABEL[key](wallDraft.style[key]);
+  }
+}
+
+function onWallKey(event) {
+  if (event.key !== "Escape") return;
+  event.stopPropagation();
+  closeWallEditor();
+}
+
+function openWallEditor(draft) {
+  wallDraft = draft;
+  // A prévia tem o formato da conversa: deitada no computador, em pé no celular.
+  const wide = innerWidth > 760;
+  const ratio = (wide ? innerWidth - 280 : innerWidth) / (wide ? innerHeight : innerHeight - 60);
+  wallPreview.style.setProperty("--preview-ar", Math.min(1.6, Math.max(0.62, ratio)).toFixed(3));
+  paintWallEditor();
+  wallEditor.classList.remove("hidden");
+  fx.incoming(wallEditor.querySelector(".modal-card"));
+  document.addEventListener("keydown", onWallKey, true);
+}
+
+function closeWallEditor() {
+  wallEditor.classList.add("hidden");
+  document.removeEventListener("keydown", onWallKey, true);
+  wallDraft = null;
+}
+
+const editWallpaper = () => (wallpaper ? openWallEditor({ image: null, url: wallpaper.url, style: { ...wallpaper.style } }) : $("#wall-input").click());
+
+function saveWallpaper() {
+  if (!wallDraft) return;
+  if (!socket?.connected) return toast("Sem conexão agora. Tente de novo em instantes.", "error");
+  const card = wallEditor.querySelector(".modal-card");
+  const payload = { style: wallDraft.style };
+  if (wallDraft.image) payload.image = wallDraft.image;
+  card.classList.add("busy");
+  $("#wall-apply").textContent = "Salvando…";
+  socket.timeout(25000).emit("wallpaper", payload, (error, result) => {
+    card.classList.remove("busy");
+    $("#wall-apply").textContent = "Aplicar";
+    if (error || !result?.ok) {
+      toast(result?.error || "Não foi possível salvar o papel de parede.", "error");
+      sound.play("error");
+      return;
+    }
+    closeWallEditor();
+    applyWallpaper(result.wallpaper);
+    // Volta para a conversa, para ver o resultado na hora.
+    showTab("chat");
+    sound.play("sparkle");
+    toast("Papel de parede aplicado", "ok");
+  });
+}
+
+function removeWallpaper() {
+  if (!socket?.connected) return toast("Sem conexão agora. Tente de novo em instantes.", "error");
+  socket.timeout(10000).emit("wallpaper", { image: null }, (error, result) => {
+    if (error || !result?.ok) return toast("Não foi possível remover o papel de parede.", "error");
+    applyWallpaper(null);
+    fx.pop($("#wall-thumb"));
+    toast("Papel de parede removido", "ok");
+  });
+}
+
+$("#wall-choose").addEventListener("click", () => $("#wall-input").click());
+$("#wall-thumb").addEventListener("click", editWallpaper);
+$("#wall-adjust").addEventListener("click", editWallpaper);
+$("#wall-remove").addEventListener("click", removeWallpaper);
+
+$("#wall-input").addEventListener("change", async () => {
+  const [file] = $("#wall-input").files;
+  $("#wall-input").value = "";
+  if (!file) return;
+  try {
+    const url = await wallPhoto(file);
+    // Trocar a foto com o editor aberto mantém os ajustes.
+    if (wallDraft) {
+      Object.assign(wallDraft, { image: url, url });
+      paintWallEditor();
+    } else {
+      openWallEditor({ image: url, url, style: { ...(wallpaper?.style || WALL_DEFAULT) } });
+    }
+  } catch (error) {
+    toast(error.message, "error");
+    sound.play("error");
+  }
+});
+
+wallEditor.addEventListener("input", (event) => {
+  const key = event.target.dataset?.style;
+  if (!key || !wallDraft) return;
+  wallDraft.style[key] = Number(event.target.value);
+  paintWallEditor();
+});
+
+wallEditor.addEventListener("click", (event) => {
+  if (event.target === wallEditor || event.target.closest("#wall-cancel")) closeWallEditor();
+  else if (event.target.closest("#wall-repick")) $("#wall-input").click();
+  else if (event.target.closest("#wall-apply")) saveWallpaper();
+  else if (event.target.closest("#wall-reset") && wallDraft) {
+    wallDraft.style = { ...WALL_DEFAULT };
+    paintWallEditor();
+    sound.play("tap");
+  }
+});
 
 // ---------- presença e digitação ----------
 
@@ -2542,6 +2728,7 @@ document.querySelectorAll(".hero-potato, .potato-mini").forEach((potato) => pota
 
 renderThemes();
 applyTheme(store.get("localStorage", THEME_KEY));
+applyWallpaper(store.get("localStorage", WALL_KEY));
 paintSound();
 paintNotifyButton();
 paintTabs();

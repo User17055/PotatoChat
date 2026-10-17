@@ -2,7 +2,7 @@
 -- Opcional: o site cria tudo sozinho no primeiro acesso. Use este arquivo só se preferir importar pelo phpMyAdmin.
 -- Se mudar o prefixo em config.php, troque "potato_" aqui também.
 -- Já importou a versão anterior deste arquivo? Não precisa fazer nada: no primeiro acesso o site
--- acrescenta sozinho as colunas novas (senha, foto e tema em potato_users, GIF em potato_messages)
+-- acrescenta sozinho as colunas novas (senha, foto, tema e papel de parede em potato_users, GIF em potato_messages)
 -- e a tabela potato_files (fotos e arquivos das mensagens).
 
 CREATE TABLE IF NOT EXISTS `potato_settings` (
@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS `potato_settings` (
   value TEXT NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- As duas contas: nome, senha (só o hash), foto de perfil e tema escolhido.
+-- As duas contas: nome, senha (só o hash), foto de perfil, tema e papel de parede.
 CREATE TABLE IF NOT EXISTS `potato_users` (
   position INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
@@ -20,6 +20,10 @@ CREATE TABLE IF NOT EXISTS `potato_users` (
   avatar_type VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NULL,
   avatar_key CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL,
   theme VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  wallpaper MEDIUMTEXT CHARACTER SET ascii COLLATE ascii_bin NULL,
+  wallpaper_type VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  wallpaper_key CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  wallpaper_style VARCHAR(255) CHARACTER SET ascii COLLATE ascii_bin NULL,
   KEY user_avatar (avatar_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

@@ -12,7 +12,7 @@ O mesmo site (mesmo HTML, CSS, animações, sons, chamadas e extensão), adaptad
 | `.env` | `site/config.php` (só os dados do banco) |
 | Uma senha da sala para os dois | Cada pessoa tem nome e senha próprios, guardados no banco |
 | Avatar com a inicial do nome | Foto de perfil, que cada um escolhe e troca quando quiser |
-| Um visual só | Temas (Escuro, Escuro total, Rosa, Roxo, Azul, Verde e Claro), salvos na conta de cada um |
+| Um visual só | Temas (Escuro, Escuro total, Rosa, Roxo, Azul, Verde e Claro) e papel de parede com foto, salvos na conta de cada um |
 | Só texto e emoji | GIFs (busca do GIPHY), fotos, vídeos, áudios e arquivos, direto no campo de mensagem |
 
 As sessões têm o mesmo formato da versão Node. Se o chat continuar no mesmo endereço e com a mesma `token_secret`, ninguém precisa entrar de novo.
@@ -46,7 +46,7 @@ versao-php/
 6. **Abra o site.** No primeiro acesso as tabelas (prefixo `potato_`) são criadas sozinhas. Se preferir, importe antes o `banco.sql` pelo phpMyAdmin.
 7. **Criem as duas contas logo.** As duas primeiras pessoas que entrarem escolhem nome e senha (o site pede a senha duas vezes). Depois disso eles valem para sempre e ninguém mais cria conta. Enquanto sobrar uma vaga, quem abrir o link pode ficar com ela.
 
-Para atualizar o site depois, envie de novo só os arquivos alterados. Os navegadores pegam a versão nova sozinhos, sem precisar limpar o cache. Se o banco veio de uma versão anterior, o que faltar (senha, foto e tema em `potato_users`, GIF em `potato_messages`, a tabela `potato_files` das fotos e arquivos) é criado sozinho no primeiro acesso. Quem já estava registrado sem senha escolhe uma ao entrar de novo.
+Para atualizar o site depois, envie de novo só os arquivos alterados. Os navegadores pegam a versão nova sozinhos, sem precisar limpar o cache. Se o banco veio de uma versão anterior, o que faltar (senha, foto, tema e papel de parede em `potato_users`, GIF em `potato_messages`, a tabela `potato_files` das fotos e arquivos) é criado sozinho no primeiro acesso. Quem já estava registrado sem senha escolhe uma ao entrar de novo.
 
 ## Perfil: conta, foto e tema
 
@@ -55,6 +55,7 @@ Foto, tema, notificações, sons e *Sair* ficam juntos na aba **Perfil**, separa
 - **Senha:** fica no banco só como *hash* (`pass_hash` na tabela `potato_users`), nunca o texto da senha.
 - **Foto:** no Perfil, clique na foto ou em *Trocar foto* e escolha uma imagem. O navegador recorta o centro num quadrado, reduz e envia. GIF animado também vale (até 700 KB): ele vai inteiro, sem recorte, para não perder a animação. A foto fica no banco e aparece para a outra pessoa na conversa, nas chamadas e nas notificações.
 - **Tema:** também no Perfil. Cada pessoa escolhe o seu, e ele só muda para ela. A escolha fica na conta (coluna `theme`), então vale em qualquer aparelho em que ela entrar, e as outras abas abertas mudam na hora. O navegador guarda uma cópia para o tema aparecer já na tela de login, sem piscar. No tema Claro, a chamada continua escura, porque o vídeo fica melhor assim.
+- **Papel de parede:** no Perfil, em *Escolher foto*. Antes de aplicar, uma prévia com balões de exemplo mostra como fica, com três ajustes: **Iluminação** (do mais escuro ao mais claro), **Desfoque** e **Cor do tema por cima** (mistura a cor do tema na foto, para a conversa combinar). Como o tema, só muda para quem escolheu e vale em todos os aparelhos dela. A foto é reduzida no navegador e fica no banco (colunas `wallpaper*` em `potato_users`). Para mudar só os ajustes, use *Ajustar*; para voltar ao fundo normal, *Remover*.
 - **Esqueceu a senha?** No phpMyAdmin, abra a tabela `potato_users`, edite a linha da pessoa e marque `pass_hash` como `NULL`. As sessões dela caem, e no próximo login ela escolhe uma senha nova com o mesmo nome. As mensagens não mudam.
 
 ## GIFs
