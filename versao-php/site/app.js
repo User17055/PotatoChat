@@ -1,7 +1,8 @@
-import { sound } from "./sound.js";
+import { sound, EFFECTS } from "./sound.js";
 import { fx, effectFor, motion } from "./fx.js";
 import { io, apiUrl } from "./realtime.js";
 import { createPlayer } from "./music.js";
+import { createWatchPlayer } from "./watch.js";
 
 const $ = (selector) => document.querySelector(selector);
 const loginView = $("#login-view");
@@ -422,6 +423,8 @@ function connect(token, animate) {
     syncTheme(payload.theme);
     applyWallpaper(payload.wallpaper);
     applyMusic(payload.music, true);
+    applyWatch(payload.watch, true);
+    applySounds(payload.sounds);
     renderAll();
     scrollToLatest();
     markSeen();
@@ -439,6 +442,17 @@ function connect(token, animate) {
   socket.on("music", ({ state, action }) => {
     applyMusic(state);
     musicNotice(action);
+  });
+  // Assistir junto e soundboard.
+  socket.on("watch", ({ state, action }) => {
+    applyWatch(state);
+    watchNotice(action);
+  });
+  socket.on("sounds", ({ sounds }) => applySounds(sounds));
+  socket.on("soundboard", ({ id, by }) => {
+    if (by === me) return;
+    playSound(id);
+    toast(`${by}: ${soundName(id)}`, "music", "audio-lines");
   });
   socket.on("theme", ({ theme }) => {
     themeSaved = true;
@@ -1021,6 +1035,7 @@ function onGifKey(event) {
 
 function openGifs() {
   closeAttach();
+  closeSounds();
   fx.show(gifPanel, { y: 10, scale: 0.98 });
   gifButton.setAttribute("aria-expanded", "true");
   document.addEventListener("keydown", onGifKey, true);
@@ -1200,6 +1215,7 @@ attachButton.addEventListener("click", () => {
   fx.press(attachButton);
   if (!attachMenu.classList.contains("hidden")) return closeAttach();
   closeGifs();
+  closeSounds();
   fx.show(attachMenu, { y: 10, scale: 0.96 });
   attachButton.setAttribute("aria-expanded", "true");
 });
@@ -2094,9 +2110,11 @@ const MUSIC_COMMANDS = [
   { name: "pause", icon: "pause", text: "Pausa a música para os dois" },
   { name: "skip", icon: "skip", text: "Pula para a próxima da fila" },
   { name: "stop", icon: "stop", text: "Para e limpa a fila" },
-  { name: "fila", icon: "list-music", text: "Abre o tocador com a fila" }
+  { name: "fila", icon: "list-music", text: "Abre o tocador com a fila" },
+  { name: "assistir", args: "link do YouTube ou da Twitch", icon: "tv", text: "Assistir junto (sozinho, escolhe um vídeo do aparelho)" },
+  { name: "som", icon: "audio-lines", text: "Abre o soundboard (sons que tocam para os dois)" }
 ];
-const COMMAND_ALIAS = { tocar: "play", continuar: "play", resume: "play", pausar: "pause", pular: "skip", next: "skip", proxima: "skip", parar: "stop", queue: "fila" };
+const COMMAND_ALIAS = { tocar: "play", continuar: "play", resume: "play", pausar: "pause", pular: "skip", next: "skip", proxima: "skip", parar: "stop", queue: "fila", watch: "assistir", ver: "assistir", sons: "som", soundboard: "som" };
 // Aviso quando a outra pessoa mexe no tocador: ícone e texto.
 const MUSIC_NOTICE = {
   pause: ["pause", "pausou a música"],
@@ -2693,7 +2711,8 @@ function musicCommand(op, extra = {}) {
       return toast(result?.error || "Não deu certo.", "error");
     }
     applyMusic(result.state, true);
-    if (op === "play" && result.action?.queued) toast(`${result.action.queued}ª na fila: ${result.action.track.title}`, "music", "list-music");
+    if (op === "play" && result.action?.added > 1) toast(`${result.action.added} músicas na fila: tocam inteiras, uma depois da outra`, "music", "list-music");
+    else if (op === "play" && result.action?.queued) toast(`${result.action.queued}ª na fila: ${result.action.track.title}`, "music", "list-music");
   });
 }
 
@@ -2714,6 +2733,10 @@ function runCommand(text) {
   const query = (match[2] || "").trim();
   unblockMusic();
   if (name === "fila") openMusic();
+  else if (name === "assistir") {
+    if (query) watchCommand("start", { query });
+    else $("#pick-watch").click();
+  } else if (name === "som") openSounds();
   else if (name === "play") musicCommand("play", query ? { query } : {});
   else musicCommand(name);
   sound.play("tap");
@@ -2899,6 +2922,417 @@ window.addEventListener("keydown", (event) => {
     closeMusic();
   }
 }, true);
+
+// ---------- assistir junto (/assistir) ----------
+
+// O que vem do servidor: o vídeo (now), se está passando e em que segundo estava em updatedAt (relógio dele).
+let watch = { now: null, playing: false, position: 0, updatedAt: 0 };
+// Vídeo do aparelho: cada um escolhe o seu arquivo (nada sobe para o servidor).
+let watchFile = null;
+let watchFileFor = null;
+let watchStarting = false;
+let watchPicking = false;
+let watchBlocked = false;
+let watchSeeking = false;
+let watchBlockTimer = 0;
+let watchUnblockedAt = 0;
+const watchPanel = $("#watch-panel");
+const watchStage = $("#watch-stage");
+const watchAt = () => (watch.playing ? watch.position + (Date.now() + musicClock - watch.updatedAt) / 1000 : watch.position);
+const hasWatchFile = (item) => Boolean(watchFile && (watchFileFor === item.uid || watchFile.name === item.name));
+
+const watchPlayer = createWatchPlayer($("#watch-host"), {
+  onReady: () => {
+    syncWatch();
+    checkWatchBlocked();
+  },
+  onUpdate: () => {
+    if (watchBlocked && watchPlayer.playing()) {
+      watchBlocked = false;
+      paintWatch();
+    }
+    paintWatchTime();
+  },
+  onEnded: (uid) => {
+    if (watch.now?.uid === uid) socket?.emit("watch", { op: "ended", uid });
+  },
+  onError: (uid, text) => {
+    if (watch.now?.uid === uid) toast(text, "error");
+  }
+});
+
+// O navegador barrou o som: aparece o "Toque no play" (no iPhone, o toque tem que ser no próprio player).
+function checkWatchBlocked() {
+  clearTimeout(watchBlockTimer);
+  watchBlockTimer = setTimeout(() => {
+    if (document.hidden) return;
+    watchBlocked = Boolean(watch.now && watch.playing && watchPlayer.ready && !watchPlayer.playing());
+    paintWatch();
+  }, 3000);
+}
+
+// Acompanha o servidor: troca de vídeo, play/pause e acerta o tempo se ficou mais de 2 s fora.
+function syncWatch() {
+  const item = watch.now;
+  if (!item || (item.source === "local" && !hasWatchFile(item))) return watchPlayer.destroy();
+  if (watchPlayer.uid !== item.uid) return watchPlayer.open(item, watchAt, () => watch.playing, watchFile);
+  if (!watchPlayer.ready) return;
+  if (watch.playing) {
+    if (!watchPlayer.live && Math.abs(watchPlayer.time() - watchAt()) > 2) watchPlayer.seek(watchAt());
+    if (!watchPlayer.playing() && !watchBlocked) {
+      watchPlayer.play();
+      checkWatchBlocked();
+    }
+  } else if (watchPlayer.playing()) {
+    watchPlayer.pause();
+    if (!watchPlayer.live) watchPlayer.seek(watch.position);
+  }
+}
+
+function watchListen() {
+  watchBlocked = false;
+  watchUnblockedAt = Date.now();
+  if (watch.now && watchPlayer.ready) {
+    if (!watchPlayer.live) watchPlayer.seek(watchAt());
+    if (watch.playing) watchPlayer.play();
+  }
+  paintWatch();
+  checkWatchBlocked();
+}
+
+function applyWatch(state, measured = false) {
+  if (!state) return;
+  if (measured && state.serverNow) musicClock = state.serverNow - Date.now();
+  const started = Boolean(state.now && state.now.uid !== watch.now?.uid);
+  watch = state;
+  if (started) {
+    watchBlocked = false;
+    // Quem começou um vídeo do aparelho já está com o arquivo.
+    if (watchStarting && state.now.source === "local" && state.now.by === me) watchFileFor = state.now.uid;
+    watchStarting = false;
+  }
+  paintWatch();
+  if (started) fx.show(watchPanel, { y: -10, scale: 0.98 });
+  syncWatch();
+}
+
+function paintWatch() {
+  const item = watch.now;
+  watchPanel.classList.toggle("hidden", !item);
+  if (!item) return setWatchExpanded(false);
+  const needFile = item.source === "local" && !hasWatchFile(item);
+  const live = item.source === "twitch" && item.kind === "channel";
+  $("#watch-need").classList.toggle("hidden", !needFile);
+  $("#watch-need-name").textContent = item.name || "";
+  $("#watch-unblock").classList.toggle("hidden", !watchBlocked || needFile);
+  watchStage.classList.toggle("blocked", watchBlocked);
+  watchPanel.classList.toggle("live", live);
+  watchPanel.dataset.source = item.source;
+  $("#watch-live").classList.toggle("hidden", !live);
+  $("#watch-title").textContent = item.title;
+  $("#watch-title").title = item.title;
+  $("#watch-logo").setAttribute("href", `#b-${item.source}`);
+  const toggle = $("#watch-toggle");
+  toggle.classList.toggle("is-off", !watch.playing || watchBlocked);
+  toggle.title = watchBlocked ? "Assistir junto" : watch.playing ? "Pausar para os dois" : "Tocar para os dois";
+  toggle.setAttribute("aria-label", toggle.title);
+  paintWatchTime();
+}
+
+function paintWatchTime() {
+  if (!watch.now) return;
+  const length = watchPlayer.duration() || watch.now.duration || 0;
+  const at = Math.min(watchAt(), length || Infinity);
+  $("#watch-time").textContent = clockTime(at);
+  $("#watch-length").textContent = length ? clockTime(length) : "–:––";
+  const seek = $("#watch-seek");
+  seek.disabled = !length;
+  if (watchSeeking || !length) return;
+  seek.max = String(length);
+  seek.value = String(at);
+  seek.style.setProperty("--fill", `${(at / length) * 100}%`);
+}
+
+setInterval(paintWatchTime, 500);
+setInterval(() => {
+  if (watch.now) syncWatch();
+}, 3000);
+
+function watchCommand(op, extra = {}) {
+  if (!socket?.connected) return toast("Sem conexão agora. Tente de novo em instantes.", "error");
+  if (op === "start" && extra.query) toast("Abrindo o vídeo…", "music", "tv");
+  socket.timeout(20000).emit("watch", { op, ...extra }, (error, result) => {
+    if (error) return toast("Não deu para mexer no vídeo agora. Tente de novo.", "error");
+    if (!result?.ok) {
+      watchStarting = false;
+      sound.play("error");
+      return toast(result?.error || "Não deu certo.", "error");
+    }
+    applyWatch(result.state, true);
+  });
+}
+
+function watchNotice(action) {
+  if (!action || action.by === me) return;
+  if (action.op === "start" && action.item) toast(`${action.by} começou um vídeo: ${action.item.title}`, "music", "tv");
+  else if (action.op === "pause") toast(`${action.by} pausou o vídeo`, "music", "pause");
+  else if (action.op === "resume") toast(`${action.by} voltou a passar o vídeo`, "music", "play");
+  else if (action.op === "stop") toast(`${action.by} fechou o vídeo`, "music", "x");
+}
+
+// Vídeo do aparelho: lê a duração e começa para os dois (a outra pessoa escolhe o mesmo arquivo no aparelho dela).
+async function startLocalVideo(file) {
+  if (!file.type.startsWith("video/") && !/\.(mp4|m4v|mov|webm|mkv)$/i.test(file.name)) return toast("Escolha um arquivo de vídeo.", "error");
+  const duration = await new Promise((resolve) => {
+    const probe = document.createElement("video");
+    const url = URL.createObjectURL(file);
+    let done = false;
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      URL.revokeObjectURL(url);
+      resolve(value);
+    };
+    probe.preload = "metadata";
+    probe.onloadedmetadata = () => finish(Number.isFinite(probe.duration) ? probe.duration : 0);
+    probe.onerror = () => finish(0);
+    setTimeout(() => finish(0), 6000);
+    probe.src = url;
+  });
+  watchFile = file;
+  watchFileFor = null;
+  watchStarting = true;
+  watchCommand("start", { local: { name: file.name, size: file.size, duration } });
+}
+
+$("#pick-watch").addEventListener("change", (event) => {
+  const file = event.target.files[0];
+  event.target.value = "";
+  if (!file) return;
+  // Entrando num vídeo que a outra pessoa começou: só guarda o arquivo daqui.
+  if (watchPicking && watch.now?.source === "local") {
+    watchPicking = false;
+    watchFile = file;
+    watchFileFor = watch.now.uid;
+    if (watch.now.size && file.size !== watch.now.size) toast("Esse arquivo é diferente do da outra pessoa: as cenas podem não bater.", "info");
+    paintWatch();
+    return syncWatch();
+  }
+  watchPicking = false;
+  startLocalVideo(file);
+});
+
+// Tela cheia: no computador e no Android, de verdade; no iPhone, ocupa a tela do navegador.
+function setWatchExpanded(on) {
+  if (watchPanel.classList.contains("expanded") === on) return;
+  watchPanel.classList.toggle("expanded", on);
+  $("#watch-full-icon").setAttribute("href", on ? "#i-minimize" : "#i-maximize");
+  $("#watch-full").title = on ? "Sair da tela cheia" : "Tela cheia";
+  if (on && !document.fullscreenElement) watchPanel.requestFullscreen?.().catch(() => {});
+  if (!on && document.fullscreenElement === watchPanel) document.exitFullscreen?.().catch(() => {});
+}
+
+document.addEventListener("fullscreenchange", () => {
+  if (document.fullscreenElement !== watchPanel) setWatchExpanded(false);
+});
+
+watchPanel.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (target.closest("#watch-unblock")) return watchListen();
+  if (target.closest("#watch-pick")) {
+    watchPicking = true;
+    return $("#pick-watch").click();
+  }
+  if (target.closest("#watch-full")) return setWatchExpanded(!watchPanel.classList.contains("expanded"));
+  if (target.closest("#watch-toggle")) {
+    if (watchBlocked) return watchListen();
+    if (Date.now() - watchUnblockedAt < 1000) return;
+    return watchCommand(watch.playing ? "pause" : "resume");
+  }
+  if (target.closest("#watch-close")) {
+    if (await confirmDialog({ title: "Fechar o vídeo?", text: "Ele para para os dois.", confirm: "Fechar" })) watchCommand("stop");
+  }
+});
+
+$("#watch-seek").addEventListener("input", (event) => {
+  const seek = event.target;
+  watchSeeking = true;
+  seek.style.setProperty("--fill", `${(seek.value / seek.max) * 100}%`);
+  $("#watch-time").textContent = clockTime(Number(seek.value));
+});
+$("#watch-seek").addEventListener("change", (event) => {
+  watchSeeking = false;
+  watchCommand("seek", { position: Number(event.target.value) });
+});
+
+// Um toque em qualquer lugar já libera o som do vídeo (como na música).
+for (const type of ["pointerup", "keydown"]) {
+  addEventListener(type, () => {
+    if (watchBlocked) watchListen();
+  }, true);
+}
+
+// De volta ao app (celular): o vídeo volta no ponto certo.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && watch.now) syncWatch();
+});
+
+// ---------- soundboard (/som) ----------
+// Sons rápidos que tocam nos dois aparelhos: os prontos (feitos no navegador) e os que cada um sobe.
+
+let customSounds = [];
+let soundPlayedAt = 0;
+let soundFile = null;
+const soundAudio = new Map();
+const soundPanel = $("#sound-panel");
+const soundButton = $("#sound-button");
+const soundName = (id) => EFFECTS.find((item) => item.id === id)?.name || customSounds.find((item) => item.id === id)?.name || "um som";
+
+function soundTile(id, name, custom) {
+  const tile = el("button", `sound-tile${custom ? " custom" : ""}`);
+  tile.type = "button";
+  tile.dataset.sound = id;
+  tile.style.setProperty("--hue", hue(name));
+  tile.append(icon(custom ? "audio-lines" : "volume"), el("span", "", name));
+  if (custom) {
+    const remove = el("span", "sound-remove");
+    remove.dataset.removeSound = id;
+    remove.title = "Tirar este som";
+    remove.append(icon("x"));
+    tile.append(remove);
+  }
+  return tile;
+}
+
+function paintSounds() {
+  const add = el("button", "sound-tile add");
+  add.type = "button";
+  add.dataset.addSound = "";
+  add.append(icon("plus"), el("span", "", "Seu som"));
+  $("#sound-grid").replaceChildren(...EFFECTS.map((item) => soundTile(item.id, item.name, false)), ...customSounds.map((item) => soundTile(item.id, item.name, true)), add);
+}
+
+function playSound(id) {
+  if (EFFECTS.some((item) => item.id === id)) return sound.effect(id);
+  const custom = customSounds.find((item) => item.id === id);
+  if (!custom) return;
+  let audio = soundAudio.get(id);
+  if (!audio) {
+    audio = new Audio(new URL(custom.url, document.baseURI).href);
+    soundAudio.set(id, audio);
+  }
+  audio.currentTime = 0;
+  audio.play().catch(() => {});
+}
+
+function applySounds(list) {
+  customSounds = Array.isArray(list) ? list : [];
+  soundAudio.clear();
+  paintSounds();
+}
+
+function openSounds() {
+  closeGifs();
+  closeAttach();
+  fx.show(soundPanel, { y: 10, scale: 0.98 });
+  soundButton.setAttribute("aria-expanded", "true");
+}
+
+function closeSounds() {
+  if (soundPanel.classList.contains("hidden")) return;
+  soundPanel.classList.add("hidden");
+  soundButton.setAttribute("aria-expanded", "false");
+  $("#sound-form").classList.add("hidden");
+  soundFile = null;
+}
+
+soundButton.addEventListener("click", () => {
+  fx.press(soundButton);
+  if (soundPanel.classList.contains("hidden")) openSounds();
+  else closeSounds();
+});
+
+soundPanel.addEventListener("click", async (event) => {
+  const remove = event.target.closest("[data-remove-sound]");
+  if (remove) {
+    event.stopPropagation();
+    if (await confirmDialog({ title: "Tirar este som?", text: `“${soundName(remove.dataset.removeSound)}” sai do soundboard dos dois.`, confirm: "Tirar" })) {
+      socket?.emit("soundboard", { op: "remove", id: remove.dataset.removeSound });
+    }
+    return;
+  }
+  if (event.target.closest("[data-add-sound]")) return $("#pick-sound").click();
+  const tile = event.target.closest("[data-sound]");
+  if (!tile || Date.now() - soundPlayedAt < 350) return;
+  soundPlayedAt = Date.now();
+  playSound(tile.dataset.sound);
+  fx.press(tile);
+  socket?.emit("soundboard", { op: "play", id: tile.dataset.sound });
+});
+
+$("#pick-sound").addEventListener("change", (event) => {
+  const file = event.target.files[0];
+  event.target.value = "";
+  if (!file) return;
+  if (file.size > 1500000) return toast("O som pode ter até 1,5 MB (uns segundos de áudio).", "error");
+  soundFile = file;
+  const form = $("#sound-form");
+  form.classList.remove("hidden");
+  const name = $("#sound-name");
+  name.value = file.name.replace(/\.[^.]+$/, "").slice(0, 24);
+  name.focus();
+  name.select();
+});
+
+async function saveSound() {
+  if (!soundFile || !socket?.connected) return;
+  const file = soundFile;
+  const name = $("#sound-name").value.trim() || "Som";
+  soundFile = null;
+  $("#sound-form").classList.add("hidden");
+  toast("Subindo o som…", "music", "audio-lines");
+  try {
+    const response = await fetch(apiUrl("upload"), {
+      method: "POST",
+      headers: { "Content-Type": file.type || "application/octet-stream", "X-Potato-Token": socket.auth.token, "X-Potato-Name": encodeURIComponent(file.name || "som") },
+      body: file
+    });
+    const result = await response.json().catch(() => null);
+    if (!response.ok || !result?.ok) throw new Error(result?.error || "O som não subiu.");
+    socket.timeout(15000).emit("soundboard", { op: "add", file: result.file.key, name }, (error, answer) => {
+      if (error || !answer?.ok) return toast(answer?.error || "Não deu para pôr o som.", "error");
+      applySounds(answer.sounds);
+      toast(`“${name}” entrou no soundboard`, "ok");
+    });
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+$("#sound-save").addEventListener("click", saveSound);
+// Enter no nome salva o som (e não manda a mensagem do campo de baixo).
+$("#sound-name").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  saveSound();
+});
+
+document.addEventListener("click", (event) => {
+  if (!event.target.closest("#sound-panel, #sound-button")) closeSounds();
+});
+
+window.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  if (!soundPanel.classList.contains("hidden")) {
+    event.stopPropagation();
+    closeSounds();
+  } else if (watchPanel.classList.contains("expanded")) {
+    event.stopPropagation();
+    setWatchExpanded(false);
+  }
+}, true);
+
+paintSounds();
 
 // ---------- presença e digitação ----------
 

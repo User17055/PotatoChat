@@ -99,11 +99,32 @@ Escreva no campo de mensagem e aperte Enter (ao digitar `/`, aparece a lista dos
 - Enquanto toca, uma pílula com a capinha e as barrinhas dançando fica no **canto superior direito** da conversa. Ela abre o tocador: no computador, ao lado; no celular, na tela toda (arraste para baixo para fechar). Tem a capa grande (no YouTube dá para trocar pelo vídeo, no mesmo tamanho), o botão de **tela cheia** no canto da capa, a barra de tempo (dá para avançar), voltar ao começo, tocar/pausar, pular, parar, volume (só para você) e a fila (tocar agora ou tirar uma música dela).
 - **Os dois ouvem a mesma parte ao mesmo tempo.** A fila fica no servidor (na tabela `potato_settings`, sem tabela nova), e cada aparelho acerta o tempo sozinho se ficar mais de 2 segundos fora. Pausar, pular ou avançar vale para os dois, com um aviso para a outra pessoa.
 - **Fora do app:** no computador, a música continua com o chat em outra aba ou minimizado (a fila continua andando), e a notificação de mídia e as teclas de mídia mandam no tocador dos dois. **No celular, o YouTube só toca com o chat na tela:** quando o app sai da tela, o próprio player do YouTube para (tocar em segundo plano é recurso do YouTube Premium, e não há um jeito permitido de contornar isso num site). Por isso, enquanto a música toca, a tela do celular fica acesa com o chat aberto; e, ao voltar para o chat, a música volta sozinha, já no ponto em que está para os dois. Na extensão, fechar o painel lateral fecha o chat, e a música para junto.
-- **Spotify:** o player do Spotify, sem login, só toca uma prévia de 30 segundos. Por isso, um link de **música** do Spotify toca a mesma música **inteira pelo YouTube** (o bot pega o nome e o artista no Spotify e acha a versão com a mesma duração), com a capa, a cor e o nome do Spotify. Álbuns, playlists e podcasts continuam no player do Spotify (sem login, prévias de 30 segundos, com o selo **Prévia**).
+- **Spotify:** o player do Spotify, sem login, só toca uma prévia de 30 segundos. Por isso, um link de **música** do Spotify toca a mesma música **inteira pelo YouTube** (o bot pega o nome e o artista no Spotify e acha a versão com a mesma duração), com a capa, a cor e o nome do Spotify. Com **álbum ou playlist**, todas as músicas vão para a fila (até 50) e cada uma toca inteira pelo YouTube quando chega a vez dela. Só os podcasts continuam no player do Spotify (sem login, prévias de 30 segundos, com o selo **Prévia**).
 - **Som bloqueado:** se o navegador não deixar a música começar sozinha (acontece quando a pessoa ainda não tocou na página), o ícone ganha um pontinho vermelho. No computador e no Android, qualquer toque na página já libera o som. No iPhone, abra o tocador e toque no play do próprio player, que aparece no lugar da capa (o sistema exige o toque no player).
 - Vídeos cujo dono proíbe tocar fora do YouTube são pulados com um aviso. Na busca pelo nome, eles já ficam de fora.
 - **Busca pelo nome:** funciona sem configurar nada (o servidor lê a página de resultados do YouTube). Se um dia ela parar, configure a chave oficial: em [console.cloud.google.com](https://console.cloud.google.com), crie um projeto, ative a **YouTube Data API v3**, crie uma chave em *Credenciais* e coloque em `youtube_key` no `config.php`. A cota grátis dá cerca de 100 buscas por dia.
 - O servidor precisa conseguir acessar a internet (YouTube e Spotify) pelo PHP, o que as hospedagens comuns permitem.
+
+## Assistir junto (/assistir)
+
+Um vídeo para os dois, no mesmo segundo, com play, pause e avanço valendo para os dois. Ele aparece em cima da conversa (no celular, a conversa continua embaixo) e tem tela cheia.
+
+| Como | O que passa |
+| --- | --- |
+| `/assistir link do YouTube` | Vídeo do YouTube |
+| `/assistir link da Twitch` | Vídeo gravado (`twitch.tv/videos/…`) ou canal ao vivo (`twitch.tv/canal`; ao vivo não dá para avançar, só pausar) |
+| `/assistir` sozinho, ou o clipe de anexar → **Assistir junto** | Um vídeo do aparelho: nada sobe para o servidor; a outra pessoa escolhe o mesmo arquivo no aparelho dela e os dois assistem sincronizados |
+
+- Começar um vídeo pausa a música do bot. O **X** fecha o vídeo para os dois.
+- Clipes da Twitch não têm como sincronizar. A Twitch só toca em site com HTTPS (a hospedagem já é).
+- **Netflix, HBO, Disney+ etc. não dá dentro do site:** os vídeos deles são protegidos e só tocam no site ou app deles, com a conta de cada um.
+
+## Soundboard (/som)
+
+O botão de ondinhas no campo de mensagem abre os sons rápidos. Apertou, toca nos dois aparelhos (e aparece quem tocou).
+
+- Dez sons prontos (aplausos, buzina, tum dum tss, tcharam, triste, boing, rufar, beijo, plim e suspense), feitos pelo próprio navegador.
+- **Seu som:** suba um áudio curto (mp3, m4a, ogg ou wav, até 1,5 MB) e dê um nome. Ele vale para os dois; o **X** no botão tira (até 24 sons).
 
 ## Chamadas e transmissão de tela
 

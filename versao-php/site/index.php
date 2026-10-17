@@ -121,6 +121,11 @@ function asset(string $file): string
       <symbol id="i-list-music" viewBox="0 0 24 24"><path d="M21 15V6"/><path d="M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/><path d="M12 12H3"/><path d="M16 6H3"/><path d="M12 18H3"/></symbol>
       <symbol id="i-rotate-ccw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
       <symbol id="i-external" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+      <symbol id="i-audio-lines" viewBox="0 0 24 24"><path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/></symbol>
+      <symbol id="i-tv" viewBox="0 0 24 24"><rect width="20" height="15" x="2" y="7" rx="2" ry="2"/><path d="m17 2-5 5-5-5"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+      <!-- Logo da Twitch (Simple Icons, CC0) -->
+      <symbol id="b-twitch" viewBox="0 0 24 24"><path fill="#9146ff" d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0 1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/></symbol>
       <symbol id="i-volume-1" viewBox="0 0 24 24"><path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/></symbol>
       <!-- Logos do YouTube e do Spotify (Simple Icons, CC0), nas cores das marcas -->
       <symbol id="b-youtube" viewBox="0 0 24 24"><path fill="#ff0033" d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z"/><path fill="#fff" d="M9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></symbol>
@@ -309,6 +314,36 @@ function asset(string $file): string
           </div>
         </div>
 
+        <!-- Assistir junto: um vídeo para os dois (YouTube, Twitch ou do aparelho), com o mesmo play/pause. -->
+        <div id="watch-panel" class="watch-panel hidden">
+          <div id="watch-stage" class="watch-stage">
+            <div id="watch-host" class="watch-host"></div>
+            <div id="watch-need" class="watch-need hidden">
+              <svg class="icon"><use href="#i-file" /></svg>
+              <p><strong id="watch-need-name"></strong>Esse vídeo está no aparelho de quem começou. Escolha o mesmo arquivo no seu para assistirem juntos.</p>
+              <button id="watch-pick" class="music-pill" type="button"><svg class="icon"><use href="#i-file" /></svg>Escolher o vídeo</button>
+            </div>
+            <button id="watch-unblock" class="music-unblock hidden" type="button"><svg class="icon"><use href="#i-play" /></svg>Toque no play para assistir junto</button>
+          </div>
+          <div class="watch-bar">
+            <button id="watch-toggle" class="watch-btn swap" type="button" title="Pausar para os dois" aria-label="Tocar ou pausar">
+              <svg class="icon when-on"><use href="#i-pause" /></svg>
+              <svg class="icon when-off"><use href="#i-play" /></svg>
+            </button>
+            <div class="watch-info">
+              <span class="watch-title"><svg class="brand" aria-hidden="true"><use id="watch-logo" href="#b-youtube" /></svg><strong id="watch-title"></strong></span>
+              <div class="watch-progress">
+                <span id="watch-time">0:00</span>
+                <input id="watch-seek" type="range" min="0" max="100" step="0.1" value="0" aria-label="Posição do vídeo" />
+                <span id="watch-length">0:00</span>
+              </div>
+              <span id="watch-live" class="watch-live hidden"><i></i>AO VIVO</span>
+            </div>
+            <button id="watch-full" class="watch-btn" type="button" title="Tela cheia" aria-label="Tela cheia"><svg class="icon"><use id="watch-full-icon" href="#i-maximize" /></svg></button>
+            <button id="watch-close" class="watch-btn danger" type="button" title="Parar para os dois" aria-label="Parar o vídeo para os dois"><svg class="icon"><use href="#i-x" /></svg></button>
+          </div>
+        </div>
+
         <div class="messages-wrap">
           <div id="messages" class="messages" aria-live="polite">
             <button id="load-more" class="load-more hidden" type="button">Carregar mensagens anteriores</button>
@@ -355,11 +390,27 @@ function asset(string $file): string
           <div id="attach-menu" class="attach-menu hidden" role="menu" aria-label="Anexar">
             <button type="button" role="menuitem" data-pick="#pick-media"><span class="attach-icon media"><svg class="icon"><use href="#i-image" /></svg></span>Foto ou vídeo</button>
             <button type="button" role="menuitem" data-pick="#pick-file"><span class="attach-icon doc"><svg class="icon"><use href="#i-file" /></svg></span>Arquivo</button>
+            <button type="button" role="menuitem" data-pick="#pick-watch"><span class="attach-icon watch"><svg class="icon"><use href="#i-tv" /></svg></span>Assistir junto (vídeo do aparelho)</button>
           </div>
           <input id="pick-media" type="file" accept="image/*,video/*" multiple hidden />
           <input id="pick-file" type="file" multiple hidden />
+          <input id="pick-watch" type="file" accept="video/*" hidden />
+          <input id="pick-sound" type="file" accept="audio/*" hidden />
+          <!-- Soundboard: sons rápidos que tocam nos dois aparelhos. -->
+          <div id="sound-panel" class="sound-panel hidden" role="dialog" aria-label="Soundboard">
+            <p class="sound-head"><strong>Soundboard</strong><span>toca para os dois</span></p>
+            <div id="sound-grid" class="sound-grid"></div>
+            <!-- Dentro do formulário de mensagem: aqui não pode ser outro <form>. -->
+            <div id="sound-form" class="sound-form hidden">
+              <input id="sound-name" maxlength="24" autocomplete="off" enterkeyhint="done" placeholder="Nome do som" aria-label="Nome do som" />
+              <button id="sound-save" class="music-pill" type="button">Salvar</button>
+            </div>
+          </div>
           <button id="attach-button" class="attach-button" type="button" title="Enviar foto ou arquivo" aria-label="Enviar foto ou arquivo" aria-haspopup="menu" aria-expanded="false" aria-controls="attach-menu">
             <svg class="icon"><use href="#i-paperclip" /></svg>
+          </button>
+          <button id="sound-button" class="attach-button sound-button" type="button" title="Soundboard" aria-label="Soundboard" aria-haspopup="dialog" aria-expanded="false" aria-controls="sound-panel">
+            <svg class="icon"><use href="#i-audio-lines" /></svg>
           </button>
           <button id="gif-button" class="gif-button" type="button" title="Enviar GIF" aria-label="Enviar GIF" aria-haspopup="dialog" aria-expanded="false" aria-controls="gif-panel">GIF</button>
           <textarea id="message-input" rows="1" maxlength="2000" placeholder="Escreva uma mensagem…" aria-label="Mensagem"></textarea>
@@ -627,7 +678,7 @@ function asset(string $file): string
 
     <script src="vendor/gsap.min.js"></script>
     <script type="importmap">
-      { "imports": { "./fx.js": "./<?= asset('fx.js') ?>", "./sound.js": "./<?= asset('sound.js') ?>", "./realtime.js": "./<?= asset('realtime.js') ?>", "./music.js": "./<?= asset('music.js') ?>" } }
+      { "imports": { "./fx.js": "./<?= asset('fx.js') ?>", "./sound.js": "./<?= asset('sound.js') ?>", "./realtime.js": "./<?= asset('realtime.js') ?>", "./music.js": "./<?= asset('music.js') ?>", "./watch.js": "./<?= asset('watch.js') ?>" } }
     </script>
     <script type="module" src="<?= asset('app.js') ?>"></script>
   </body>

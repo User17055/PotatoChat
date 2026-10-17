@@ -18,7 +18,7 @@ function loadApi(name, src, setup) {
   return apis[name];
 }
 
-const youtubeApi = () => (window.YT?.Player ? Promise.resolve(window.YT) : loadApi("youtube", "https://www.youtube.com/iframe_api", (resolve) => {
+export const youtubeApi = () => (window.YT?.Player ? Promise.resolve(window.YT) : loadApi("youtube", "https://www.youtube.com/iframe_api", (resolve) => {
   const previous = window.onYouTubeIframeAPIReady;
   window.onYouTubeIframeAPIReady = () => {
     previous?.();

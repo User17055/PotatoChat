@@ -22,6 +22,8 @@ const FILE_UPLOADS_PER_10_MIN = 60;
 // Papel de parede: foto reduzida no navegador (lado maior até 1600 px). Cabe numa requisição mesmo em base64.
 const WALLPAPER_MAX = 650000;
 const MUSIC_QUEUE_MAX = 50;
+const SOUND_MAX = 1500000;
+const SOUND_LIST_MAX = 24;
 // Mesma lista do app.js (THEMES). O primeiro é o padrão.
 const THEMES = ['escuro', 'preto', 'rosa', 'roxo', 'azul', 'verde', 'claro'];
 
@@ -720,7 +722,22 @@ function spotify_meta(string $type, string $id): ?array
         'thumb' => $sharp ? https_url($sharp[count($sharp) - 1]['url']) : ($images ? https_url($images[0]['url']) : null),
         'color' => is_array($base) ? sprintf('#%02x%02x%02x', $channel('red'), $channel('green'), $channel('blue')) : null,
         'duration' => ($entity['duration'] ?? 0) > 0 ? round($entity['duration'] / 1000, 1) : null,
+        // Álbum ou playlist: as músicas (nome, artistas e duração; a capa vem quando cada uma for tocar).
+        'tracks' => array_values(array_filter(array_map(function ($item) use ($line) {
+            if (!is_array($item) || !preg_match('~^spotify:track:([A-Za-z0-9]{22})$~', (string) ($item['uri'] ?? ''), $match)) return null;
+            return ['id' => $match[1], 'title' => $line($item['title'] ?? ''), 'artist' => text_slice($line($item['subtitle'] ?? ''), 120),
+                'duration' => ($item['duration'] ?? 0) > 0 ? round($item['duration'] / 1000, 1) : null];
+        }, (array) ($entity['trackList'] ?? [])))),
     ];
+}
+
+// Música da fila guardada só com o nome (de um álbum ou playlist do Spotify): na hora de tocar, vira a música
+// inteira pelo YouTube. null = não deu para tocar.
+function ready_track(array $item): ?array
+{
+    if (empty($item['lazy'])) return $item;
+    $resolved = resolve_track("spotify:track:{$item['id']}");
+    return $resolved['ok'] ? $resolved['track'] + ['uid' => $item['uid'], 'by' => $item['by']] : null;
 }
 
 // Nome ou link → música pronta para a fila ({source, type, id, title, artist, thumb, cover, …}).
@@ -752,6 +769,21 @@ function resolve_track(string $query): array
             'thumb' => $meta['thumb'], 'cover' => $meta['cover'], 'color' => $meta['color'],
             'duration' => $video['duration'] ?? $meta['duration'],
             'origin' => ['source' => 'spotify', 'type' => 'track', 'id' => $link['id']],
+        ], fn($value) => $value !== null)];
+    }
+    // Álbum ou playlist: as músicas vão todas para a fila, e cada uma toca inteira pelo YouTube quando chegar a vez
+    // dela (procurar as 50 de uma vez demoraria minutos). O cartão no chat é o da lista.
+    if ($meta && in_array($link['type'], ['album', 'playlist'], true) && !empty($meta['tracks'])) {
+        $album = $link['type'] === 'album';
+        $list = array_map(fn($item) => array_filter([
+            'source' => 'spotify', 'type' => 'track', 'id' => $item['id'], 'title' => $item['title'], 'artist' => $item['artist'],
+            'duration' => $item['duration'], 'thumb' => $album ? $meta['thumb'] : null, 'lazy' => true,
+        ], fn($value) => $value !== null && $value !== ''), array_slice($meta['tracks'], 0, MUSIC_QUEUE_MAX));
+        $count = count($list);
+        return ['ok' => true, 'list' => $list, 'card' => $link + array_filter([
+            'title' => $meta['title'] ?: ($album ? 'Álbum do Spotify' : 'Playlist do Spotify'),
+            'artist' => text_slice(($album ? 'Álbum' : 'Playlist') . ($meta['artist'] !== '' ? " · {$meta['artist']}" : '') . " · $count " . ($count === 1 ? 'música' : 'músicas'), 120),
+            'thumb' => $meta['thumb'], 'cover' => $meta['cover'], 'color' => $meta['color'],
         ], fn($value) => $value !== null)];
     }
     // Sem a página do player, o oEmbed ainda dá o nome e a capa.
@@ -811,16 +843,29 @@ function music_act(array $me, array $body): array
     $op = str($body['op'] ?? '');
     $query = text_slice(text_trim(str($body['query'] ?? '')), 300);
     $track = null;
+    $card = null;
+    $more = [];
     if ($op === 'play' && $query !== '') {
         $resolved = resolve_track($query);
         if (!$resolved['ok']) return $resolved;
-        $track = $resolved['track'] + ['uid' => bin2hex(random_bytes(8)), 'by' => $me['name']];
+        $stamp = fn($item) => $item + ['uid' => bin2hex(random_bytes(8)), 'by' => $me['name']];
+        if (isset($resolved['list'])) {
+            // Álbum ou playlist: a primeira que der para tocar já fica pronta; as outras vão para a fila.
+            $more = array_map($stamp, $resolved['list']);
+            for ($tries = 0; !$track && $more && $tries < 3; $tries++) $track = ready_track(array_shift($more));
+            if (!$track) return ['ok' => false, 'error' => 'Não deu para tocar as músicas dessa lista.'];
+            $card = $resolved['card'] + ['uid' => $track['uid'], 'by' => $me['name']];
+        } else {
+            $track = $stamp($resolved['track']);
+        }
     }
     $state = music_state(true);
     $now = now_ms();
     $action = ['op' => $op, 'by' => $me['name']];
     $advance = function () use (&$state, $now, &$action) {
-        $state['now'] = array_shift($state['queue']) ?: null;
+        $next = null;
+        for ($tries = 0; !$next && $state['queue'] && $tries < 3; $tries++) $next = ready_track(array_shift($state['queue']));
+        $state['now'] = $next;
         $state['playing'] = (bool) $state['now'];
         $state['position'] = 0;
         $state['updatedAt'] = $now;
@@ -838,6 +883,11 @@ function music_act(array $me, array $body): array
                     $action['queued'] = 0;
                 }
                 $action['track'] = $track;
+                if ($more) {
+                    $more = array_slice($more, 0, max(0, MUSIC_QUEUE_MAX - count($state['queue'])));
+                    $state['queue'] = array_merge($state['queue'], $more);
+                    $action['added'] = 1 + count($more);
+                }
                 break;
             }
             // /play sozinho: continua o que estava pausado.
@@ -885,6 +935,8 @@ function music_act(array $me, array $body): array
             $index = array_search($uid, array_map(fn($item) => $item['uid'] ?? '', $state['queue']), true);
             if ($uid === '' || $index === false) return ['ok' => false, 'error' => 'Essa música não está mais na fila.'];
             [$picked] = array_splice($state['queue'], $index, 1);
+            $picked = ready_track($picked);
+            if (!$picked) return ['ok' => false, 'error' => 'Não deu para tocar essa música.'];
             $state = ['now' => $picked, 'queue' => $state['queue'], 'playing' => true, 'position' => 0, 'updatedAt' => $now];
             $action['track'] = $picked;
             break;
@@ -892,10 +944,167 @@ function music_act(array $me, array $body): array
             return ['ok' => false, 'error' => 'Comando de música desconhecido.'];
     }
     save_music($state);
-    if ($track) post_music_card($me, $track, $action['queued']);
+    if ($track) post_music_card($me, $card ?? $track, $action['queued']);
     $public = music_public($state);
     emit('music', ['state' => $public, 'action' => $action]);
     return ['ok' => true, 'state' => $public, 'action' => $action];
+}
+
+// ---------- assistir junto ----------
+// Um vídeo para os dois, no mesmo segundo: YouTube, Twitch (vídeo gravado ou canal ao vivo) ou um arquivo que cada
+// um escolhe no próprio aparelho (nada sobe para o servidor). Fica na tabela de configurações (nome "watch").
+
+function parse_watch_link(string $query): ?array
+{
+    $music = parse_music_link($query);
+    if (($music['source'] ?? '') === 'youtube') return ['source' => 'youtube', 'id' => $music['id']];
+    if (preg_match('~twitch\.tv/videos/(\d+)~i', $query, $match)) return ['source' => 'twitch', 'kind' => 'video', 'id' => $match[1]];
+    if (preg_match('~clips\.twitch\.tv/|twitch\.tv/[^/\s]+/clip/~i', $query)) return ['source' => 'clip'];
+    if (preg_match('~twitch\.tv/([A-Za-z0-9_]{3,25})(?=[/?#\s]|$)~i', $query, $match)) return ['source' => 'twitch', 'kind' => 'channel', 'id' => strtolower($match[1])];
+    return null;
+}
+
+function watch_blank(): array
+{
+    return ['now' => null, 'playing' => false, 'position' => 0, 'updatedAt' => 0];
+}
+
+function watch_state(bool $lock = false): array
+{
+    if ($lock) query('INSERT IGNORE INTO ' . t('settings') . " (name, value) VALUES ('watch', '{}')");
+    $raw = query('SELECT value FROM ' . t('settings') . " WHERE name = 'watch'" . ($lock ? ' FOR UPDATE' : ''))->fetchColumn();
+    $state = $raw ? json_decode((string) $raw, true) : null;
+    return is_array($state) ? array_merge(watch_blank(), $state) : watch_blank();
+}
+
+function save_watch(array $state): void
+{
+    query('INSERT INTO ' . t('settings') . " (name, value) VALUES ('watch', ?) ON DUPLICATE KEY UPDATE value = VALUES(value)", [encode($state)]);
+}
+
+function watch_public(array $state): array
+{
+    return $state + ['serverNow' => now_ms()];
+}
+
+// Comandos: start (query = link; local = vídeo do aparelho), pause, resume, seek, ended e stop.
+function watch_act(array $me, array $body): array
+{
+    $op = str($body['op'] ?? '');
+    $item = null;
+    if ($op === 'start') {
+        $local = is_array($body['local'] ?? null) ? $body['local'] : null;
+        if ($local) {
+            $name = clean_file_name(str($local['name'] ?? ''));
+            $item = ['source' => 'local', 'title' => $name, 'name' => $name, 'size' => max(0, (int) ($local['size'] ?? 0)), 'duration' => max(0, min(86400, (float) ($local['duration'] ?? 0)))];
+        } else {
+            $link = parse_watch_link(text_slice(text_trim(str($body['query'] ?? '')), 300));
+            if (!$link) return ['ok' => false, 'error' => 'Cole o link de um vídeo do YouTube ou da Twitch (ou escolha um vídeo do aparelho).'];
+            if ($link['source'] === 'clip') return ['ok' => false, 'error' => 'Clipe da Twitch não dá para assistir junto: use o link do vídeo ou do canal.'];
+            if ($link['source'] === 'youtube') {
+                $meta = config()['music_lookup'] ? youtube_meta($link['id']) : null;
+                $item = $link + ['title' => text_slice((string) ($meta['title'] ?? 'Vídeo do YouTube'), 200)];
+            } else {
+                $item = $link + ['title' => $link['kind'] === 'channel' ? "Ao vivo: {$link['id']}" : 'Vídeo da Twitch'];
+            }
+        }
+        $item += ['uid' => bin2hex(random_bytes(8)), 'by' => $me['name']];
+    }
+    $state = watch_state(true);
+    $now = now_ms();
+    $action = ['op' => $op, 'by' => $me['name']];
+    $at = fn() => $state['playing'] ? $state['position'] + ($now - $state['updatedAt']) / 1000 : $state['position'];
+    switch ($op) {
+        case 'start':
+            $state = ['now' => $item, 'playing' => true, 'position' => 0, 'updatedAt' => $now];
+            $action['item'] = $item;
+            // Os dois sons juntos não dá: a música pausa.
+            $music = music_state(true);
+            if ($music['now'] && $music['playing']) {
+                $music['position'] += ($now - $music['updatedAt']) / 1000;
+                $music['playing'] = false;
+                $music['updatedAt'] = $now;
+                save_music($music);
+                emit('music', ['state' => music_public($music), 'action' => ['op' => 'pause', 'by' => $me['name']]]);
+            }
+            break;
+        case 'pause':
+        case 'ended':
+            if (!$state['now']) return ['ok' => false, 'error' => 'Nenhum vídeo agora.'];
+            if ($op === 'ended' && ($state['now']['uid'] ?? '') !== str($body['uid'] ?? '')) return ['ok' => true, 'state' => watch_public($state)];
+            if ($state['playing']) {
+                $state['position'] = $at();
+                $state['playing'] = false;
+                $state['updatedAt'] = $now;
+            }
+            break;
+        case 'resume':
+            if (!$state['now']) return ['ok' => false, 'error' => 'Nenhum vídeo agora.'];
+            if (!$state['playing']) {
+                $state['playing'] = true;
+                $state['updatedAt'] = $now;
+            }
+            break;
+        case 'seek':
+            if (!$state['now']) return ['ok' => false, 'error' => 'Nenhum vídeo agora.'];
+            $state['position'] = max(0, min(86400, (float) ($body['position'] ?? 0)));
+            $state['updatedAt'] = $now;
+            break;
+        case 'stop':
+            $state = watch_blank();
+            break;
+        default:
+            return ['ok' => false, 'error' => 'Comando desconhecido.'];
+    }
+    save_watch($state);
+    $public = watch_public($state);
+    emit('watch', ['state' => $public, 'action' => $action]);
+    return ['ok' => true, 'state' => $public, 'action' => $action];
+}
+
+// ---------- soundboard ----------
+// Sons rápidos que tocam nos dois aparelhos. Os prontos são feitos no próprio navegador (sound.js); cada um pode
+// subir os seus (áudio curto, enviado como arquivo). A lista fica na tabela de configurações (nome "sounds").
+
+function sound_list(bool $lock = false): array
+{
+    if ($lock) query('INSERT IGNORE INTO ' . t('settings') . " (name, value) VALUES ('sounds', '[]')");
+    $raw = query('SELECT value FROM ' . t('settings') . " WHERE name = 'sounds'" . ($lock ? ' FOR UPDATE' : ''))->fetchColumn();
+    $list = $raw ? json_decode((string) $raw, true) : null;
+    return is_array($list) ? array_values($list) : [];
+}
+
+// Comandos: play (id), add (file = chave do áudio enviado, name) e remove (id).
+function soundboard_act(array $me, array $body): array
+{
+    $op = str($body['op'] ?? '');
+    $id = str($body['id'] ?? '');
+    if ($op === 'play') {
+        if (!preg_match('/^[a-z0-9-]{1,40}$/', $id)) return ['ok' => false, 'error' => 'Som desconhecido.'];
+        emit('soundboard', ['id' => $id, 'by' => $me['name']]);
+        return ['ok' => true];
+    }
+    $list = sound_list(true);
+    if ($op === 'add') {
+        $key = str($body['file'] ?? '');
+        $file = query('SELECT kind, size FROM ' . t('files') . ' WHERE file_key = ? AND owner = ? AND message_id IS NULL', [$key, $me['name']])->fetch();
+        if (!$file || $file['kind'] !== 'audio') return ['ok' => false, 'error' => 'Escolha um áudio (mp3, m4a, ogg ou wav).'];
+        if ((int) $file['size'] > SOUND_MAX) return ['ok' => false, 'error' => 'O som pode ter até 1,5 MB (alguns segundos).'];
+        if (count($list) >= SOUND_LIST_MAX) return ['ok' => false, 'error' => 'Já tem ' . SOUND_LIST_MAX . ' sons. Tire um antes de pôr outro.'];
+        // Marcado como do soundboard, o arquivo não some na limpeza de envios abandonados.
+        query('UPDATE ' . t('files') . " SET message_id = 'soundboard' WHERE file_key = ?", [$key]);
+        $list[] = ['id' => 'u' . substr($key, 0, 12), 'key' => $key, 'name' => text_trim(text_slice(text_trim(str($body['name'] ?? '')), 24)) ?: 'Som', 'url' => file_url($key), 'by' => $me['name']];
+    } elseif ($op === 'remove') {
+        $found = array_values(array_filter($list, fn($sound) => ($sound['id'] ?? '') === $id));
+        if (!$found) return ['ok' => false, 'error' => 'Esse som já saiu.'];
+        query('DELETE FROM ' . t('files') . " WHERE file_key = ? AND message_id = 'soundboard'", [$found[0]['key']]);
+        $list = array_values(array_filter($list, fn($sound) => ($sound['id'] ?? '') !== $id));
+    } else {
+        return ['ok' => false, 'error' => 'Comando desconhecido.'];
+    }
+    query('INSERT INTO ' . t('settings') . " (name, value) VALUES ('sounds', ?) ON DUPLICATE KEY UPDATE value = VALUES(value)", [encode($list)]);
+    emit('sounds', ['sounds' => $list]);
+    return ['ok' => true, 'sounds' => $list];
 }
 
 // ---------- papel de parede ----------
@@ -1128,6 +1337,8 @@ function history(string $me): array
         'gifKey' => str(config()['giphy_key']),
         'fileMax' => file_max(),
         'music' => music_public(music_state()),
+        'watch' => watch_public(watch_state()),
+        'sounds' => sound_list(),
     ];
 }
 
@@ -1285,6 +1496,12 @@ function act(array $me, string $event, $data)
 
         case 'music':
             return music_act($me, $body);
+
+        case 'watch':
+            return watch_act($me, $body);
+
+        case 'soundboard':
+            return soundboard_act($me, $body);
 
         // Tema escolhido: fica na conta e muda na hora nas outras abas da mesma pessoa.
         case 'theme':
