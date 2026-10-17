@@ -105,19 +105,30 @@ Escreva no campo de mensagem e aperte Enter (ao digitar `/`, aparece a lista dos
 - **Busca pelo nome:** funciona sem configurar nada (o servidor lê a página de resultados do YouTube). Se um dia ela parar, configure a chave oficial: em [console.cloud.google.com](https://console.cloud.google.com), crie um projeto, ative a **YouTube Data API v3**, crie uma chave em *Credenciais* e coloque em `youtube_key` no `config.php`. A cota grátis dá cerca de 100 buscas por dia.
 - O servidor precisa conseguir acessar a internet (YouTube e Spotify) pelo PHP, o que as hospedagens comuns permitem.
 
-## Watch Party (/watchparty)
+## Batata Watch Party (/watchparty)
 
-Uma sala só para assistir junto: o vídeo grande, com cara de cinema, e a conversa do lado (no celular, embaixo). Abre pelo botão de TV no topo da conversa, pelo clipe de anexar → **Watch Party** ou com `/watchparty`. Os dois veem o mesmo vídeo, no mesmo segundo: play, pause e avanço valem para os dois, e tem tela cheia.
+Uma sala só para assistir junto: o vídeo grande, com cara de cinema, e a conversa do lado (no celular, embaixo). Abre pelo botão de TV no topo da conversa, pelo clipe de anexar → **Batata Watch Party** ou com `/watchparty`, sempre com uma abertura de cinema (um toque na tela acelera; com "reduzir movimento" ligado no aparelho, a sala abre direto). Os dois veem o mesmo vídeo, no mesmo segundo: play, pause e avanço valem para os dois, e tem tela cheia.
 
 | De onde | Como |
 | --- | --- |
 | YouTube | Nome ou link (`/watchparty nome do vídeo` também funciona) |
+| Netflix | Nome do filme ou da série, ou o link (`netflix.com/watch/…` ou `netflix.com/title/…`). Veja abaixo |
+| HBO Max | Nome do filme ou da série, ou o link do `hbomax.com` / `max.com`. Veja abaixo |
 | Twitch | Nome do canal (ao vivo; aí só dá para pausar, não avançar) ou link de um vídeo gravado (`twitch.tv/videos/…`) |
 | Do aparelho | Cada um escolhe o mesmo arquivo no próprio aparelho; nada sobe para o servidor |
 
+- No celular, os cartões de origem passam para o lado.
 - Quando um vídeo começa, a sala abre para os dois. Cada um sai quando quiser (o vídeo continua para o outro, e o botão de TV fica com um pontinho vermelho). O **X** embaixo do vídeo para para os dois.
 - Começar um vídeo pausa a música do bot. Clipes da Twitch não têm como sincronizar.
-- **Netflix, Max (HBO), Disney+ etc. não tocam dentro do site:** os filmes deles são criptografados e só aparecem no site ou no app deles, com a conta de cada um. Guardar a senha deles no banco não resolveria isso e seria um risco para as contas.
+
+### Netflix e HBO Max
+
+Os filmes da Netflix e da HBO Max são protegidos contra cópia: só tocam no site ou no app deles, com a conta de cada um, nunca dentro de outro site. Por isso, nesses dois, a sala funciona como um controle remoto dos dois players:
+
+- **Cada um assiste com a própria conta.** A sala mostra o título, o relógio da sessão (igual para os dois) e o botão **Abrir na Netflix** / **Abrir na HBO Max**, que abre o link ou, se foi só o nome, a busca.
+- **No computador, com a extensão do Chrome (versão 2.1.0):** com o filme aberto na aba da Netflix ou da HBO Max, o player segue a sala sozinho (play, pause e o mesmo segundo), e o play, o pause ou o avanço dado lá vale para os dois.
+- **No celular:** os apps da Netflix e da HBO Max não deixam nenhum outro app mandar no player. Use a **Contagem 3, 2, 1**, que aparece nos dois aparelhos no mesmo instante, para darem o play juntos. Quando alguém pausa, o outro recebe o aviso para pausar também.
+- **Nenhuma senha fica guardada:** salvar a senha da Netflix ou da HBO Max no banco não faria o filme tocar dentro do site e ainda deixaria as contas em risco.
 
 ## Chamadas e transmissão de tela
 
@@ -133,6 +144,7 @@ Os botões do topo da conversa ligam por voz, por vídeo ou já transmitindo a t
 
 1. Em `chrome://extensions`, ative o **Modo do desenvolvedor** e clique em **Carregar sem compactação**. Escolha a pasta `extensao/`. Se a versão antiga estiver instalada, remova-a antes.
 2. Nas opções da extensão, coloque o endereço do site (ex.: `https://chat.seudominio.com.br`) e clique em **Testar conexão**.
+3. **Atualizou os arquivos da pasta `extensao/`?** Em `chrome://extensions`, clique no botão de recarregar da extensão e recarregue as abas da Netflix e da HBO Max que estiverem abertas. A versão 2.1.0 é a que sincroniza a Batata Watch Party nesses dois sites.
 
 Os atalhos continuam iguais: botão direito → *Enviar para o nosso chat*, `pc` + Espaço na barra de endereço, e `Alt+Shift+O`.
 

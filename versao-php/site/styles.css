@@ -259,10 +259,10 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .peer-text { min-width: 0; }
 .topbar h2 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .peer-status { margin: 2px 0 0; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color .3s; }
-/* Não coube: o texto passa devagar, como um letreiro (duas cópias, sem emenda). */
+/* Não coube no celular: o texto passa devagar, como um letreiro (duas cópias, sem emenda). Parado, é texto
+   comum, para o "…" funcionar no computador. */
 .peer-status.ticking { text-overflow: clip; -webkit-mask-image: linear-gradient(90deg, transparent, #000 8px, #000 calc(100% - 16px), transparent); mask-image: linear-gradient(90deg, transparent, #000 8px, #000 calc(100% - 16px), transparent); }
-.peer-status .ticker-line { display: inline-block; }
-.peer-status.ticking .ticker-line { padding-right: 36px; animation: ticker var(--ticker-time, 10s) linear infinite; }
+.peer-status.ticking .ticker-line { display: inline-block; padding-right: 36px; animation: ticker var(--ticker-time, 10s) linear infinite; }
 @keyframes ticker { to { translate: -100% 0; } }
 .peer-status.live { color: var(--ok); }
 .actions { display: flex; flex: none; gap: 8px; }
@@ -788,16 +788,32 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 /* =====================================================================
    Watch Party (/watchparty)
    ===================================================================== */
-/* Abertura da Watch Party (fx.cinema): cortinas de veludo, facho do projetor, o logo aceso e faíscas de luz. */
+/* Abertura da Batata Watch Party (fx.cinema): faixas pretas de cinema, a batata e o nome no meio, o mergulho
+   nas faixas de luz e um clarão. Tudo empilhado e centralizado, para caber igual no celular e no computador. */
 .wp-intro { position: fixed; inset: 0; z-index: 200; overflow: hidden; pointer-events: none; }
-.wp-curtain { position: absolute; top: 0; bottom: 0; width: 50.5%; background: repeating-linear-gradient(90deg, #4a0716 0 18px, #7d1028 18px 30px, #5e0b1d 30px 44px); box-shadow: inset 0 -90px 120px #000a, inset 0 50px 70px #0008; }
-.wp-curtain::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, #0007, transparent 25%, transparent 75%, #0007); }
-.wp-curtain.left { left: 0; }
-.wp-curtain.right { right: 0; }
-.wp-beam { position: absolute; left: 50%; top: -10%; width: 80vmin; height: 120%; translate: -50% 0; transform-origin: 50% 0; background: radial-gradient(ellipse at 50% 0%, #ffffff66 0%, #c4b5fd40 30%, transparent 70%); filter: blur(10px); mix-blend-mode: screen; opacity: 0; }
-.wp-logo { position: absolute; left: 50%; top: 50%; translate: -50% -50%; display: flex; align-items: center; gap: 14px; padding: 18px 30px; border-radius: 999px; background: linear-gradient(120deg, #7c3aed, #ef4444); color: #fff; font-size: clamp(24px, 6vw, 40px); font-weight: 800; letter-spacing: .02em; white-space: nowrap; box-shadow: 0 0 60px #a78bfa99, 0 0 140px #ef444466; opacity: 0; }
-.wp-logo .icon { width: 1.15em; height: 1.15em; }
-.wp-spark { position: absolute; width: 6px; height: 6px; border-radius: 50%; background: #fde68a; box-shadow: 0 0 12px #fde68a, 0 0 26px #f59e0b; opacity: 0; }
+.wp-black { position: absolute; inset: 0; background: radial-gradient(circle at 50% 45%, #1b1029, #060409 55%, #000 85%); opacity: 0; }
+.wp-glow { position: absolute; left: 50%; top: 50%; width: 120vmin; height: 120vmin; margin: -60vmin 0 0 -60vmin; border-radius: 50%; background: radial-gradient(circle, #f5c04f42, #ff3b5c1c 38%, transparent 66%); opacity: 0; }
+.wp-ribbons { position: absolute; inset: 0; }
+.wp-ribbons i { position: absolute; top: 0; bottom: 0; left: 50%; translate: -50% 0; background: linear-gradient(90deg, transparent, var(--c) 32%, color-mix(in srgb, var(--c) 45%, #fff) 50%, var(--c) 68%, transparent); -webkit-mask-image: linear-gradient(transparent, #000 22%, #000 78%, transparent); mask-image: linear-gradient(transparent, #000 22%, #000 78%, transparent); mix-blend-mode: screen; opacity: 0; }
+.wp-logo { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.wp-mark { position: relative; display: grid; place-items: center; margin-bottom: clamp(8px, 2vh, 18px); }
+.wp-potato { width: clamp(96px, 24vw, 168px); filter: drop-shadow(0 14px 28px #000c) drop-shadow(0 0 46px #f5c04f66); opacity: 0; }
+.wp-ring { position: absolute; left: -10%; right: -10%; bottom: -14%; height: 34%; border: 2px solid #f5c04f; border-radius: 50%; box-shadow: 0 0 22px #f5c04f, inset 0 0 18px #f5c04f99; opacity: 0; }
+.wp-batata { margin-right: -.5em; color: #f5c04f; font-size: clamp(13px, 3.4vw, 24px); font-weight: 800; letter-spacing: .5em; text-shadow: 0 0 18px #f5c04f88; opacity: 0; }
+.wp-title { display: flex; perspective: 500px; color: #fff; font-size: clamp(36px, 11vw, 96px); font-weight: 800; line-height: 1.05; letter-spacing: -.015em; white-space: pre; text-shadow: 0 0 30px #ff3b5c66, 0 8px 30px #000; }
+.wp-title span { display: inline-block; transform-origin: 50% 100%; }
+/* Granulado de filme por cima de tudo, bem de leve. */
+.wp-grain { position: absolute; inset: -60px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); opacity: 0; animation: wp-grain .6s steps(1) infinite; }
+@keyframes wp-grain {
+  0% { transform: translate(0, 0); }
+  20% { transform: translate(-28px, 18px); }
+  40% { transform: translate(22px, -36px); }
+  60% { transform: translate(-44px, -10px); }
+  80% { transform: translate(36px, 26px); }
+}
+.wp-bar { position: absolute; top: 0; left: 0; right: 0; height: 9vh; background: #000; }
+.wp-bar.low { top: auto; bottom: 0; }
+.wp-flash { position: absolute; inset: 0; background: radial-gradient(circle, #fff, #fff1d6 35%, #ffb02000 75%); opacity: 0; }
 
 /* Sala da Watch Party: cara de cinema, o vídeo grande e a conversa do lado (no celular, embaixo). */
 .app-shell.watching .conversation { background: radial-gradient(120% 80% at 30% 0%, #24183a 0%, #0b0a10 55%, #060609 100%); }
@@ -808,27 +824,41 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .app-shell.watching .watch-button { border-color: #a78bfa; color: #a78bfa; }
 .watch-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #0e0d14; color: #fff; }
 .watch-badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: linear-gradient(120deg, #7c3aed, #ef4444); font-size: 12.5px; font-weight: 700; letter-spacing: .03em; }
-.watch-badge .icon { width: 16px; height: 16px; }
+.watch-badge .potato-mark { width: 24px; height: 17px; }
 .watch-who { flex: 1; min-width: 0; overflow: hidden; color: #ffffffa6; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
 .watch-head .watch-btn { background: #ffffff14; color: #fff; }
 .watch-head .watch-btn:hover { background: #ffffff26; }
 .watch-panel:not(.has-video) .watch-bar { display: none; }
 /* Nada passando: escolher de onde vem o vídeo. */
-.watch-picker { position: absolute; inset: 0; z-index: 1; display: grid; place-content: center; justify-items: center; gap: 10px; padding: 24px; overflow-y: auto; background: radial-gradient(circle at 50% 30%, #2a1f45, #08070c 70%); color: #fff; text-align: center; }
-.watch-picker-icon { width: 64px; height: 64px; display: grid; place-items: center; border-radius: 20px; background: linear-gradient(140deg, #7c3aed, #ef4444); box-shadow: 0 14px 40px #7c3aed55; }
-.watch-picker-icon .icon { width: 30px; height: 30px; }
+/* "safe center": se não couber (celular deitado), começa do topo e rola, em vez de cortar em cima. */
+.watch-picker { position: absolute; inset: 0; z-index: 1; display: grid; place-content: center; place-content: safe center; justify-items: center; gap: 10px; padding: 24px; overflow-y: auto; background: radial-gradient(circle at 50% 30%, #2a1f45, #08070c 70%); color: #fff; text-align: center; }
+.watch-picker-icon { width: 72px; height: 72px; display: grid; place-items: center; border-radius: 22px; background: linear-gradient(140deg, #7c3aed, #ef4444); box-shadow: 0 14px 40px #7c3aed55; }
+.watch-picker-icon svg { width: 52px; filter: drop-shadow(0 4px 8px #0006); }
 .watch-picker strong { font-size: 20px; }
-.watch-picker p { max-width: 380px; margin: 0; color: #ffffffa6; font-size: 13.5px; line-height: 1.5; }
+.watch-hint { max-width: 420px; margin: 0; color: #ffffffa6; font-size: 13px; line-height: 1.5; }
 .watch-form { display: flex; gap: 8px; width: min(460px, 100%); margin-top: 6px; }
-.watch-form input { flex: 1; min-width: 0; padding: 11px 16px; border: 1px solid #ffffff26; border-radius: 999px; background: #ffffff12; color: #fff; font-size: 14px; outline: none; }
+.watch-form input { flex: 1; min-width: 0; padding: 11px 16px; border: 1px solid #ffffff26; border-radius: 999px; background: #ffffff12; color: #fff; font-size: 14px; text-overflow: ellipsis; outline: none; }
 .watch-form input::placeholder { color: #ffffff73; }
 .watch-form input:focus { border-color: #a78bfa; }
 .watch-form .music-pill { margin: 0; }
-.watch-sources { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 4px; }
-.watch-sources button { display: inline-flex; align-items: center; gap: 7px; padding: 8px 14px; border: 1px solid #ffffff26; border-radius: 999px; background: transparent; color: #ffffffcc; font-size: 13px; font-weight: 600; transition: background .2s, color .2s; }
-.watch-sources button:hover { background: #ffffff14; }
-.watch-sources button.active { border-color: transparent; background: #fff; color: #111; }
-.watch-sources .brand, .watch-sources .icon { width: 16px; height: 16px; }
+/* De onde vem o vídeo: cartões na cor de cada serviço (no celular, a fileira passa para o lado). */
+/* O espaço em volta dos cartões é para o brilho do escolhido não ficar cortado pela rolagem. A altura mínima
+   (cartão + espaço) impede a grade de espremer a fileira quando o texto de baixo é comprido. */
+.watch-sources { display: flex; justify-content: center; justify-content: safe center; gap: 10px; max-width: 100%; min-height: 118px; margin: -4px 0 -18px; padding: 10px 20px 26px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; }
+.watch-sources::-webkit-scrollbar { display: none; }
+.watch-source { --brand: #f5c04f; flex: 0 0 auto; width: 104px; height: 82px; display: grid; place-items: center; align-content: center; gap: 6px; padding: 8px; border: 1.5px solid color-mix(in srgb, var(--brand) 35%, #ffffff1a); border-radius: 16px; background: linear-gradient(160deg, color-mix(in srgb, var(--brand) 26%, #15121c), #0c0b10); color: #ffffffcc; font-size: 12px; font-weight: 600; scroll-snap-align: center; transition: transform .2s, border-color .2s, box-shadow .2s, color .2s; }
+.watch-source:hover { transform: translateY(-2px); color: #fff; }
+.watch-source.active { border-color: var(--brand); color: #fff; box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 30%, transparent), 0 10px 26px -8px color-mix(in srgb, var(--brand) 60%, transparent); transform: translateY(-2px) scale(1.04); }
+.watch-source[data-watch-source="youtube"] { --brand: #ff0033; }
+.watch-source[data-watch-source="twitch"] { --brand: #9146ff; }
+.watch-source[data-watch-source="netflix"] { --brand: #e50914; }
+.watch-source[data-watch-source="max"] { --brand: #2a4bff; }
+.watch-source .brand { width: 30px; height: 30px; }
+.watch-source .icon { width: 26px; height: 26px; color: var(--brand); }
+/* Marcas escritas (Netflix e HBO Max), só para mostrar de onde é. */
+.wordmark { display: inline-block; font-weight: 800; line-height: 1; letter-spacing: .04em; }
+.wordmark.netflix { color: #e50914; font-size: 17px; transform: scaleY(1.35); text-shadow: 0 2px 10px #e5091455; }
+.wordmark.max { background: linear-gradient(120deg, #fff, #9fb2ff); -webkit-background-clip: text; background-clip: text; color: transparent; font-size: 24px; letter-spacing: -.02em; }
 
 /* Palco do vídeo: o player e, embaixo, os controles dos dois. */
 .watch-panel { position: relative; z-index: 3; margin: 12px max(14px, calc((100% - 850px) / 2)) 0; overflow: hidden; border: 1px solid var(--line); border-radius: 20px; background: #000; box-shadow: 0 16px 40px #0007; }
@@ -838,6 +868,28 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 /* Os controles são os nossos (iguais para os dois); o player só recebe toque quando o navegador exige. */
 .watch-host iframe { pointer-events: none; }
 .watch-stage.blocked .watch-host iframe { pointer-events: auto; }
+/* Netflix ou HBO Max: cada um assiste na própria conta; aqui fica o relógio da sessão, o atalho e a contagem. */
+.watch-stream { position: absolute; inset: 0; z-index: 1; display: grid; place-content: center; place-content: safe center; justify-items: center; gap: 8px; padding: 22px; overflow-y: auto; background: radial-gradient(circle at 50% 35%, #2b0a0e, #050505 70%); color: #fff; text-align: center; }
+.watch-panel[data-source="max"] .watch-stream { background: radial-gradient(circle at 50% 35%, #0b1a4d, #04050c 70%); }
+.watch-stream .wordmark.netflix { font-size: clamp(30px, 6vw, 48px); }
+.watch-stream .wordmark.max { font-size: clamp(42px, 8vw, 64px); }
+.watch-stream strong { max-width: 90%; font-size: 17px; }
+.watch-stream-clock { font-size: clamp(34px, 7vw, 52px); font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.watch-stream-state { display: inline-flex; align-items: center; gap: 7px; color: #ffffffb3; font-size: 13px; font-weight: 600; }
+.watch-stream.playing .watch-stream-state::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #3ddc84; box-shadow: 0 0 10px #3ddc84; animation: blink 1.4s ease-in-out infinite; }
+.watch-stream-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 6px; }
+.watch-stream-actions .music-pill { margin: 0; text-decoration: none; }
+.watch-ghost { display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border: 1.5px solid #ffffff4d; border-radius: 999px; background: #ffffff12; color: #fff; font-size: 14px; font-weight: 700; transition: background .2s, transform .15s; }
+.watch-ghost:hover { background: #ffffff24; }
+.watch-ghost:active { transform: scale(.95); }
+.watch-ghost .icon { width: 16px; height: 16px; }
+.watch-stream-note { max-width: 420px; margin: 4px 0 0; color: #ffffff8c; font-size: 12px; line-height: 1.5; }
+.watch-panel[data-source="netflix"] #watch-full, .watch-panel[data-source="max"] #watch-full,
+.watch-panel[data-source="netflix"] .watch-title .brand, .watch-panel[data-source="max"] .watch-title .brand { display: none; }
+.watch-count { position: absolute; inset: 0; z-index: 3; display: grid; place-content: center; justify-items: center; gap: 6px; background: #000000b3; color: #fff; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.watch-count span { font-size: clamp(56px, 14vw, 120px); font-weight: 800; line-height: 1; text-shadow: 0 0 40px #a78bfa; }
+.watch-count small { color: #ffffffb3; font-size: 14px; font-weight: 600; }
+.watch-count.go span { color: #3ddc84; text-shadow: 0 0 40px #3ddc84; }
 .watch-need { position: absolute; inset: 0; z-index: 1; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 20px; background: radial-gradient(circle, #1c1c1c, #000); color: #fff; text-align: center; }
 .watch-need .icon { width: 34px; height: 34px; color: var(--accent); }
 .watch-need p { max-width: 380px; margin: 0; color: #ffffffb3; font-size: 13.5px; line-height: 1.5; }
@@ -1150,7 +1202,23 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
   /* Sala no celular: o vídeo em cima, a conversa embaixo (sem as abas). */
   .app-shell.watching .tabbar, .watching .topbar { display: none; }
   .watching .watch-panel { margin: 0; border: 0; border-radius: 0; }
-  .watching .watch-panel:not(.has-video) .watch-stage { aspect-ratio: auto; min-height: 330px; }
+  .watching .watch-panel:not(.has-video) .watch-stage { aspect-ratio: auto; min-height: 380px; }
+  .watching .watch-panel[data-source="netflix"] .watch-stage, .watching .watch-panel[data-source="max"] .watch-stage { aspect-ratio: auto; min-height: 330px; }
+  .watch-sources { justify-content: flex-start; width: calc(100% + 48px); max-width: none; margin-inline: -24px; padding-inline: 24px; -webkit-mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent); mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent); }
+  /* No celular, a batata já está no selo do topo: o espaço fica para os cartões e o texto. */
+  .watch-picker-icon { display: none; }
+  /* No celular, o "Assistir" vira só o play, para o nome do filme caber no campo. */
+  .watch-form .music-pill { width: 44px; justify-content: center; padding: 0; }
+  .watch-form .music-pill span { display: none; }
+  /* Netflix / HBO Max no celular: mais compacto, os dois botões na mesma linha. */
+  .watch-stream { gap: 6px; padding: 16px 18px; }
+  .watch-stream .wordmark.netflix { font-size: 28px; }
+  .watch-stream .wordmark.max { font-size: 40px; }
+  .watch-stream strong { font-size: 15px; }
+  .watch-stream-clock { font-size: 34px; }
+  .watch-stream-actions { gap: 8px; margin-top: 2px; }
+  .watch-stream-actions .music-pill, .watch-ghost { padding: 9px 14px; font-size: 13px; }
+  .watch-stream-note { font-size: 11.5px; }
   .profile-scroll { padding: 26px 16px 28px; }
   .topbar { min-height: 64px; padding: 10px 12px; }
   .topbar h2 { font-size: 16px; }

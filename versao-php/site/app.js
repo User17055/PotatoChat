@@ -2103,7 +2103,7 @@ const MUSIC_COMMANDS = [
   { name: "skip", icon: "skip", text: "Pula para a próxima da fila" },
   { name: "stop", icon: "stop", text: "Para e limpa a fila" },
   { name: "fila", icon: "list-music", text: "Abre o tocador com a fila" },
-  { name: "watchparty", args: "nome ou link (YouTube ou Twitch)", icon: "tv", text: "Abre a sala para assistir junto (sozinho, só abre a sala)" }
+  { name: "watchparty", args: "nome ou link (YouTube ou Twitch)", icon: "tv", text: "Abre a Batata Watch Party: YouTube, Twitch, Netflix, HBO Max ou vídeo do aparelho" }
 ];
 const COMMAND_ALIAS = { tocar: "play", continuar: "play", resume: "play", pausar: "pause", pular: "skip", next: "skip", proxima: "skip", parar: "stop", queue: "fila", watch: "watchparty", assistir: "watchparty", wp: "watchparty", ver: "watchparty" };
 // Aviso quando a outra pessoa mexe no tocador: ícone e texto.
@@ -2935,7 +2935,20 @@ let watchSource = "youtube";
 const watchPanel = $("#watch-panel");
 const watchButton = $("#watch-button");
 const watchStage = $("#watch-stage");
-const watchAt = () => (watch.playing ? watch.position + (Date.now() + musicClock - watch.updatedAt) / 1000 : watch.position);
+// updatedAt no futuro = contagem para o play: até lá, parado no mesmo segundo.
+const watchAt = () => (watch.playing ? watch.position + Math.max(0, Date.now() + musicClock - watch.updatedAt) / 1000 : watch.position);
+// Netflix e HBO Max: nada toca aqui; cada um assiste na própria conta (a extensão sincroniza; no celular, a contagem).
+const STREAMING = {
+  netflix: { name: "Netflix", mark: "NETFLIX", placeholder: "Filme, série ou link da Netflix" },
+  max: { name: "HBO Max", mark: "max", placeholder: "Filme, série ou link da HBO Max" }
+};
+const streaming = (item) => Boolean(item && STREAMING[item.source]);
+const WATCH_HINT = {
+  default: "Os dois veem o mesmo vídeo, no mesmo segundo. Play, pause e avanço valem para os dois.",
+  streaming: "Cada um assiste com a própria conta. No computador, a extensão do Potato Chat faz o player seguir a sala; no celular, a contagem ajuda a darem o play juntos."
+};
+let countdownAt = 0;
+let countdownTimer = 0;
 const hasWatchFile = (item) => Boolean(watchFile && (watchFileFor === item.uid || watchFile.name === item.name));
 
 const watchPlayer = createWatchPlayer($("#watch-host"), {
@@ -2971,7 +2984,7 @@ function checkWatchBlocked() {
 // Acompanha o servidor: troca de vídeo, play/pause e acerta o tempo se ficou mais de 2 s fora.
 function syncWatch() {
   const item = watch.now;
-  if (!watchView || !item || (item.source === "local" && !hasWatchFile(item))) return watchPlayer.destroy();
+  if (!watchView || !item || streaming(item) || (item.source === "local" && !hasWatchFile(item))) return watchPlayer.destroy();
   if (watchPlayer.uid !== item.uid) return watchPlayer.open(item, watchAt, () => watch.playing, watchFile);
   if (!watchPlayer.ready) return;
   if (watch.playing) {
@@ -3030,14 +3043,20 @@ function setWatchRoom(on) {
     syncWatch();
     scrollToLatest();
     if (on && !watch.now && matchMedia("(pointer: fine)").matches) setTimeout(() => $("#watch-query").focus(), 50);
-  });
+  }, (cue) => sound.play(cue));
 }
 
 function setWatchSource(source) {
   watchSource = source;
-  for (const button of watchPanel.querySelectorAll("[data-watch-source]")) button.classList.toggle("active", button.dataset.watchSource === source);
-  $("#watch-query").placeholder = source === "twitch" ? "Canal ou link da Twitch (twitch.tv/…)" : "Nome ou link do YouTube";
-  $("#watch-query").focus();
+  for (const button of watchPanel.querySelectorAll("[data-watch-source]")) {
+    const on = button.dataset.watchSource === source;
+    button.classList.toggle("active", on);
+    button.setAttribute("aria-checked", String(on));
+    if (on) button.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+  }
+  $("#watch-query").placeholder = STREAMING[source]?.placeholder || (source === "twitch" ? "Canal ou link da Twitch" : "Nome ou link do YouTube");
+  $("#watch-hint").textContent = STREAMING[source] ? WATCH_HINT.streaming : WATCH_HINT.default;
+  if (matchMedia("(pointer: fine)").matches) $("#watch-query").focus();
 }
 
 function paintWatch() {
@@ -3045,18 +3064,30 @@ function paintWatch() {
   watchPanel.classList.toggle("hidden", !watchView);
   watchPanel.classList.toggle("has-video", Boolean(item));
   watchButton.classList.toggle("live", Boolean(item) && !watchRoom);
-  watchButton.title = item && !watchRoom ? `Watch Party rolando: ${item.title}` : "Watch Party";
+  watchButton.title = item && !watchRoom ? `Batata Watch Party rolando: ${item.title}` : "Batata Watch Party";
   $("#watch-picker").classList.toggle("hidden", Boolean(item));
   $("#watch-who").textContent = peerName ? `com ${peerName}` : "";
+  watchPanel.dataset.source = item?.source || "";
   if (!item) return setWatchExpanded(false);
   const needFile = item.source === "local" && !hasWatchFile(item);
   const live = item.source === "twitch" && item.kind === "channel";
+  const service = STREAMING[item.source];
+  $("#watch-stream").classList.toggle("hidden", !service);
+  if (service) {
+    const mark = $("#watch-stream-mark");
+    mark.textContent = service.mark;
+    mark.className = `wordmark ${item.source}`;
+    $("#watch-stream-title").textContent = item.title === service.name ? "" : item.title;
+    const open = $("#watch-stream-open");
+    open.href = item.url;
+    open.querySelector("span").textContent = `Abrir na ${service.name}`;
+    $("#watch-stream-note").textContent = WATCH_HINT.streaming;
+  }
   $("#watch-need").classList.toggle("hidden", !needFile);
   $("#watch-need-name").textContent = item.name || "";
   $("#watch-unblock").classList.toggle("hidden", !watchBlocked || needFile);
   watchStage.classList.toggle("blocked", watchBlocked);
   watchPanel.classList.toggle("live", live);
-  watchPanel.dataset.source = item.source;
   $("#watch-live").classList.toggle("hidden", !live);
   $("#watch-title").textContent = item.title;
   $("#watch-title").title = item.title;
@@ -3070,6 +3101,12 @@ function paintWatch() {
 
 function paintWatchTime() {
   if (!watch.now) return;
+  if (streaming(watch.now)) {
+    const waiting = watch.playing && watch.updatedAt > Date.now() + musicClock;
+    $("#watch-stream-clock").textContent = clockTime(watchAt());
+    $("#watch-stream-state").textContent = waiting ? "Prontos para o play…" : watch.playing ? "Passando agora" : "Pausado";
+    $("#watch-stream").classList.toggle("playing", watch.playing && !waiting);
+  }
   const length = watchPlayer.duration() || watch.now.duration || 0;
   const at = Math.min(watchAt(), length || Infinity);
   $("#watch-time").textContent = clockTime(at);
@@ -3098,11 +3135,16 @@ function watchCommand(op, extra = {}) {
       return toast(result?.error || "Não deu certo.", "error");
     }
     applyWatch(result.state, true);
+    if (result.action?.op === "countdown") showCountdown(result.action.at);
   });
 }
 
 function watchNotice(action) {
+  if (action?.op === "countdown") showCountdown(action.at);
   if (!action || action.by === me) return;
+  // Netflix e HBO Max sem a extensão: o aviso pede para fazer o mesmo no player de lá.
+  if (streaming(watch.now) && action.op === "pause") return toast(`${action.by} pausou: pause aí também`, "music", "pause");
+  if (streaming(watch.now) && action.op === "resume") return toast(`${action.by} deu o play: dê o play aí também`, "music", "play");
   if (action.op === "start" && action.item) toast(`${action.by} começou um vídeo: ${action.item.title}`, "music", "tv");
   else if (action.op === "pause") toast(`${action.by} pausou o vídeo`, "music", "pause");
   else if (action.op === "resume") toast(`${action.by} voltou a passar o vídeo`, "music", "play");
@@ -3173,6 +3215,12 @@ watchButton.addEventListener("click", () => {
 $("#watch-form").addEventListener("submit", (event) => {
   event.preventDefault();
   let query = $("#watch-query").value.trim();
+  // Netflix e HBO Max: o nome é opcional (cada um escolhe lá na própria conta).
+  if (STREAMING[watchSource]) {
+    watchCommand("start", { query, service: watchSource });
+    $("#watch-query").value = "";
+    return;
+  }
   if (!query) return $("#watch-query").focus();
   // Na Twitch, só o nome do canal já basta.
   if (watchSource === "twitch" && !/twitch\.tv/i.test(query)) query = `twitch.tv/${query.replace(/^@/, "")}`;
@@ -3180,9 +3228,36 @@ $("#watch-form").addEventListener("submit", (event) => {
   $("#watch-query").value = "";
 });
 
+// Contagem 3, 2, 1 nos dois aparelhos ao mesmo tempo (pelo relógio do servidor), para darem o play juntos.
+function showCountdown(at) {
+  if (!at || at === countdownAt) return;
+  countdownAt = at;
+  const box = $("#watch-count");
+  const number = $("#watch-count-number");
+  let shown = "";
+  box.classList.remove("hidden");
+  clearInterval(countdownTimer);
+  countdownTimer = setInterval(() => {
+    const left = at - (Date.now() + musicClock);
+    const next = left > 3000 ? "Prontos?" : left > 0 ? String(Math.ceil(left / 1000)) : "Play!";
+    if (next !== shown) {
+      shown = next;
+      number.textContent = next;
+      box.classList.toggle("go", next === "Play!");
+      fx.pop(number);
+      sound.play(next === "Play!" ? "connected" : "tap");
+    }
+    if (left < -1200) {
+      clearInterval(countdownTimer);
+      box.classList.add("hidden");
+    }
+  }, 80);
+}
+
 watchPanel.addEventListener("click", async (event) => {
   const target = event.target;
   if (target.closest("#watch-leave")) return setWatchRoom(false);
+  if (target.closest("#watch-countdown")) return watchCommand("countdown");
   const source = target.closest("[data-watch-source]");
   if (source) {
     if (source.dataset.watchSource === "local") return $("#pick-watch").click();
@@ -3292,14 +3367,18 @@ function paintPeerStatus() {
   else setTicker(peerStatus, lastSeenLabel(peer.lastSeen));
 }
 
-// Texto que não cabe (no celular, o "Visto por último…") passa devagar, como um letreiro.
+// Texto que não cabe no celular (o "Visto por último…") passa devagar, como um letreiro. Só no celular: no
+// computador, o que não couber (na sala da Watch Party) termina em "…", com o texto inteiro ao passar o mouse.
 // Duas cópias andando juntas: quando a primeira sai, a segunda está no lugar dela, sem emenda.
+const tickerScreen = matchMedia("(max-width: 760px)");
 function setTicker(node, text, force = false) {
   if (node.dataset.text === text && !force) return;
   node.dataset.text = text;
+  node.title = text;
   const line = el("span", "ticker-line", text);
   node.replaceChildren(line);
   node.classList.remove("ticking");
+  if (!tickerScreen.matches) return;
   requestAnimationFrame(() => {
     if (line.offsetWidth <= node.clientWidth + 1) return;
     const copy = el("span", "ticker-line", text);
@@ -3310,13 +3389,20 @@ function setTicker(node, text, force = false) {
   });
 }
 
-// A largura muda (girar o celular, fonte carregando): mede de novo.
+// O espaço muda (girar o celular, entrar ou sair da Watch Party, o botão da música crescendo, fonte carregando):
+// mede de novo. Observa a barra e os botões, que não mudam de tamanho por causa do letreiro.
 let tickerTimer = 0;
 const remeasureTicker = () => {
   clearTimeout(tickerTimer);
   tickerTimer = setTimeout(() => setTicker(peerStatus, peerStatus.dataset.text || peerStatus.textContent, true), 200);
 };
-addEventListener("resize", remeasureTicker);
+if (window.ResizeObserver) {
+  const tickerSpace = new ResizeObserver(remeasureTicker);
+  tickerSpace.observe($(".topbar"));
+  tickerSpace.observe($(".topbar .actions"));
+} else {
+  addEventListener("resize", remeasureTicker);
+}
 document.fonts?.ready.then(remeasureTicker);
 
 function setPeerTyping(active) {

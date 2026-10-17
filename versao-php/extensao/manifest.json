@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Potato Chat",
-  "version": "2.0.0",
-  "description": "Nosso chat no painel lateral: envie textos, links e páginas direto do navegador.",
+  "version": "2.1.0",
+  "description": "Nosso chat no painel lateral: envie textos, links e páginas direto do navegador, e assista Netflix e HBO Max juntos na Batata Watch Party.",
   "minimum_chrome_version": "116",
   "permissions": [
     "sidePanel",
@@ -14,6 +14,19 @@
   "host_permissions": [
     "http://localhost/*",
     "https://*/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://www.netflix.com/*", "https://play.max.com/*", "https://play.hbomax.com/*"],
+      "js": ["watch-content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.netflix.com/*"],
+      "js": ["netflix-main.js"],
+      "world": "MAIN",
+      "run_at": "document_idle"
+    }
   ],
   "background": {
     "service_worker": "background.js",

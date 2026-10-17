@@ -234,7 +234,7 @@ function asset(string $file): string
             <button id="share-screen" class="icon-button" type="button" title="Transmitir tela" data-title="Transmitir tela" aria-label="Transmitir tela">
               <svg class="icon"><use href="#i-monitor-up" /></svg>
             </button>
-            <button id="watch-button" class="icon-button watch-button" type="button" title="Watch Party" aria-label="Abrir a Watch Party" aria-pressed="false">
+            <button id="watch-button" class="icon-button watch-button" type="button" title="Batata Watch Party" aria-label="Abrir a Batata Watch Party" aria-pressed="false">
               <svg class="icon"><use href="#i-tv" /></svg>
               <span class="watch-dot" aria-hidden="true"></span>
             </button>
@@ -319,26 +319,41 @@ function asset(string $file): string
         <!-- Assistir junto: um vídeo para os dois (YouTube, Twitch ou do aparelho), com o mesmo play/pause. -->
         <div id="watch-panel" class="watch-panel hidden" aria-label="Watch Party">
           <header class="watch-head">
-            <span class="watch-badge"><svg class="icon"><use href="#i-tv" /></svg>Watch Party</span>
+            <span class="watch-badge"><svg class="potato-mark" viewBox="0 0 142 100" aria-hidden="true"><use href="#potato" /></svg>Batata Watch Party</span>
             <span id="watch-who" class="watch-who"></span>
             <button id="watch-leave" class="watch-btn" type="button" title="Sair da sala (o vídeo continua para a outra pessoa)" aria-label="Sair da sala"><svg class="icon"><use href="#i-logout" /></svg></button>
           </header>
           <div id="watch-stage" class="watch-stage">
             <div id="watch-host" class="watch-host"></div>
             <div id="watch-picker" class="watch-picker hidden">
-              <span class="watch-picker-icon"><svg class="icon"><use href="#i-tv" /></svg></span>
+              <span class="watch-picker-icon"><svg viewBox="0 0 142 100" aria-hidden="true"><use href="#potato" /></svg></span>
               <strong>O que vamos assistir?</strong>
-              <p>Os dois veem o mesmo vídeo, no mesmo segundo. Play, pause e avanço valem para os dois.</p>
+              <!-- De onde vem o vídeo: no celular, a fileira passa para o lado. -->
+              <div class="watch-sources" role="radiogroup" aria-label="De onde vem o vídeo">
+                <button type="button" class="watch-source active" data-watch-source="youtube" role="radio" aria-checked="true"><svg class="brand" aria-hidden="true"><use href="#b-youtube" /></svg><span>YouTube</span></button>
+                <button type="button" class="watch-source" data-watch-source="netflix" role="radio" aria-checked="false"><b class="wordmark netflix">NETFLIX</b><span>Netflix</span></button>
+                <button type="button" class="watch-source" data-watch-source="max" role="radio" aria-checked="false"><b class="wordmark max">max</b><span>HBO Max</span></button>
+                <button type="button" class="watch-source" data-watch-source="twitch" role="radio" aria-checked="false"><svg class="brand" aria-hidden="true"><use href="#b-twitch" /></svg><span>Twitch</span></button>
+                <button type="button" class="watch-source" data-watch-source="local" role="radio" aria-checked="false"><svg class="icon"><use href="#i-file" /></svg><span>Do aparelho</span></button>
+              </div>
               <form id="watch-form" class="watch-form">
                 <input id="watch-query" type="search" autocomplete="off" enterkeyhint="go" placeholder="Nome ou link do YouTube" aria-label="Nome ou link do vídeo" />
-                <button class="music-pill" type="submit"><svg class="icon"><use href="#i-play" /></svg>Assistir</button>
+                <button class="music-pill" type="submit" title="Assistir" aria-label="Assistir"><svg class="icon"><use href="#i-play" /></svg><span>Assistir</span></button>
               </form>
-              <div class="watch-sources" role="group" aria-label="De onde vem o vídeo">
-                <button type="button" class="active" data-watch-source="youtube"><svg class="brand" aria-hidden="true"><use href="#b-youtube" /></svg>YouTube</button>
-                <button type="button" data-watch-source="twitch"><svg class="brand" aria-hidden="true"><use href="#b-twitch" /></svg>Twitch</button>
-                <button type="button" data-watch-source="local"><svg class="icon"><use href="#i-file" /></svg>Do aparelho</button>
-              </div>
+              <p id="watch-hint" class="watch-hint">Os dois veem o mesmo vídeo, no mesmo segundo. Play, pause e avanço valem para os dois.</p>
             </div>
+            <div id="watch-stream" class="watch-stream hidden">
+              <b id="watch-stream-mark" class="wordmark"></b>
+              <strong id="watch-stream-title"></strong>
+              <span id="watch-stream-clock" class="watch-stream-clock">0:00</span>
+              <span id="watch-stream-state" class="watch-stream-state"></span>
+              <div class="watch-stream-actions">
+                <a id="watch-stream-open" class="music-pill" href="https://www.netflix.com/" target="_blank" rel="noopener noreferrer"><svg class="icon"><use href="#i-external" /></svg><span>Abrir na Netflix</span></a>
+                <button id="watch-countdown" class="watch-ghost" type="button" title="Contagem nos dois aparelhos ao mesmo tempo, para darem o play juntos"><svg class="icon"><use href="#i-play" /></svg>Contagem 3, 2, 1</button>
+              </div>
+              <p id="watch-stream-note" class="watch-stream-note"></p>
+            </div>
+            <div id="watch-count" class="watch-count hidden" aria-live="assertive"><span id="watch-count-number"></span><small>deem o play juntos</small></div>
             <div id="watch-need" class="watch-need hidden">
               <svg class="icon"><use href="#i-file" /></svg>
               <p><strong id="watch-need-name"></strong>Esse vídeo está no aparelho de quem começou. Escolha o mesmo arquivo no seu para assistirem juntos.</p>
@@ -411,7 +426,7 @@ function asset(string $file): string
           <div id="attach-menu" class="attach-menu hidden" role="menu" aria-label="Anexar">
             <button type="button" role="menuitem" data-pick="#pick-media"><span class="attach-icon media"><svg class="icon"><use href="#i-image" /></svg></span>Foto ou vídeo</button>
             <button type="button" role="menuitem" data-pick="#pick-file"><span class="attach-icon doc"><svg class="icon"><use href="#i-file" /></svg></span>Arquivo</button>
-            <button type="button" role="menuitem" data-pick="#watch-button"><span class="attach-icon watch"><svg class="icon"><use href="#i-tv" /></svg></span>Watch Party</button>
+            <button type="button" role="menuitem" data-pick="#watch-button"><span class="attach-icon watch"><svg class="icon"><use href="#i-tv" /></svg></span>Batata Watch Party</button>
           </div>
           <input id="pick-media" type="file" accept="image/*,video/*" multiple hidden />
           <input id="pick-file" type="file" multiple hidden />

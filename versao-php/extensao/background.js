@@ -83,15 +83,19 @@ async function listen(siteUrl, key, signal) {
         const start = await call(siteUrl, "connect", base, signal);
         if (start.roomFull) return;
         if (start.session?.token) await chrome.storage.local.set({ session: start.session });
+        if (start.history?.watch) onWatch(start.history.watch);
         link.cursor = start.cursor;
         wait = start.wait;
         await chrome.storage.session.set({ link });
         flushOutbox();
       } else {
-        const data = await call(siteUrl, "poll", { ...base, cursor: link.cursor, only: ["message"] }, signal);
+        const data = await call(siteUrl, "poll", { ...base, cursor: link.cursor, only: ["message", "watch"] }, signal);
         link.cursor = data.cursor;
         wait = data.wait;
-        for (const event of data.events) if (event.type === "message") await onMessage(event.data);
+        for (const event of data.events) {
+          if (event.type === "message") await onMessage(event.data);
+          else if (event.type === "watch") onWatch(event.data.state);
+        }
       }
       failures = 0;
       // Salvar o cursor também mantém o serviço de fundo acordado entre as consultas.
@@ -144,6 +148,40 @@ async function onMessage(message) {
     priority: 1
   });
 }
+
+// ---------- Batata Watch Party na Netflix e na HBO Max ----------
+// Cada um assiste com a própria conta, numa aba normal. A extensão faz o player de lá seguir a sala
+// (play, pause e o segundo) e avisa a sala quando a pessoa mexe no player de lá. Nenhuma senha passa por aqui.
+
+const STREAM_TABS = ["https://www.netflix.com/*", "https://play.max.com/*", "https://play.hbomax.com/*"];
+let watch = null; // { state, offset }: o estado da sala e a diferença entre o relógio do servidor e o daqui
+
+async function onWatch(state) {
+  if (!state) return;
+  watch = { state, offset: (state.serverNow || Date.now()) - Date.now() };
+  await chrome.storage.session.set({ watch });
+  const tabs = await chrome.tabs.query({ url: STREAM_TABS }).catch(() => []);
+  for (const tab of tabs) chrome.tabs.sendMessage(tab.id, { type: "potato-watch", ...watch }).catch(() => {});
+}
+
+async function watchAction({ op, position, duration }) {
+  const [{ siteUrl }, session, { link }] = await Promise.all([settings(), getSession(), chrome.storage.session.get("link")]);
+  if (!session || !["pause", "resume", "seek"].includes(op)) return;
+  const data = { op, position: Number(position) || 0, duration: Number(duration) || 0 };
+  const body = { token: session.token, conn: link?.conn || crypto.randomUUID(), client: "extension", ops: [{ event: "watch", data }] };
+  const result = await call(siteUrl, "ops", body).then(({ results }) => results?.[0]).catch(() => null);
+  if (result?.state) onWatch(result.state);
+}
+
+chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  if (message?.type === "potato-watch-hello") {
+    // A aba da Netflix acabou de abrir: manda o estado da sala (guardado, se o serviço de fundo dormiu).
+    (watch ? Promise.resolve(watch) : chrome.storage.session.get("watch").then((saved) => saved.watch || null)).then(reply);
+    return true;
+  }
+  if (message?.type === "potato-watch-action") watchAction(message);
+  return false;
+});
 
 // ---------- fila de envio ----------
 

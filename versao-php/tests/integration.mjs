@@ -653,6 +653,16 @@ try {
   assert.equal((await withAck(dj1, "watch", { op: "start", query: "um filme bom" })).error, "Não achei esse vídeo. Cole o link do YouTube ou da Twitch (ou escolha um vídeo do aparelho).");
   const watchEnded = await withAck(dj2, "watch", { op: "ended", uid: local.state.now.uid });
   assert.equal(watchEnded.state.playing, false);
+  // Netflix e HBO Max: cada um assiste na própria conta; a sala guarda o segundo, faz a contagem e ouve a extensão.
+  const netflix = await withAck(dj1, "watch", { op: "start", query: "Stranger Things", service: "netflix" });
+  assert.deepEqual([netflix.state.now.source, netflix.state.now.title, netflix.state.now.url], ["netflix", "Stranger Things", "https://www.netflix.com/search?q=Stranger%20Things"]);
+  const counting = await withAck(dj2, "watch", { op: "countdown" });
+  assert.ok(counting.action.at >= counting.state.serverNow + 3000, "a contagem começa no futuro");
+  const reported = await withAck(dj2, "watch", { op: "pause", position: 754.2, duration: 3200 });
+  assert.deepEqual([reported.state.playing, reported.state.position, reported.state.now.duration], [false, 754.2, 3200]);
+  const hbo = await withAck(dj1, "watch", { op: "start", query: "https://play.max.com/video/watch/abc-1/def-2" });
+  assert.deepEqual([hbo.state.now.source, hbo.state.now.url], ["max", "https://play.max.com/video/watch/abc-1/def-2"]);
+  assert.equal((await withAck(dj1, "watch", { op: "start", query: "https://www.netflix.com/br/watch/81231974?t=1" })).state.now.url, "https://www.netflix.com/watch/81231974");
   assert.deepEqual((await withAck(dj1, "watch", { op: "stop" })).state.now, null);
   await withAck(dj1, "music", { op: "stop" });
 

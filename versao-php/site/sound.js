@@ -44,6 +44,30 @@ function tone({ freq = 440, to, type = "sine", start = 0, duration = 0.15, volum
   osc.stop(time + duration + 0.05);
 }
 
+// Ruído passando por um filtro que varre de from até to (vento, estalo, ar do boom).
+function noise({ from = 400, to = 4000, type = "bandpass", q = 1, start = 0, duration = 0.5, volume = 0.2, attack = 0.01 }) {
+  const ctx = audio();
+  if (!ctx) return;
+  const time = ctx.currentTime + start;
+  const buffer = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * duration), ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const source = ctx.createBufferSource();
+  const filter = ctx.createBiquadFilter();
+  const gain = ctx.createGain();
+  source.buffer = buffer;
+  filter.type = type;
+  filter.Q.value = q;
+  filter.frequency.setValueAtTime(from, time);
+  filter.frequency.exponentialRampToValueAtTime(to, time + duration);
+  gain.gain.setValueAtTime(0.0001, time);
+  gain.gain.exponentialRampToValueAtTime(volume, time + attack);
+  gain.gain.exponentialRampToValueAtTime(0.0001, time + duration);
+  source.connect(filter).connect(gain).connect(master);
+  source.start(time);
+  source.stop(time + duration + 0.05);
+}
+
 const sounds = {
   send() {
     tone({ freq: 520, to: 980, duration: 0.11, volume: 0.22, type: "triangle" });
@@ -76,6 +100,22 @@ const sounds = {
   },
   sparkle() {
     [1568, 2093, 2637, 3136].forEach((freq, i) => tone({ freq, duration: 0.18, volume: 0.06, start: i * 0.05 }));
+  },
+  // Abertura da Batata Watch Party: "ta-dum". Uma batida curta (a batata no chão) e, logo depois, um boom grave
+  // com um acorde que vai abrindo.
+  cinema() {
+    tone({ freq: 196, to: 98, duration: 0.16, volume: 0.3, type: "triangle", attack: 0.004 });
+    tone({ freq: 90, to: 50, duration: 0.22, volume: 0.4, attack: 0.004 });
+    noise({ from: 2600, to: 900, duration: 0.06, volume: 0.1, attack: 0.002 });
+    tone({ freq: 73.4, to: 36.7, start: 0.3, duration: 1.8, volume: 0.6, attack: 0.008 });
+    tone({ freq: 146.8, to: 73.4, start: 0.3, duration: 1.1, volume: 0.2, type: "triangle", attack: 0.008 });
+    noise({ from: 1200, to: 120, type: "lowpass", q: 0.7, start: 0.3, duration: 0.5, volume: 0.1, attack: 0.004 });
+    [146.83, 220, 293.66, 369.99, 440, 587.33].forEach((freq, i) => tone({ freq, start: 0.34 + i * 0.025, duration: 2.2, volume: 0.04, type: "triangle", attack: 0.18 }));
+  },
+  // Mergulho da abertura: um vento que sobe até o clarão.
+  dive() {
+    noise({ from: 250, to: 5000, q: 0.9, duration: 0.8, volume: 0.22, attack: 0.68 });
+    tone({ freq: 90, to: 420, duration: 0.8, volume: 0.07, type: "triangle", attack: 0.6 });
   },
   whoosh() {
     tone({ freq: 300, to: 1800, duration: 0.25, volume: 0.07, type: "sawtooth" });

@@ -959,6 +959,11 @@ function parse_watch_link(string $query): ?array
     if (preg_match('~twitch\.tv/videos/(\d+)~i', $query, $match)) return ['source' => 'twitch', 'kind' => 'video', 'id' => $match[1]];
     if (preg_match('~clips\.twitch\.tv/|twitch\.tv/[^/\s]+/clip/~i', $query)) return ['source' => 'clip'];
     if (preg_match('~twitch\.tv/([A-Za-z0-9_]{3,25})(?=[/?#\s]|$)~i', $query, $match)) return ['source' => 'twitch', 'kind' => 'channel', 'id' => strtolower($match[1])];
+    // Netflix e HBO Max: cada um abre com a própria conta (a extensão sincroniza; no celular, a contagem).
+    if (preg_match('~netflix\.com/(?:[a-z]{2}(?:-[a-z]{2})?/)?(watch|title)/(\d+)~i', $query, $match)) {
+        return ['source' => 'netflix', 'title' => 'Netflix', 'url' => 'https://www.netflix.com/' . strtolower($match[1]) . '/' . $match[2]];
+    }
+    if (preg_match('~https?://(?:[a-z]+\.)?(?:hbo)?max\.com/[^\s"<>]*~i', $query, $match)) return ['source' => 'max', 'title' => 'HBO Max', 'url' => https_url($match[0]) ?? 'https://play.hbomax.com/'];
     return null;
 }
 
@@ -997,7 +1002,14 @@ function watch_act(array $me, array $body): array
             $item = ['source' => 'local', 'title' => $name, 'name' => $name, 'size' => max(0, (int) ($local['size'] ?? 0)), 'duration' => max(0, min(86400, (float) ($local['duration'] ?? 0)))];
         } else {
             $query = text_slice(text_trim(str($body['query'] ?? '')), 300);
+            $service = str($body['service'] ?? '');
             $link = parse_watch_link($query);
+            // Netflix ou HBO Max sem link: vale o nome do filme ou da série (o botão abre a busca de lá).
+            if (!$link && in_array($service, ['netflix', 'max'], true)) {
+                $netflix = $service === 'netflix';
+                $link = ['source' => $service, 'title' => $query !== '' ? text_slice($query, 120) : ($netflix ? 'Netflix' : 'HBO Max'),
+                    'url' => $netflix ? 'https://www.netflix.com/' . ($query !== '' ? 'search?q=' . rawurlencode($query) : 'browse') : 'https://play.hbomax.com/'];
+            }
             // Sem link: procura pelo nome no YouTube (o primeiro que dá para passar fora de lá).
             if (!$link && $query !== '' && config()['music_lookup']) {
                 foreach (array_slice(youtube_search($query), 0, 4) as $video) {
@@ -1011,6 +1023,8 @@ function watch_act(array $me, array $body): array
             if ($link['source'] === 'youtube') {
                 $meta = !isset($link['title']) && config()['music_lookup'] ? youtube_meta($link['id']) : null;
                 $item = $link + ['title' => text_slice((string) ($meta['title'] ?? 'Vídeo do YouTube'), 200)];
+            } elseif (in_array($link['source'], ['netflix', 'max'], true)) {
+                $item = $link;
             } else {
                 $item = $link + ['title' => $link['kind'] === 'channel' ? "Ao vivo: {$link['id']}" : 'Vídeo da Twitch'];
             }
@@ -1020,7 +1034,13 @@ function watch_act(array $me, array $body): array
     $state = watch_state(true);
     $now = now_ms();
     $action = ['op' => $op, 'by' => $me['name']];
-    $at = fn() => $state['playing'] ? $state['position'] + ($now - $state['updatedAt']) / 1000 : $state['position'];
+    // updatedAt no futuro = contagem para o play: até lá, o vídeo fica parado no mesmo segundo.
+    $at = fn() => $state['playing'] ? $state['position'] + max(0, $now - $state['updatedAt']) / 1000 : $state['position'];
+    // Netflix e HBO Max: a extensão conta a duração e o segundo em que o player de lá está.
+    $reported = isset($body['position']) ? max(0, min(86400, (float) $body['position'])) : null;
+    if ($op !== 'start' && in_array($state['now']['source'] ?? '', ['netflix', 'max'], true) && (float) ($body['duration'] ?? 0) > 0) {
+        $state['now']['duration'] = min(86400, (float) $body['duration']);
+    }
     switch ($op) {
         case 'start':
             $state = ['now' => $item, 'playing' => true, 'position' => 0, 'updatedAt' => $now];
@@ -1040,7 +1060,7 @@ function watch_act(array $me, array $body): array
             if (!$state['now']) return ['ok' => false, 'error' => 'Nenhum vídeo agora.'];
             if ($op === 'ended' && ($state['now']['uid'] ?? '') !== str($body['uid'] ?? '')) return ['ok' => true, 'state' => watch_public($state)];
             if ($state['playing']) {
-                $state['position'] = $at();
+                $state['position'] = $reported ?? $at();
                 $state['playing'] = false;
                 $state['updatedAt'] = $now;
             }
@@ -1048,9 +1068,18 @@ function watch_act(array $me, array $body): array
         case 'resume':
             if (!$state['now']) return ['ok' => false, 'error' => 'Nenhum vídeo agora.'];
             if (!$state['playing']) {
+                if ($reported !== null) $state['position'] = $reported;
                 $state['playing'] = true;
                 $state['updatedAt'] = $now;
             }
+            break;
+        case 'countdown':
+            // Contagem 3, 2, 1 para os dois darem o play juntos (Netflix e HBO Max no celular).
+            if (!$state['now']) return ['ok' => false, 'error' => 'Nenhum vídeo agora.'];
+            $state['position'] = $at();
+            $state['playing'] = true;
+            $state['updatedAt'] = $now + 4000;
+            $action['at'] = $state['updatedAt'];
             break;
         case 'seek':
             if (!$state['now']) return ['ok' => false, 'error' => 'Nenhum vídeo agora.'];
