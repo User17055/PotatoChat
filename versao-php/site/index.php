@@ -115,6 +115,15 @@ function asset(string $file): string
       <symbol id="i-skip" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M5 5.5v13a1 1 0 0 0 1.55.83l9.6-6.5a1 1 0 0 0 0-1.66l-9.6-6.5A1 1 0 0 0 5 5.5Z"/><path d="M19 5v14"/></symbol>
       <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none"/></symbol>
       <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></symbol>
+      <symbol id="i-skip-back" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M19 5.5v13a1 1 0 0 1-1.55.83l-9.6-6.5a1 1 0 0 1 0-1.66l9.6-6.5A1 1 0 0 1 19 5.5Z"/><path d="M5 5v14"/></symbol>
+      <symbol id="i-headphones" viewBox="0 0 24 24"><path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3"/></symbol>
+      <symbol id="i-list-music" viewBox="0 0 24 24"><path d="M21 15V6"/><path d="M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/><path d="M12 12H3"/><path d="M16 6H3"/><path d="M12 18H3"/></symbol>
+      <symbol id="i-rotate-ccw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+      <symbol id="i-external" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+      <symbol id="i-volume-1" viewBox="0 0 24 24"><path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/></symbol>
+      <!-- Logos do YouTube e do Spotify (Simple Icons, CC0), nas cores das marcas -->
+      <symbol id="b-youtube" viewBox="0 0 24 24"><path fill="#ff0033" d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z"/><path fill="#fff" d="M9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></symbol>
+      <symbol id="b-spotify" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="#1ed760"/><path fill="#000" d="M17.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></symbol>
       <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="14" height="14" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
       <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
       <symbol id="i-check-check" viewBox="0 0 24 24"><path d="M18 6 7 17l-5-5"/><path d="m22 10-7.5 7.5L13 16"/></symbol>
@@ -222,6 +231,7 @@ function asset(string $file): string
               <svg class="icon"><use href="#i-monitor-up" /></svg>
             </button>
             <button id="music-button" class="icon-button music-button hidden" type="button" title="Música tocando" aria-label="Abrir o tocador de música" aria-expanded="false" aria-controls="music-panel">
+              <span id="music-mini-art" class="mini-art" aria-hidden="true"></span>
               <span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
               <span class="music-alert" aria-hidden="true"></span>
             </button>
@@ -359,45 +369,67 @@ function asset(string $file): string
       </section>
 
       <!-- ===================== MÚSICA (bot do /play) ===================== -->
-      <section id="music-panel" class="music-panel closed" aria-label="Música">
+      <!-- O tocador de verdade (YouTube ou Spotify) fica atrás da capa; fechado, o painel só sai da vista e a música continua. -->
+      <section id="music-panel" class="music-panel closed" aria-label="Tocador de música">
+        <div class="music-glow" aria-hidden="true"><img id="music-glow" alt="" /></div>
         <header class="music-head">
-          <span class="music-bot"><span class="music-bot-icon">🎧</span>Potato DJ</span>
-          <span id="music-source" class="music-source"></span>
-          <button id="music-close" class="close-x" type="button" aria-label="Fechar o tocador" title="Fechar (a música continua)">
-            <svg class="icon"><use href="#i-x" /></svg>
+          <button id="music-close" class="music-round" type="button" aria-label="Fechar o tocador" title="Fechar (a música continua)">
+            <svg class="icon"><use href="#i-chevron-down" /></svg>
           </button>
+          <div class="music-where">
+            <small id="music-state">Potato DJ</small>
+            <strong><svg class="brand" aria-hidden="true"><use id="music-logo" href="#b-youtube" /></svg><span id="music-source">YouTube</span></strong>
+          </div>
+          <a id="music-open" class="music-round" href="https://www.youtube.com/" target="_blank" rel="noopener noreferrer" title="Abrir no YouTube" aria-label="Abrir no YouTube">
+            <svg class="icon"><use href="#i-external" /></svg>
+          </a>
         </header>
-        <div id="music-stage" class="music-stage"></div>
-        <button id="music-unblock" class="music-unblock hidden" type="button"><svg class="icon"><use href="#i-play" /></svg>Toque para ouvir junto</button>
-        <div id="music-now" class="music-now">
-          <div class="music-info"><strong id="music-title"></strong><small id="music-meta"></small></div>
+        <div id="music-hero" class="music-hero">
+          <div id="music-stage" class="music-stage"></div>
+          <img id="music-cover" class="music-cover" alt="" />
+          <span class="music-cover-empty" aria-hidden="true"><svg class="icon"><use href="#i-music" /></svg></span>
+          <button id="music-unblock" class="music-unblock hidden" type="button"><svg class="icon"><use href="#i-headphones" /></svg>Toque no play para ouvir junto</button>
+        </div>
+        <div class="music-now">
+          <div class="music-title-row">
+            <div class="music-info">
+              <strong id="music-title" class="marquee"><span></span></strong>
+              <small><span id="music-preview" class="music-preview hidden" title="Sem login no Spotify, o player dele só toca 30 segundos">Prévia</span><span id="music-meta"></span></small>
+            </div>
+            <button id="music-video" class="music-round small" type="button" title="Ver o vídeo" aria-label="Ver o vídeo" aria-pressed="false">
+              <svg class="icon"><use href="#i-video" /></svg>
+            </button>
+          </div>
           <div class="music-progress">
-            <span id="music-time">0:00</span>
             <input id="music-seek" type="range" min="0" max="100" step="0.1" value="0" aria-label="Posição da música" />
-            <span id="music-length">0:00</span>
+            <div class="music-times"><span id="music-time">0:00</span><span id="music-length">0:00</span></div>
           </div>
           <div class="music-controls">
+            <button id="music-stop" class="music-ctl" type="button" title="Parar e limpar a fila" aria-label="Parar e limpar a fila"><svg class="icon"><use href="#i-stop" /></svg></button>
+            <button id="music-restart" class="music-ctl" type="button" title="Voltar ao começo" aria-label="Voltar ao começo"><svg class="icon"><use href="#i-skip-back" /></svg></button>
             <button id="music-toggle" class="music-ctl big swap" type="button" title="Pausar para os dois" aria-label="Tocar ou pausar">
               <svg class="icon when-on"><use href="#i-pause" /></svg>
               <svg class="icon when-off"><use href="#i-play" /></svg>
             </button>
-            <button id="music-skip" class="music-ctl" type="button" title="Pular para a próxima" aria-label="Pular"><svg class="icon"><use href="#i-skip" /></svg></button>
-            <button id="music-stop" class="music-ctl" type="button" title="Parar e limpar a fila" aria-label="Parar"><svg class="icon"><use href="#i-stop" /></svg></button>
-            <label id="music-volume-wrap" class="music-volume" title="Volume (só para você)">
-              <svg class="icon"><use href="#i-volume" /></svg>
-              <input id="music-volume" type="range" min="0" max="100" step="1" value="80" aria-label="Volume" />
-            </label>
+            <button id="music-skip" class="music-ctl" type="button" title="Pular para a próxima" aria-label="Pular para a próxima"><svg class="icon"><use href="#i-skip" /></svg></button>
+            <button id="music-list" class="music-ctl" type="button" title="Ver a fila" aria-label="Ver a fila"><svg class="icon"><use href="#i-list-music" /></svg></button>
+          </div>
+          <div class="music-volume">
+            <button id="music-mute" class="music-round small" type="button" title="Tirar o som (só para você)" aria-label="Tirar o som"><svg class="icon"><use id="music-mute-icon" href="#i-volume" /></svg></button>
+            <input id="music-volume" type="range" min="0" max="100" step="1" value="80" aria-label="Volume (só para você)" />
           </div>
         </div>
-        <div id="music-empty" class="music-empty">
-          <svg class="icon"><use href="#i-music" /></svg>
-          <p>Nada tocando. Escreva <b>/play</b> e o nome ou o link de uma música do YouTube ou do Spotify.</p>
+        <div class="music-empty">
+          <span class="music-empty-art"><svg class="icon"><use href="#i-headphones" /></svg></span>
+          <strong>Nada tocando</strong>
+          <p>Escreva <b>/play</b> e o nome ou o link de uma música do YouTube ou do Spotify. Ela toca para os dois ao mesmo tempo.</p>
+          <button id="music-try" class="music-pill" type="button"><svg class="icon"><use href="#i-play" /></svg>Escrever /play</button>
         </div>
         <div id="music-next" class="music-next hidden">
-          <p class="picker-label">A seguir</p>
+          <p class="music-label">A seguir <span id="music-count"></span></p>
           <ol id="music-queue" class="music-queue"></ol>
         </div>
-        <p class="music-hint"><b>/play</b> nome ou link · <b>/pause</b> · <b>/skip</b> · <b>/stop</b></p>
+        <p class="music-hint"><b>/play</b> nome ou link<i></i><b>/pause</b><i></i><b>/skip</b><i></i><b>/stop</b></p>
       </section>
 
       <!-- ===================== PERFIL ===================== -->

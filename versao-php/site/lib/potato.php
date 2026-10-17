@@ -633,7 +633,63 @@ function youtube_search(string $query): array
     return $found;
 }
 
-// Nome ou link → música pronta para a fila ({source, type, id, title, artist, thumb}).
+// "Artista - Música (Clipe Oficial)" → ["Música", "Artista"], como num app de música.
+// Sem o traço no título, o artista é o canal (sem o "- Topic" e o "VEVO").
+function clean_video_title(string $title, string $channel): array
+{
+    $noise = 'official|oficial|music|video|vídeo|videoclipe|clipe|clip|lyrics?|letra|audio|áudio|visuali[sz]er|legendad[oa]|tradução|traducao|hd|4k|mv';
+    $strip = fn(string $text): string => preg_replace('~^[\s"\'“”‘’]+|[\s"\'“”‘’]+$~u', '', $text) ?? $text;
+    $lower = fn(string $text): string => function_exists('mb_strtolower') ? mb_strtolower($text, 'UTF-8') : strtolower($text);
+    $clean = preg_replace('~\s*[(\[][^)\]]*(?<!\pL)(?:' . $noise . ')(?!\pL)[^)\]]*[)\]]~iu', '', $title) ?? $title;
+    $clean = preg_replace('~\s+\|\s.*$~u', '', $clean) ?? $clean;
+    $artist = $strip(preg_replace('~\s*-\s*Topic$|VEVO$~iu', '', $channel) ?? $channel);
+    if (preg_match('~^(.+?)\s+[-–—]\s+(.+)$~u', $clean, $match)) {
+        [$left, $right] = [$strip($match[1]), $strip($match[2])];
+        // "Música - Artista": o lado entre aspas é a música; o lado igual ao canal, o artista.
+        $swap = preg_match('~^["“‘\']~u', $match[1]) === 1
+            || ($artist !== '' && $lower($right) === $lower($artist) && $lower($left) !== $lower($artist));
+        [$clean, $artist] = $swap ? [$left, $right] : [$right, $left];
+    }
+    $clean = $strip(preg_replace('~\s+~u', ' ', $clean) ?? $clean);
+    return [$clean !== '' ? $clean : $title, $artist];
+}
+
+function youtube_track(string $id, string $title, string $channel): array
+{
+    [$name, $artist] = clean_video_title($title, $channel);
+    return [
+        'source' => 'youtube', 'type' => 'video', 'id' => $id,
+        'title' => text_slice($name, 200), 'artist' => text_slice($artist, 120), 'full' => text_slice($title, 200),
+        'thumb' => "https://i.ytimg.com/vi/$id/mqdefault.jpg", 'cover' => "https://i.ytimg.com/vi/$id/hqdefault.jpg",
+    ];
+}
+
+// Página do player do Spotify: nome, artistas, capa, duração e a cor que o próprio Spotify usa no cartão.
+function spotify_meta(string $type, string $id): ?array
+{
+    [$status, $html] = http_get("https://open.spotify.com/embed/$type/$id");
+    if ($status !== 200 || !preg_match('~<script id="__NEXT_DATA__" type="application/json">(.+?)</script>~s', $html, $match)) return null;
+    $entity = json_decode($match[1], true)['props']['pageProps']['state']['data']['entity'] ?? null;
+    if (!is_array($entity)) return null;
+    $line = fn($text): string => text_slice(trim(preg_replace('~\s+~u', ' ', is_string($text) ? $text : '') ?? ''), 200);
+    $artists = array_filter(array_map(fn($artist) => $line(is_array($artist) ? ($artist['name'] ?? '') : ''), (array) ($entity['artists'] ?? [])));
+    $width = fn($image): int => (int) ($image['maxWidth'] ?? $image['width'] ?? 0);
+    $images = array_values(array_filter((array) ($entity['visualIdentity']['image'] ?? $entity['coverArt']['sources'] ?? []), fn($image) => is_array($image) && https_url($image['url'] ?? null)));
+    usort($images, fn($a, $b) => $width($b) <=> $width($a));
+    $sharp = array_values(array_filter($images, fn($image) => $width($image) >= 250));
+    $base = $entity['visualIdentity']['backgroundBase'] ?? null;
+    $channel = fn($key): int => max(0, min(255, (int) ($base[$key] ?? 0)));
+    return [
+        'title' => $line($entity['name'] ?? $entity['title'] ?? ''),
+        'artist' => text_slice($artists ? implode(', ', $artists) : $line($entity['subtitle'] ?? ''), 120),
+        'cover' => $images ? https_url($images[0]['url']) : null,
+        'thumb' => $sharp ? https_url($sharp[count($sharp) - 1]['url']) : ($images ? https_url($images[0]['url']) : null),
+        'color' => is_array($base) ? sprintf('#%02x%02x%02x', $channel('red'), $channel('green'), $channel('blue')) : null,
+        'duration' => ($entity['duration'] ?? 0) > 0 ? round($entity['duration'] / 1000, 1) : null,
+    ];
+}
+
+// Nome ou link → música pronta para a fila ({source, type, id, title, artist, thumb, cover, …}).
 function resolve_track(string $query): array
 {
     $lookup = (bool) config()['music_lookup'];
@@ -643,30 +699,28 @@ function resolve_track(string $query): array
         foreach (array_slice(youtube_search($query), 0, 4) as $video) {
             $meta = $video['checked'] ? null : youtube_meta($video['id']);
             if (!$video['checked'] && !$meta) continue;
-            return ['ok' => true, 'track' => [
-                'source' => 'youtube', 'type' => 'video', 'id' => $video['id'],
-                'title' => text_slice($video['title'] ?: (string) ($meta['title'] ?? 'Vídeo do YouTube'), 200),
-                'artist' => text_slice($video['artist'] ?: (string) ($meta['author_name'] ?? ''), 120),
-                'thumb' => "https://i.ytimg.com/vi/{$video['id']}/mqdefault.jpg",
-            ]];
+            return ['ok' => true, 'track' => youtube_track($video['id'], $video['title'] ?: (string) ($meta['title'] ?? 'Vídeo do YouTube'), $video['artist'] ?: (string) ($meta['author_name'] ?? ''))];
         }
         return ['ok' => false, 'error' => "Não achei nada que dê para tocar com “{$query}”. Tente outro nome ou cole o link."];
     }
     if ($link['source'] === 'youtube') {
         $meta = $lookup ? youtube_meta($link['id']) : null;
-        return ['ok' => true, 'track' => $link + [
-            'title' => text_slice((string) ($meta['title'] ?? 'Vídeo do YouTube'), 200),
-            'artist' => text_slice((string) ($meta['author_name'] ?? ''), 120),
-            'thumb' => "https://i.ytimg.com/vi/{$link['id']}/mqdefault.jpg",
-        ]];
+        return ['ok' => true, 'track' => youtube_track($link['id'], (string) ($meta['title'] ?? 'Vídeo do YouTube'), (string) ($meta['author_name'] ?? ''))];
     }
-    $meta = $lookup ? http_json('https://open.spotify.com/oembed?' . http_build_query(['url' => "https://open.spotify.com/{$link['type']}/{$link['id']}"])) : null;
+    $meta = $lookup ? spotify_meta($link['type'], $link['id']) : null;
+    // Sem a página do player, o oEmbed ainda dá o nome e a capa.
+    $oembed = $lookup && !$meta ? http_json('https://open.spotify.com/oembed?' . http_build_query(['url' => "https://open.spotify.com/{$link['type']}/{$link['id']}"])) : null;
     $label = ['track' => 'Música', 'album' => 'Álbum', 'playlist' => 'Playlist', 'episode' => 'Episódio', 'show' => 'Podcast'][$link['type']];
-    return ['ok' => true, 'track' => $link + [
-        'title' => text_slice((string) ($meta['title'] ?? "$label do Spotify"), 200),
-        'artist' => $link['type'] === 'track' ? '' : $label,
-        'thumb' => https_url($meta['thumbnail_url'] ?? null),
-    ]];
+    $artist = (string) ($meta['artist'] ?? '');
+    if ($link['type'] !== 'track') $artist = $artist !== '' ? "$label · $artist" : $label;
+    return ['ok' => true, 'track' => $link + array_filter([
+        'title' => text_slice(($meta['title'] ?? '') ?: (string) ($oembed['title'] ?? "$label do Spotify"), 200),
+        'artist' => text_slice($artist, 120),
+        'thumb' => $meta['thumb'] ?? https_url($oembed['thumbnail_url'] ?? null),
+        'cover' => $meta['cover'] ?? null,
+        'color' => $meta['color'] ?? null,
+        'duration' => $meta['duration'] ?? null,
+    ], fn($value) => $value !== null)];
 }
 
 function music_blank(): array
@@ -704,7 +758,8 @@ function post_music_card(array $me, array $track, int $queued): void
     emit('message', to_message($row));
 }
 
-// Comandos: play (com query = pede música; sem = continua), pause, resume, seek, skip, ended (a música acabou), stop, remove.
+// Comandos: play (com query = pede música; sem = continua), pause, resume, seek, skip, ended (a música acabou), stop,
+// remove (tira da fila) e jump (toca agora uma da fila).
 function music_act(array $me, array $body): array
 {
     $op = str($body['op'] ?? '');
@@ -777,6 +832,15 @@ function music_act(array $me, array $body): array
         case 'remove':
             $uid = str($body['uid'] ?? '');
             $state['queue'] = array_values(array_filter($state['queue'], fn($item) => ($item['uid'] ?? '') !== $uid));
+            break;
+        case 'jump':
+            // A escolhida sai da fila e começa do zero; a que tocava, para.
+            $uid = str($body['uid'] ?? '');
+            $index = array_search($uid, array_map(fn($item) => $item['uid'] ?? '', $state['queue']), true);
+            if ($uid === '' || $index === false) return ['ok' => false, 'error' => 'Essa música não está mais na fila.'];
+            [$picked] = array_splice($state['queue'], $index, 1);
+            $state = ['now' => $picked, 'queue' => $state['queue'], 'playing' => true, 'position' => 0, 'updatedAt' => $now];
+            $action['track'] = $picked;
             break;
         default:
             return ['ok' => false, 'error' => 'Comando de música desconhecido.'];
@@ -1288,7 +1352,7 @@ function preview_text(array $row): string
     if ($row['text'] !== '') return text_slice($row['text'], 160);
     $media = empty($row['media']) ? null : json_decode((string) $row['media'], true);
     if (isset($media['file'])) return ['image' => 'Foto', 'video' => 'Vídeo', 'audio' => 'Áudio'][$media['file']['kind']] ?? text_slice((string) $media['file']['name'], 160);
-    if (isset($media['music'])) return text_slice('🎵 ' . $media['music']['title'], 160);
+    if (isset($media['music'])) return text_slice('Música: ' . $media['music']['title'], 160);
     return $media ? 'GIF' : '';
 }
 

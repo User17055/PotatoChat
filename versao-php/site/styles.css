@@ -526,102 +526,229 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 /* =====================================================================
    Bot de música (/play)
    ===================================================================== */
-/* Ícone no canto superior direito: barrinhas que dançam enquanto a música toca. */
-.music-button { position: relative; }
-.music-button .eq { display: flex; align-items: flex-end; gap: 2px; height: 15px; }
-.music-button .eq i { display: block; width: 3px; height: 35%; border-radius: 2px; background: currentColor; transition: height .3s; }
-.music-button.playing { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); color: var(--accent); box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 25%, transparent); }
-.music-button.playing .eq i { animation: eq .9s ease-in-out infinite; }
-.music-button.playing .eq i:nth-child(2) { animation-delay: -.45s; }
-.music-button.playing .eq i:nth-child(3) { animation-delay: -.2s; }
-.music-button.playing .eq i:nth-child(4) { animation-delay: -.65s; }
+/* Cor da música (a do Spotify ou a que mais aparece na capa): muda devagar de uma música para outra. */
+@property --tone { syntax: "<color>"; inherits: true; initial-value: #3b3428; }
+
+/* Barrinhas que dançam enquanto a música toca (botão do canto e cartão do chat). */
+.eq { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
+.eq i { display: block; width: 3px; height: 35%; border-radius: 2px; background: currentColor; transition: height .3s; }
+.eq i:nth-child(2) { animation-delay: -.45s; }
+.eq i:nth-child(3) { animation-delay: -.2s; }
+.eq i:nth-child(4) { animation-delay: -.65s; }
+.music-button.playing .eq i, .dj-card[data-state="playing"] .eq i { animation: eq .9s ease-in-out infinite; }
 @keyframes eq { 0%, 100% { height: 25%; } 50% { height: 100%; } }
-.music-alert { position: absolute; top: 2px; right: 2px; width: 10px; height: 10px; display: none; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 2px var(--bg); }
+
+/* Botão no canto superior direito: a capa girando como um disco e, em volta, um anel com o andamento da música. */
+.music-button { position: relative; }
+.music-button .eq { position: relative; z-index: 1; height: 15px; }
+.music-button.playing { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); color: var(--accent); box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 25%, transparent); }
+.music-button.has-art, .music-button.has-art:hover { border-color: transparent; color: #fff; background: conic-gradient(var(--accent) calc(var(--progress, 0) * 1turn), color-mix(in srgb, var(--ink) 16%, transparent) 0); }
+.music-button.has-art .eq { filter: drop-shadow(0 1px 2px #000c); }
+.mini-art { position: absolute; inset: 3px; display: none; border-radius: 50%; background: var(--tone) center / cover no-repeat; }
+.mini-art::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: radial-gradient(circle, #0006 0 30%, #0002 70%); }
+.music-button.has-art .mini-art { display: block; }
+.music-button.playing .mini-art { animation: spin 14s linear infinite; }
+.music-alert { position: absolute; top: 0; right: 0; z-index: 1; width: 11px; height: 11px; display: none; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 2px var(--bg); }
 .music-button.blocked .music-alert { display: block; animation: blink 1.2s ease-in-out infinite; }
+.toast.music .icon { color: var(--accent); }
 
-/* Painel do tocador: fechado, só sai da vista (a música continua). */
-.music-panel { position: fixed; top: 86px; right: 20px; z-index: 40; width: min(340px, calc(100vw - 24px)); max-height: calc(100vh - 106px); max-height: calc(100dvh - 106px); padding: 12px; overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--line); border-radius: 24px; background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(18px); box-shadow: 0 24px 60px #000b; scrollbar-width: thin; scrollbar-color: var(--line) transparent; transform-origin: 90% 0; transition: opacity .22s, transform .3s cubic-bezier(.34, 1.4, .64, 1), visibility .22s; }
+/* Tocador, no estilo do "tocando agora" do Spotify: fundo na cor da música, capa grande e controles redondos.
+   Sempre escuro, em qualquer tema. Fechado, ele só sai da vista: a música continua. */
+.music-panel {
+  --ink: #fff; --muted: #ffffffb3; --faint: #ffffff73; --line: #ffffff1f;
+  position: fixed; top: 86px; right: 20px; z-index: 40;
+  width: min(360px, calc(100vw - 24px)); max-height: calc(100vh - 106px); max-height: calc(100dvh - 106px);
+  padding: 14px 18px 18px; overflow-y: auto; overscroll-behavior: contain;
+  border-radius: 28px; color: var(--ink); color-scheme: dark;
+  background: linear-gradient(180deg, color-mix(in oklab, var(--tone) 90%, #000) 0, color-mix(in oklab, var(--tone) 40%, #121212) 420px, #121212 720px);
+  box-shadow: 0 30px 80px #000c, inset 0 0 0 1px #ffffff14;
+  scrollbar-width: thin; scrollbar-color: #ffffff2e transparent;
+  transform-origin: 90% 0;
+  transition: opacity .22s, transform .3s cubic-bezier(.34, 1.4, .64, 1), visibility .22s, --tone .8s;
+}
 .music-panel.closed { visibility: hidden; opacity: 0; transform: translateY(-8px) scale(.96); pointer-events: none; }
-.music-head { display: flex; align-items: center; gap: 8px; margin: 0 2px 10px 4px; }
-.music-bot { display: inline-flex; align-items: center; gap: 7px; font-size: 13.5px; font-weight: 700; }
-.music-bot-icon { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; background: linear-gradient(140deg, var(--accent-2), var(--accent-3)); font-size: 14px; }
-.music-source { margin-right: auto; padding: 2px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 700; letter-spacing: .03em; }
-.music-source:empty { display: none; }
-.music-source.youtube { background: #ff00331f; color: #ff5470; }
-.music-source.spotify { background: #1ed7601f; color: #1ed760; }
-.music-head .close-x { width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--surface-2); color: var(--muted); }
-.music-head .close-x:hover { background: var(--surface-3); color: var(--ink); }
-.music-head .close-x .icon { width: 15px; height: 15px; }
-.music-stage { position: relative; overflow: hidden; border-radius: 16px; background: #000; box-shadow: 0 10px 26px #0007; }
-.music-stage.youtube { aspect-ratio: 16 / 9; }
-.music-stage.spotify { height: 152px; background: transparent; box-shadow: none; }
-.music-stage iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; border-radius: inherit; }
-.music-unblock { width: 100%; margin-top: 10px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 10px; border: 0; border-radius: 14px; background: var(--accent); color: var(--accent-ink); font-weight: 600; animation: pulse-soft 1.6s ease-in-out infinite; }
-.music-unblock .icon { width: 16px; height: 16px; }
-@keyframes pulse-soft { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 22%, transparent); } }
-.music-info { display: grid; gap: 2px; margin: 12px 4px 0; }
-.music-info strong { overflow: hidden; font-size: 14.5px; font-weight: 600; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.music-info small { overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.music-progress { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; margin: 12px 4px 0; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-/* Trilhos redondos (posição e volume), preenchidos na cor do tema. */
-.music-progress input, .music-volume input { -webkit-appearance: none; appearance: none; width: 100%; height: 5px; margin: 0; border-radius: 999px; background: linear-gradient(90deg, var(--accent) var(--fill, 0%), var(--surface-3) var(--fill, 0%)); cursor: pointer; }
-.music-progress input::-webkit-slider-thumb, .music-volume input::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 2px 6px #0008; transition: transform .15s; }
-.music-progress input:active::-webkit-slider-thumb { transform: scale(1.3); }
-.music-progress input::-moz-range-thumb, .music-volume input::-moz-range-thumb { width: 14px; height: 14px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 2px 6px #0008; }
-.music-progress input:disabled { opacity: .4; cursor: default; }
-.music-controls { display: flex; align-items: center; gap: 8px; margin: 12px 2px 2px; }
-.music-ctl { width: 40px; height: 40px; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--surface-2); color: var(--ink); transition: background .2s, transform .2s; }
-.music-ctl:hover { background: var(--surface-3); }
-.music-ctl .icon { width: 17px; height: 17px; }
-.music-ctl.big { width: 48px; height: 48px; background: var(--accent); color: var(--accent-ink); box-shadow: 0 8px 20px color-mix(in srgb, var(--accent) 30%, transparent); }
-.music-ctl.big:hover { background: var(--accent); filter: brightness(1.08); }
-.music-ctl.big .icon { width: 20px; height: 20px; }
-.music-ctl.big.is-off .icon.when-off { margin-left: 2px; }
-.music-volume { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; margin-left: 4px; color: var(--muted); }
-.music-volume .icon { width: 16px; height: 16px; flex: none; }
-.music-empty { display: grid; justify-items: center; gap: 8px; padding: 20px 14px 14px; color: var(--muted); font-size: 13px; line-height: 1.5; text-align: center; }
-.music-empty .icon { width: 30px; height: 30px; color: var(--accent); }
-.music-empty p { margin: 0; }
-.music-next { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
-.music-next .picker-label { margin: 0 4px 8px; }
-.music-queue { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
-.music-item { display: flex; align-items: center; gap: 10px; padding: 6px; border-radius: 12px; transition: background .2s; }
-.music-item:hover { background: var(--surface-2); }
-.music-art, .dj-art { position: relative; flex: none; width: 40px; height: 40px; border-radius: 10px; background: var(--surface-3) center / cover no-repeat; }
-.music-art::after, .dj-art::after { content: ""; position: absolute; right: -3px; bottom: -3px; width: 13px; height: 13px; border-radius: 50%; box-shadow: 0 0 0 2px var(--surface); }
-.music-art.youtube::after, .dj-art.youtube::after { background: #ff0033; }
-.music-art.spotify::after, .dj-art.spotify::after { background: #1ed760; }
-.music-item-text { flex: 1; min-width: 0; display: grid; }
-.music-item-text strong { overflow: hidden; font-size: 12.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.music-item-text small { color: var(--muted); font-size: 11px; }
-.music-remove { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; color: var(--faint); opacity: 0; transition: opacity .2s, color .2s, background .2s; }
-.music-item:hover .music-remove, .music-remove:focus-visible { opacity: 1; }
-@media (hover: none) { .music-remove { opacity: 1; } }
-.music-remove:hover { background: var(--surface-3); color: var(--danger); }
-.music-remove .icon { width: 14px; height: 14px; }
-.music-hint { margin: 12px 4px 2px; color: var(--faint); font-size: 11px; line-height: 1.5; text-align: center; }
-.music-hint b { color: var(--muted); font-weight: 600; }
+.music-panel > :not(.music-glow) { position: relative; }
+/* Brilho da capa, bem desfocado, atrás do topo. */
+.music-glow { position: absolute; inset: 0 0 auto; height: 460px; overflow: hidden; pointer-events: none; -webkit-mask-image: linear-gradient(#000 25%, transparent); mask-image: linear-gradient(#000 25%, transparent); }
+.music-glow img { width: 100%; height: 100%; object-fit: cover; opacity: .5; filter: blur(46px) saturate(1.6); scale: 1.4; }
+.music-glow img:not([src]) { display: none; }
 
-/* Cartão do Potato DJ no chat (no meio da conversa, como um aviso do bot). */
-.message.music-note { align-self: center; max-width: min(92%, 400px); }
-.bubble.music-card { min-width: 0; padding: 0; overflow: hidden; border: 1px solid var(--line); background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, var(--surface-2)), var(--surface-2) 60%); color: var(--ink); box-shadow: 0 8px 24px #0005; white-space: normal; }
-.mine .bubble.music-card { border-color: var(--line); background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, var(--surface-2)), var(--surface-2) 60%); color: var(--ink); }
-.message.music-note .bubble { border-radius: 18px; }
-.dj-card { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 4px 12px; padding: 10px 14px 4px 10px; cursor: pointer; }
-.dj-head { grid-column: 1 / -1; margin-left: 2px; color: var(--accent); font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-:root[data-theme="claro"] .dj-head { color: var(--accent-text); }
-.dj-art { width: 52px; height: 52px; border-radius: 12px; box-shadow: 0 4px 12px #0006; }
-.dj-text { min-width: 0; display: grid; gap: 1px; }
-.dj-line { color: var(--muted); font-size: 11.5px; }
-.dj-text strong { overflow: hidden; font-size: 13.5px; font-weight: 600; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.dj-text small { color: var(--muted); font-size: 11.5px; }
-.bubble.music-card .foot { margin: 0 12px 8px 0; }
+.music-head { display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; align-items: center; gap: 8px; margin-bottom: 14px; }
+.music-where { display: grid; justify-items: center; gap: 2px; min-width: 0; text-align: center; }
+.music-where small { color: var(--muted); font-size: 10.5px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+.music-where strong { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 700; }
+.music-panel:not(.has-track) :is(.music-where strong, #music-open) { visibility: hidden; }
+.brand { width: 18px; height: 18px; flex: none; }
+.music-round { width: 40px; height: 40px; display: grid; place-items: center; border: 0; border-radius: 50%; background: #ffffff17; color: #fff; transition: background .2s, color .2s, transform .15s; }
+.music-round:hover { background: #ffffff29; }
+.music-round:active { transform: scale(.9); }
+.music-round .icon { width: 19px; height: 19px; }
+.music-round.small { width: 36px; height: 36px; background: transparent; color: var(--muted); }
+.music-round.small:hover { background: #ffffff17; color: #fff; }
+#music-video[aria-pressed="true"] { color: var(--accent); }
+.music-panel:not([data-source="youtube"]) #music-video { visibility: hidden; }
+
+/* Capa grande. Atrás dela fica o player de verdade (YouTube ou Spotify); no YouTube dá para trocar pelo vídeo.
+   Pausada, a capa encolhe um pouco. */
+.music-hero { position: relative; width: 100%; aspect-ratio: 1; overflow: hidden; border-radius: 16px; background: linear-gradient(140deg, color-mix(in oklab, var(--tone), #fff 8%), color-mix(in oklab, var(--tone) 60%, #000)); box-shadow: 0 26px 50px #000a; transition: scale .5s cubic-bezier(.34, 1.4, .64, 1), aspect-ratio .4s ease; }
+.music-panel.paused .music-hero { scale: .9; }
+.music-panel.show-video[data-source="youtube"] .music-hero { aspect-ratio: 16 / 9; }
+.music-stage { position: absolute; inset: 0; pointer-events: none; }
+.music-stage iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.music-cover { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .5s; }
+.music-cover.ready { opacity: 1; }
+.music-cover.letterbox { scale: 1.34; }
+.music-panel.show-video[data-source="youtube"]:not(.paused) .music-cover { opacity: 0; }
+.music-cover-empty { position: absolute; inset: 0; display: grid; place-items: center; color: #ffffff4d; pointer-events: none; }
+.music-cover-empty .icon { width: 34%; height: 34%; stroke-width: 1.4; }
+.music-cover.ready + .music-cover-empty { display: none; }
+/* Som bloqueado: a capa sai da frente e o player de verdade aceita o toque (no iPhone, só um toque nele mesmo libera o som). */
+.music-panel.blocked .music-hero { scale: 1; }
+.music-panel.blocked .music-stage { pointer-events: auto; }
+.music-panel.blocked .music-cover { opacity: 0; pointer-events: none; }
+.music-panel.blocked .music-cover-empty { display: none; }
+.music-unblock { position: absolute; left: 50%; top: 14px; translate: -50% 0; display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border: 0; border-radius: 999px; background: #fff; color: #111; font-size: 13.5px; font-weight: 700; white-space: nowrap; box-shadow: 0 12px 30px #0009; animation: pulse-white 1.6s ease-in-out infinite; }
+.music-unblock .icon { width: 17px; height: 17px; }
+@keyframes pulse-white { 50% { box-shadow: 0 12px 30px #0009, 0 0 0 7px #ffffff38; } }
+
+/* Nome (comprido, rola para os lados), artista, tempo e controles. */
+.music-now { margin-top: 20px; }
+.music-title-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+.music-info { display: grid; gap: 2px; min-width: 0; }
+.marquee { display: block; overflow: hidden; white-space: nowrap; font-size: 21px; font-weight: 700; line-height: 1.35; letter-spacing: -.01em; }
+.marquee > span { display: inline-block; }
+.marquee.rolling { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
+.marquee.rolling > span { animation: roll var(--roll-time, 8s) ease-in-out infinite alternate; }
+@keyframes roll { 0%, 20% { translate: 0; } 80%, 100% { translate: var(--roll); } }
+.music-info small { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--muted); font-size: 13.5px; }
+#music-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-preview { flex: none; padding: 2px 6px; border-radius: 4px; background: #ffffff2b; color: #fff; font-size: 9.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+
+.music-progress { margin-top: 12px; }
+.music-times { display: flex; justify-content: space-between; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+/* Trilhos finos (posição e volume): brancos, na cor do tema ao passar o mouse; a bolinha só aparece ao mexer. */
+.music-panel input[type="range"] { --track-fill: #fff; -webkit-appearance: none; appearance: none; display: block; width: 100%; height: 20px; margin: 0; background: transparent; cursor: pointer; }
+.music-panel input[type="range"]:is(:hover, :focus-visible) { --track-fill: var(--accent); outline: none; }
+.music-panel input[type="range"]::-webkit-slider-runnable-track { height: 4px; border-radius: 999px; background: linear-gradient(90deg, var(--track-fill) var(--fill, 0%), #ffffff3d var(--fill, 0%)); }
+.music-panel input[type="range"]::-moz-range-track { height: 4px; border-radius: 999px; background: linear-gradient(90deg, var(--track-fill) var(--fill, 0%), #ffffff3d var(--fill, 0%)); }
+.music-panel input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 13px; height: 13px; margin-top: -4.5px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 2px 6px #0009; transform: scale(0); transition: transform .15s; }
+.music-panel input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 2px 6px #0009; transform: scale(0); transition: transform .15s; }
+.music-panel input[type="range"]:is(:hover, :active, :focus-visible)::-webkit-slider-thumb { transform: scale(1); }
+.music-panel input[type="range"]:is(:hover, :active, :focus-visible)::-moz-range-thumb { transform: scale(1); }
+@media (hover: none) {
+  .music-panel input[type="range"]::-webkit-slider-thumb { transform: scale(1); }
+  .music-panel input[type="range"]::-moz-range-thumb { transform: scale(1); }
+}
+.music-panel input[type="range"]:disabled { opacity: .45; cursor: default; }
+
+.music-controls { display: grid; grid-template-columns: repeat(5, 1fr); align-items: center; justify-items: center; margin: 6px -6px 0; }
+.music-ctl { width: 46px; height: 46px; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; color: #ffffffd9; transition: color .2s, background .2s, transform .15s; }
+.music-ctl:hover { background: #ffffff14; color: #fff; }
+.music-ctl:active { transform: scale(.9); }
+.music-ctl .icon { width: 22px; height: 22px; }
+#music-stop .icon { width: 19px; height: 19px; }
+.music-ctl.big { width: 64px; height: 64px; background: #fff; color: #111; box-shadow: 0 12px 28px #0007; }
+.music-ctl.big:hover { background: #fff; color: #111; transform: scale(1.05); }
+.music-ctl.big:active { transform: scale(.94); }
+.music-ctl.big .icon { width: 26px; height: 26px; }
+.music-ctl.big.is-off .when-off { margin-left: 3px; }
+.music-volume { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; margin-top: 8px; }
+.music-panel:not([data-source="youtube"]) .music-volume { display: none; }
+
+/* Nada tocando (aberto pelo /fila). */
+.music-panel:not(.has-track) :is(.music-hero, .music-now) { display: none; }
+.music-panel.has-track .music-empty { display: none; }
+.music-empty { display: grid; justify-items: center; gap: 8px; padding: 6px 6px 2px; text-align: center; }
+.music-empty-art { width: 92px; height: 92px; display: grid; place-items: center; margin-bottom: 6px; border-radius: 28px; background: linear-gradient(140deg, var(--accent-2), var(--accent-3)); color: var(--accent-ink); box-shadow: 0 18px 40px color-mix(in srgb, var(--accent) 28%, transparent); animation: float-soft 4s ease-in-out infinite; }
+.music-empty-art .icon { width: 42px; height: 42px; }
+@keyframes float-soft { 50% { translate: 0 -6px; } }
+.music-empty strong { font-size: 18px; }
+.music-empty p { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.55; }
+.music-empty b { color: #fff; }
+.music-pill { margin-top: 8px; display: inline-flex; align-items: center; gap: 8px; padding: 11px 20px; border: 0; border-radius: 999px; background: #fff; color: #111; font-size: 14px; font-weight: 700; transition: transform .15s; }
+.music-pill:hover { transform: scale(1.04); }
+.music-pill .icon { width: 16px; height: 16px; }
+
+/* A seguir (fila). */
+.music-next { margin-top: 22px; padding: 14px 10px 8px; border-radius: 18px; background: #ffffff0f; }
+.music-label { display: flex; align-items: center; gap: 8px; margin: 0 6px 8px; font-size: 15px; font-weight: 700; }
+#music-count { padding: 2px 8px; border-radius: 999px; background: #ffffff1f; color: var(--muted); font-size: 11px; font-weight: 600; }
+.music-queue { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.music-item { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 6px; border-radius: 12px; transition: background .2s; }
+.music-item:hover { background: #ffffff12; }
+.music-art { position: relative; width: 46px; height: 46px; display: grid; place-items: center; overflow: hidden; border-radius: 8px; background: #ffffff1a; color: var(--muted); }
+.music-art .icon { width: 20px; height: 20px; }
+.music-art img, .dj-art img { width: 100%; height: 100%; object-fit: cover; }
+.music-art.letterbox img, .dj-art.letterbox img { scale: 1.34; }
+.music-order { position: absolute; inset: 0; display: grid; place-items: center; background: #0009; color: #fff; font-size: 15px; font-weight: 700; opacity: 0; transition: opacity .2s; }
+.music-item:hover .music-order { opacity: 1; }
+.music-item-text { display: grid; gap: 1px; min-width: 0; }
+.music-item-text strong { overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.music-item-text small { display: flex; align-items: center; gap: 5px; min-width: 0; color: var(--muted); font-size: 12px; }
+.music-item-text small span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-item-text .brand { width: 13px; height: 13px; }
+.music-mini { width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; color: var(--muted); opacity: 0; transition: opacity .2s, color .2s, background .2s; }
+.music-mini .icon { width: 15px; height: 15px; }
+.music-item:hover .music-mini, .music-mini:focus-visible { opacity: 1; }
+@media (hover: none) { .music-mini { opacity: 1; } }
+.music-mini:hover { background: #ffffff1f; color: #fff; }
+.music-mini[data-remove]:hover { color: var(--danger); }
+.music-hint { margin: 18px 0 0; color: var(--faint); font-size: 11.5px; line-height: 1.6; text-align: center; }
+.music-hint b { color: var(--muted); font-weight: 600; }
+.music-hint i { display: inline-block; width: 3px; height: 3px; margin: 0 7px; border-radius: 50%; background: currentColor; vertical-align: middle; }
+
+/* Cartão do Potato DJ no chat, no estilo do cartão do Spotify: na cor da música e com o estado ao vivo
+   (tocando, pausada, na fila ou já tocou). O .dj-card não tem caixa própria: os pedaços dele se encaixam
+   na grade do balão, junto com a hora. */
+.message.music-note { align-self: center; width: min(92%, 390px); max-width: none; }
+.message.music-note .bubble { flex: 1; }
+.bubble.music-card, .mine .bubble.music-card {
+  display: grid; grid-template-columns: 84px minmax(0, 1fr) auto;
+  grid-template-areas: "art head brand" "art body body" "art state action" "bar bar foot";
+  align-items: center; column-gap: 12px; min-width: 0; padding: 12px; overflow: hidden;
+  border: 0; border-radius: 18px;
+  background: linear-gradient(135deg, color-mix(in oklab, var(--tone), #fff 7%), color-mix(in oklab, var(--tone) 72%, #000));
+  color: #fff; box-shadow: 0 12px 30px #0006, inset 0 0 0 1px #ffffff14; white-space: normal;
+  transition: --tone .8s, box-shadow .3s;
+}
+.dj-card { display: contents; cursor: pointer; }
+.dj-art { grid-area: art; align-self: start; position: relative; width: 84px; height: 84px; display: grid; place-items: center; overflow: hidden; border-radius: 10px; background: #0003; color: #ffffff80; box-shadow: 0 8px 20px #0007; }
+.dj-art .icon { width: 30px; height: 30px; }
+.dj-head { grid-area: head; display: flex; align-items: center; gap: 6px; min-width: 0; color: #ffffffc2; font-size: 11.5px; font-weight: 600; }
+.dj-head .icon { width: 13px; height: 13px; flex: none; }
+.dj-head span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dj-card .brand { grid-area: brand; width: 20px; height: 20px; justify-self: end; }
+.dj-body { grid-area: body; display: grid; gap: 1px; min-width: 0; margin: 4px 0 6px; }
+.dj-title { overflow: hidden; font-size: 15px; font-weight: 700; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.dj-artist { overflow: hidden; color: #ffffffb3; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.dj-state { grid-area: state; display: inline-flex; align-items: center; gap: 7px; min-width: 0; color: #ffffffcc; font-size: 12px; font-weight: 600; }
+.dj-state .eq { display: none; height: 12px; }
+.dj-state .eq i { width: 2.5px; }
+.dj-card:is([data-state="playing"], [data-state="paused"]) .dj-state .eq { display: inline-flex; }
+.dj-card[data-state="playing"] .dj-state { color: #fff; }
+.dj-action { grid-area: action; width: 40px; height: 40px; display: grid; place-items: center; border: 0; border-radius: 50%; background: #fff; color: #111; box-shadow: 0 6px 16px #0006; transition: transform .15s, background .2s; }
+.dj-action:hover { transform: scale(1.07); }
+.dj-action:active { transform: scale(.92); }
+.dj-action .icon { display: none; width: 18px; height: 18px; }
+.dj-card:is([data-state="paused"], [data-state="queued"]) .when-play,
+.dj-card[data-state="playing"] .when-pause,
+.dj-card[data-state="done"] .when-again { display: block; }
+.dj-action .when-play { margin-left: 2px; }
+.dj-card[data-state="done"] .dj-action { background: #ffffff29; color: #fff; box-shadow: none; }
+.dj-card[data-state="done"] .dj-art img { filter: saturate(.75) brightness(.9); }
+.dj-progress { grid-area: bar; display: none; height: 4px; margin-top: 12px; overflow: hidden; border-radius: 999px; background: #ffffff38; }
+.dj-progress i { display: block; width: calc(var(--p, 0) * 100%); height: 100%; border-radius: inherit; background: #fff; transition: width .5s linear; }
+.dj-card:is([data-state="playing"], [data-state="paused"]) .dj-progress { display: block; }
+.bubble.music-card .foot { grid-area: foot; float: none; justify-self: end; margin: 12px 0 0; color: #fff; opacity: .75; }
+.bubble.music-card .status[data-state="read"] { color: #7cc4ff; }
 
 /* Menu dos comandos (ao digitar "/"). */
 .command-menu { position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 12; width: min(420px, 100%); padding: 6px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: 0 20px 50px #000a; }
-.command { width: 100%; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 1px 10px; padding: 8px 10px; border: 0; border-radius: 12px; background: transparent; text-align: left; transition: background .15s; }
+.command { width: 100%; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 1px 12px; padding: 8px 10px; border: 0; border-radius: 12px; background: transparent; text-align: left; transition: background .15s; }
 .command:hover, .command:first-child { background: var(--surface-2); }
-.command .icon { grid-row: span 2; width: 18px; height: 18px; color: var(--accent); }
+.command-icon { grid-row: span 2; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 10px; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+:root[data-theme="claro"] .command-icon { color: var(--accent-text); }
+.command-icon .icon { width: 16px; height: 16px; }
 .command-name { font-size: 13.5px; font-weight: 700; }
 .command-name i { color: var(--muted); font-style: normal; font-weight: 400; }
 .command small { color: var(--muted); font-size: 11.5px; }
@@ -872,7 +999,19 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
   .tabbar { position: relative; display: grid; grid-template-columns: 1fr 1fr; padding: 6px 12px calc(6px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: color-mix(in srgb, var(--bg-2) 92%, transparent); backdrop-filter: blur(14px); }
   .in-call .tabbar { display: none; }
   .profile-top { min-height: 64px; padding: 10px 16px; }
-  .music-panel { top: 70px; right: 8px; width: calc(100vw - 16px); max-height: calc(100dvh - 150px); }
+  /* Tocador: ocupa a tela toda e sobe de baixo, como no Spotify (arrastar para baixo fecha). */
+  .music-panel { inset: 0; width: auto; max-height: none; padding: max(14px, env(safe-area-inset-top)) 22px max(24px, env(safe-area-inset-bottom)); border-radius: 0; box-shadow: none; transition: transform .42s cubic-bezier(.32, .72, 0, 1), translate .42s cubic-bezier(.32, .72, 0, 1), visibility 0s, --tone .8s; }
+  .music-panel.closed { opacity: 1; transform: translateY(102%); transition: transform .34s cubic-bezier(.32, .72, 0, 1), translate .34s cubic-bezier(.32, .72, 0, 1), visibility 0s .34s, --tone .8s; }
+  .music-panel.dragging { transition: none; }
+  .music-head, .music-hero { touch-action: none; }
+  .music-hero { width: min(100%, 48dvh); margin-inline: auto; }
+  .music-panel.show-video[data-source="youtube"] .music-hero { width: 100%; }
+  .music-now { margin-top: 26px; }
+  .marquee { font-size: 23px; }
+  .music-ctl.big { width: 70px; height: 70px; }
+  .music-ctl.big .icon { width: 28px; height: 28px; }
+  .music-glow { height: 75vh; }
+  .music-empty { margin-top: 14vh; }
   .profile-scroll { padding: 26px 16px 28px; }
   .topbar { min-height: 64px; padding: 10px 12px; }
   .topbar h2 { font-size: 16px; }
@@ -919,5 +1058,5 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
   /* Animações que repetem para sempre ficariam piscando: aqui elas param de vez. */
   .message.show-tools .bubble, .message.show-tools .bubble::after,
   button.person.active, button.person.active::before, button.person.active .avatar::before,
-  .typing.on .typing-bubble, .typing.on .typing-bubble i, .music-button .eq i, .music-unblock { animation: none !important; }
+  .typing.on .typing-bubble, .typing.on .typing-bubble i, .eq i, .mini-art, .music-unblock, .music-empty-art, .marquee > span { animation: none !important; }
 }

@@ -583,6 +583,10 @@ try {
   assert.equal(card.text, "");
   assert.equal(card.music.id, "dQw4w9WgXcQ");
   assert.equal(card.music.queued, 0);
+  assert.equal(card.music.cover, "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg");
+  // Responder ao cartão cita a música (sem emoji).
+  const cardReply = await withAck(dj2, "message", { text: "Amo essa", clientId: "cliente-musica", replyTo: card.id });
+  assert.equal(cardReply.message.replyTo.text, "Música: Vídeo do YouTube");
   // Com música tocando, a próxima vai para a fila.
   const queued = await withAck(dj2, "music", { op: "play", query: "https://open.spotify.com/intl-pt/track/4cOdK2wGLETKBW3PvgPWqT?si=abc" });
   assert.deepEqual([queued.state.queue.length, queued.state.queue[0].source, queued.state.queue[0].type, queued.state.queue[0].by, queued.action.queued], [1, "spotify", "track", "Pessoa 2", 1]);
@@ -612,6 +616,19 @@ try {
   assert.equal((await withAck(dj1, "music", { op: "play" })).error, "Nada tocando. Use /play com o nome ou o link de uma música.");
   await withAck(dj1, "music", { op: "play", query: "https://youtu.be/dQw4w9WgXcQ" });
   await withAck(dj1, "music", { op: "play", query: "spotify:album:4LH4d3cOWNNsVw41Gqt2kv" });
+  // Tocar agora uma da fila (botão do cartão): ela sai da fila e começa do zero.
+  const third = await withAck(dj2, "music", { op: "play", query: "https://youtu.be/9bZkp7q19f0" });
+  const album = third.state.queue[0];
+  assert.deepEqual([album.title, album.artist, third.state.queue.length], ["Álbum do Spotify", "Álbum", 2]);
+  const jumpSeen = new Promise((resolve) => dj1.on("music", function seen(payload) {
+    if (payload.action?.op !== "jump") return;
+    dj1.off("music", seen);
+    resolve(payload);
+  }));
+  const jumped = await withAck(dj2, "music", { op: "jump", uid: album.uid });
+  assert.deepEqual([jumped.state.now.uid, jumped.state.queue.map((item) => item.id), jumped.state.playing, jumped.state.position], [album.uid, ["9bZkp7q19f0"], true, 0]);
+  assert.equal((await jumpSeen).action.track.uid, album.uid);
+  assert.equal((await withAck(dj2, "music", { op: "jump", uid: album.uid })).error, "Essa música não está mais na fila.");
   const stopped = await withAck(dj2, "music", { op: "stop" });
   assert.deepEqual([stopped.state.now, stopped.state.queue], [null, []]);
   // O cartão do bot não conta como mensagem no perfil.

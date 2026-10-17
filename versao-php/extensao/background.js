@@ -139,7 +139,7 @@ async function onMessage(message) {
     type: "basic",
     iconUrl: "icons/icon128.png",
     title: message.sender,
-    message: message.deleted ? "Mensagem apagada" : message.gif ? "GIF" : message.music ? `🎵 ${message.music.title}` : message.file && !message.text ? fileLabel(message.file) : message.text.slice(0, 200),
+    message: message.deleted ? "Mensagem apagada" : message.gif ? "GIF" : message.music ? `Música: ${message.music.title}` : message.file && !message.text ? fileLabel(message.file) : message.text.slice(0, 200),
     contextMessage: "Potato Chat",
     priority: 1
   });
