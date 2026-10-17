@@ -37,6 +37,7 @@ export function createPlayer(host, events) {
   let youtube = null;
   let spotify = null;
   let uid = null;
+  let videoId = null;
   let ready = false;
   let load = 0;
   let volume = 80;
@@ -47,7 +48,7 @@ export function createPlayer(host, events) {
     load += 1;
     try { youtube?.destroy(); } catch {}
     try { spotify?.destroy(); } catch {}
-    youtube = spotify = kind = uid = null;
+    youtube = spotify = kind = uid = videoId = null;
     ready = false;
     spot = { position: 0, duration: 0, paused: true, started: false };
     host.replaceChildren();
@@ -59,6 +60,7 @@ export function createPlayer(host, events) {
   function swapVideo(track, position, playing) {
     load += 1;
     uid = track.uid;
+    videoId = track.id;
     const options = { videoId: track.id, startSeconds: Math.floor(position()) };
     if (playing()) youtube.loadVideoById(options);
     else youtube.cueVideoById(options);
@@ -70,6 +72,7 @@ export function createPlayer(host, events) {
     destroy();
     const mine = load;
     uid = track.uid;
+    videoId = track.id;
     kind = track.source;
     host.classList.add(kind);
     const mount = document.createElement("div");
@@ -82,11 +85,13 @@ export function createPlayer(host, events) {
           videoId: track.id,
           width: "100%",
           height: "100%",
-          playerVars: { autoplay: playing() ? 1 : 0, start: Math.floor(position()), controls: 0, disablekb: 1, playsinline: 1, rel: 0, iv_load_policy: 3, fs: 0 },
+          playerVars: { autoplay: playing() ? 1 : 0, start: Math.floor(position()), controls: 0, disablekb: 1, playsinline: 1, rel: 0, iv_load_policy: 3, fs: 0, cc_load_policy: 0 },
           events: {
             onReady: (event) => {
               if (event.target !== youtube) return;
               ready = true;
+              // Sem legenda automática (o YouTube às vezes liga a tradução sozinho).
+              try { youtube.unloadModule?.("captions"); } catch {}
               youtube.setVolume(volume);
               youtube.seekTo(position(), true);
               if (playing()) youtube.playVideo();
@@ -95,6 +100,9 @@ export function createPlayer(host, events) {
             },
             onStateChange: (event) => {
               if (event.target !== youtube) return;
+              if (event.data === YT.PlayerState.PLAYING) {
+                try { youtube.unloadModule?.("captions"); } catch {}
+              }
               if (event.data === YT.PlayerState.ENDED) events.onEnded?.(uid);
               events.onUpdate?.();
             },
@@ -144,6 +152,15 @@ export function createPlayer(host, events) {
     duration: () => (kind === "youtube" ? youtube?.getDuration?.() || 0 : spot.duration),
     // Tocando (ou carregando para tocar).
     playing: () => (kind === "youtube" ? [1, 3].includes(youtube?.getPlayerState?.()) : !spot.paused),
+    // Estado do YouTube (1 tocando, 2 pausado, 3 carregando…); no Spotify, só tocando ou pausado.
+    state: () => (kind === "youtube" ? youtube?.getPlayerState?.() : spot.paused ? 2 : 1),
+    // No celular, o YouTube larga a música quando o app sai da tela e fica "carregando" para sempre:
+    // carrega o vídeo de novo, no ponto certo. Devolve se precisou.
+    revive(seconds) {
+      if (kind !== "youtube" || !ready || youtube.getPlayerState?.() === 1) return false;
+      youtube.loadVideoById({ videoId, startSeconds: Math.max(0, seconds) });
+      return true;
+    },
     play() {
       if (!ready) return;
       if (kind === "youtube") youtube.playVideo();

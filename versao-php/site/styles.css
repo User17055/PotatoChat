@@ -259,6 +259,11 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .peer-text { min-width: 0; }
 .topbar h2 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .peer-status { margin: 2px 0 0; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color .3s; }
+/* Não coube: o texto passa devagar, como um letreiro (duas cópias, sem emenda). */
+.peer-status.ticking { text-overflow: clip; -webkit-mask-image: linear-gradient(90deg, transparent, #000 8px, #000 calc(100% - 16px), transparent); mask-image: linear-gradient(90deg, transparent, #000 8px, #000 calc(100% - 16px), transparent); }
+.peer-status .ticker-line { display: inline-block; }
+.peer-status.ticking .ticker-line { padding-right: 36px; animation: ticker var(--ticker-time, 10s) linear infinite; }
+@keyframes ticker { to { translate: -100% 0; } }
 .peer-status.live { color: var(--ok); }
 .actions { display: flex; flex: none; gap: 8px; }
 .icon-button { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: var(--surface-2); color: var(--ink); transition: border-color .2s, color .2s, background .2s, opacity .2s; }
@@ -358,8 +363,9 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .jump:hover { border-color: var(--accent); color: var(--accent); }
 .jump-count { position: absolute; top: -6px; right: -4px; min-width: 20px; height: 20px; padding: 0 6px; display: grid; place-items: center; border-radius: 10px; background: var(--accent); color: var(--accent-ink); font-size: 11px; font-weight: 700; }
 
-.typing { height: 26px; padding: 0 max(20px, calc((100% - 820px) / 2)); display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; visibility: hidden; }
-.typing.on { visibility: visible; }
+/* Fechado, o "digitando" não ocupa espaço (nada de faixa vazia entre a conversa e o campo de mensagem). */
+.typing { height: 0; padding: 0 max(20px, calc((100% - 820px) / 2)); display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; visibility: hidden; transition: height .2s ease; }
+.typing.on { height: 30px; visibility: visible; }
 /* Digitando: balãozinho sem borda que respira, com as bolinhas pulando em onda e acendendo na cor do tema. */
 .typing-bubble { display: inline-flex; gap: 4px; padding: 8px 11px; border-radius: 14px; background: var(--surface-2); box-shadow: 0 2px 10px #0003; transform-origin: 0 50%; }
 .typing-bubble i { display: block; width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
@@ -381,7 +387,8 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 
 .composer { position: relative; margin: 8px max(14px, calc((100% - 850px) / 2)) 18px; display: flex; align-items: flex-end; gap: 8px; padding: 7px; border: 1px solid var(--line); border-radius: 22px; background: var(--surface); box-shadow: 0 10px 30px #0005; transition: border-color .2s, box-shadow .2s; }
 .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 40%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 8%, transparent), 0 10px 30px #0005; }
-.quick-emojis { display: flex; align-self: center; }
+/* Os ícones ficam presos embaixo, na linha do enviar, mesmo quando o texto cresce. */
+.quick-emojis { display: flex; align-self: flex-end; margin-bottom: 3px; }
 .quick-emojis button { width: 32px; height: 36px; border: 0; border-radius: 10px; background: transparent; font-size: 18px; transition: transform .15s, background .15s; }
 .quick-emojis button:hover { background: var(--surface-2); transform: translateY(-2px); }
 .composer textarea { flex: 1; min-width: 0; max-height: 140px; padding: 9px 6px; border: 0; background: transparent; color: var(--ink); font-size: 14.5px; line-height: 1.45; resize: none; outline: none; overflow-y: hidden; }
@@ -393,7 +400,7 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .send .icon { width: 19px; height: 19px; margin: 1px 2px 0 0; stroke-width: 2.2; }
 
 /* ---------- GIFs ---------- */
-.gif-button { flex: none; align-self: center; height: 28px; margin: 0 2px; padding: 0 7px; border: 1.5px solid var(--line); border-radius: 8px; background: transparent; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .06em; transition: color .2s, border-color .2s, transform .15s; }
+.gif-button { flex: none; align-self: flex-end; height: 28px; margin: 0 2px 7px; padding: 0 7px; border: 1.5px solid var(--line); border-radius: 8px; background: transparent; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .06em; transition: color .2s, border-color .2s, transform .15s; }
 .gif-button:hover, .gif-button[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
 .gif-panel { position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 12; width: min(420px, 100%); height: min(440px, 56vh); height: min(440px, 56dvh); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: 0 20px 50px #000a; }
 .gif-search { position: relative; display: block; flex: none; margin: 10px; }
@@ -412,7 +419,7 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .gif-credit { flex: none; margin: 0; padding: 6px 12px 7px; border-top: 1px solid var(--line-soft); color: var(--faint); font-size: 9.5px; font-weight: 700; letter-spacing: .1em; text-align: right; text-transform: uppercase; }
 
 /* ---------- fotos e arquivos ---------- */
-.attach-button { flex: none; align-self: center; width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; color: var(--muted); transition: color .2s, background .2s, rotate .3s cubic-bezier(.34, 1.56, .64, 1); }
+.attach-button { flex: none; align-self: flex-end; width: 34px; height: 34px; margin-bottom: 4px; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; color: var(--muted); transition: color .2s, background .2s, rotate .3s cubic-bezier(.34, 1.56, .64, 1); }
 .attach-button:hover, .attach-button[aria-expanded="true"] { background: var(--surface-2); color: var(--accent); }
 .attach-button[aria-expanded="true"] { rotate: -35deg; }
 .attach-button .icon { width: 19px; height: 19px; }
@@ -586,13 +593,15 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 #music-video[aria-pressed="true"] { color: var(--accent); }
 .music-panel:not([data-source="youtube"]) #music-video { visibility: hidden; }
 
-/* Capa grande. Atrás dela fica o player de verdade (YouTube ou Spotify); no YouTube dá para trocar pelo vídeo.
-   Pausada, a capa encolhe um pouco. */
-.music-hero { position: relative; width: 100%; aspect-ratio: 1; overflow: hidden; border-radius: 16px; background: linear-gradient(140deg, color-mix(in oklab, var(--tone), #fff 8%), color-mix(in oklab, var(--tone) 60%, #000)); box-shadow: 0 26px 50px #000a; transition: scale .5s cubic-bezier(.34, 1.4, .64, 1), aspect-ratio .4s ease; }
+/* Capa grande. Atrás dela fica o player de verdade (YouTube ou Spotify); no YouTube dá para trocar pelo vídeo,
+   que enche o mesmo quadrado (as laterais ficam de fora). Pausada, a capa encolhe um pouco. */
+.music-hero { position: relative; width: 100%; aspect-ratio: 1; overflow: hidden; border-radius: 16px; background: linear-gradient(140deg, color-mix(in oklab, var(--tone), #fff 8%), color-mix(in oklab, var(--tone) 60%, #000)); box-shadow: 0 26px 50px #000a; transition: scale .5s cubic-bezier(.34, 1.4, .64, 1); }
 .music-panel.paused .music-hero { scale: .9; }
-.music-panel.show-video[data-source="youtube"] .music-hero { aspect-ratio: 16 / 9; }
-.music-stage { position: absolute; inset: 0; pointer-events: none; }
-.music-stage iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+/* O player só aparece no modo vídeo (YouTube) ou quando precisa de um toque; com a capa, nada dele vaza nas bordas. */
+.music-stage { position: absolute; inset: 0; visibility: hidden; pointer-events: none; }
+.music-panel.show-video[data-source="youtube"] .music-stage, .music-panel.blocked .music-stage { visibility: visible; }
+.music-stage iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }
+.music-panel.show-video[data-source="youtube"] .music-stage iframe { left: 50%; width: 177.78%; translate: -50% 0; }
 .music-cover { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .5s; }
 .music-cover.ready { opacity: 1; }
 .music-cover.letterbox { scale: 1.34; }
@@ -608,6 +617,23 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .music-unblock { position: absolute; left: 50%; top: 14px; translate: -50% 0; display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border: 0; border-radius: 999px; background: #fff; color: #111; font-size: 13.5px; font-weight: 700; white-space: nowrap; box-shadow: 0 12px 30px #0009; animation: pulse-white 1.6s ease-in-out infinite; }
 .music-unblock .icon { width: 17px; height: 17px; }
 @keyframes pulse-white { 50% { box-shadow: 0 12px 30px #0009, 0 0 0 7px #ffffff38; } }
+
+/* Tela cheia (botão no canto da capa): a capa ou o vídeo inteiros, sem cortar, no fundo preto. */
+.music-expand { position: absolute; right: 10px; bottom: 10px; z-index: 2; width: 38px; height: 38px; display: grid; place-items: center; border: 0; border-radius: 50%; background: #00000080; color: #fff; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); transition: background .2s, transform .15s; }
+.music-expand:hover { background: #000000b3; }
+.music-expand:active { transform: scale(.9); }
+.music-expand .icon { width: 18px; height: 18px; }
+.music-panel.blocked .music-expand { display: none; }
+.music-caption { display: none; }
+.music-panel.expanded .music-hero { position: fixed; inset: 0; z-index: 5; width: auto; height: auto; aspect-ratio: auto; margin: 0; border-radius: 0; scale: 1; background: #000; box-shadow: none; }
+.music-panel.expanded .music-cover { object-fit: contain; scale: 1; }
+.music-panel.expanded .music-stage iframe { left: 0; width: 100%; translate: none; }
+.music-panel.expanded .music-expand { top: max(14px, env(safe-area-inset-top)); right: 14px; bottom: auto; width: 46px; height: 46px; background: #ffffff2b; }
+.music-panel.expanded .music-expand .icon { width: 20px; height: 20px; }
+.music-panel.expanded .music-caption { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; display: grid; gap: 3px; padding: 70px 24px max(26px, env(safe-area-inset-bottom)); background: linear-gradient(transparent, #000000d9); color: #fff; pointer-events: none; transition: opacity .3s; }
+.music-panel.expanded.show-video[data-source="youtube"]:not(.paused) .music-caption { opacity: 0; }
+.music-caption strong { font-size: 22px; font-weight: 700; line-height: 1.3; }
+.music-caption span { color: #ffffffb3; font-size: 15px; }
 
 /* Nome (comprido, rola para os lados), artista, tempo e controles. */
 .music-now { margin-top: 20px; }
@@ -694,11 +720,15 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .music-hint { margin: 18px 0 0; color: var(--faint); font-size: 11.5px; line-height: 1.6; text-align: center; }
 .music-hint b { color: var(--muted); font-weight: 600; }
 .music-hint i { display: inline-block; width: 3px; height: 3px; margin: 0 7px; border-radius: 50%; background: currentColor; vertical-align: middle; }
+/* Aviso só no celular: o YouTube não toca com o app fora da tela. */
+.music-tip { display: none; align-items: flex-start; gap: 8px; margin: 12px 0 0; padding: 10px 12px; border-radius: 14px; background: #ffffff0f; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.music-tip .icon { flex: none; width: 15px; height: 15px; margin-top: 2px; color: var(--accent); }
+@media (hover: none) and (pointer: coarse) { .music-tip { display: flex; } }
 
 /* Cartão do Potato DJ no chat: compacto, com a capa desfocada no fundo e a cor da música por cima.
    Mostra ao vivo se está tocando, pausada, na fila ou se já tocou. O .dj-card não tem caixa própria:
    os pedaços dele se encaixam na grade do balão, junto com a hora. */
-.message.music-note { align-self: center; width: min(92%, 360px); max-width: none; }
+.message.music-note { align-self: center; width: min(92%, 360px); max-width: none; margin-top: 6px; }
 .message.music-note .bubble { flex: 1; }
 .bubble.music-card, .mine .bubble.music-card {
   isolation: isolate;
@@ -1007,7 +1037,6 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
   .music-panel.dragging { transition: none; }
   .music-head, .music-hero { touch-action: none; }
   .music-hero { width: min(100%, 48dvh); margin-inline: auto; }
-  .music-panel.show-video[data-source="youtube"] .music-hero { width: 100%; }
   .music-now { margin-top: 26px; }
   .marquee { font-size: 23px; }
   .music-ctl.big { width: 70px; height: 70px; }
@@ -1064,5 +1093,5 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
   /* Animações que repetem para sempre ficariam piscando: aqui elas param de vez. */
   .message.show-tools .bubble, .message.show-tools .bubble::after,
   button.person.active, button.person.active::before, button.person.active .avatar::before,
-  .typing.on .typing-bubble, .typing.on .typing-bubble i, .eq i, .music-unblock, .music-empty-art, .marquee > span { animation: none !important; }
+  .typing.on .typing-bubble, .typing.on .typing-bubble i, .eq i, .music-unblock, .music-empty-art, .marquee > span, .ticker-line { animation: none !important; }
 }

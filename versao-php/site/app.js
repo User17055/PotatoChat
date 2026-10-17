@@ -541,8 +541,10 @@ function needsDay(previous, message) {
   return !previous || dayKey(previous.createdAt) !== dayKey(message.createdAt);
 }
 
+// Mensagens seguidas da mesma pessoa ficam juntinhas. Os cartões de música (no meio da conversa) não entram:
+// eles têm sempre o mesmo espaço em volta.
 function isGrouped(previous, message) {
-  return Boolean(previous) && previous.sender === message.sender && !needsDay(previous, message)
+  return Boolean(previous) && !previous.music && !message.music && previous.sender === message.sender && !needsDay(previous, message)
     && new Date(message.createdAt) - new Date(previous.createdAt) < 5 * 60 * 1000;
 }
 
@@ -818,6 +820,12 @@ function uploadFile(message) {
   xhr.onerror = () => fail("O arquivo não subiu. Toque no aviso vermelho da mensagem para tentar de novo.");
   xhr.send(upload.blob);
 }
+
+// Celular: tocar no enviar (ou num emoji rápido) não tira o foco do campo. Assim o teclado continua aberto,
+// a tela não pula para baixo e o primeiro toque já envia.
+messageForm.addEventListener("mousedown", (event) => {
+  if (document.activeElement === messageInput && event.target.closest(".send, .quick-emojis button")) event.preventDefault();
+});
 
 messageForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -2100,8 +2108,14 @@ const musicAt = () => (music.playing ? music.position + (Date.now() + musicClock
 // Duração: a do player (no Spotify sem login, a prévia) ou, antes de ele carregar, a que veio com a música.
 const musicLength = () => (music.now ? musicPlayer.duration() || music.now.duration || 0 : 0);
 const requestedBy = (name) => `pedida por ${name === me ? "você" : name}`;
-const trackLink = (track) => (track.source === "youtube" ? `https://www.youtube.com/watch?v=${track.id}` : `https://open.spotify.com/${track.type}/${track.id}`);
-const smallCover = (track) => (track.source === "youtube" ? `https://i.ytimg.com/vi/${track.id}/mqdefault.jpg` : track.thumb || "");
+// Música do Spotify que toca inteira pelo YouTube (origin): aparece como Spotify (logo, capa, link).
+const shownSource = (track) => track.origin?.source || track.source;
+const youtubeArt = (track) => track.source === "youtube" && !track.origin;
+const trackLink = (track) => {
+  const from = track.origin || track;
+  return from.source === "youtube" ? `https://www.youtube.com/watch?v=${from.id}` : `https://open.spotify.com/${from.type}/${from.id}`;
+};
+const smallCover = (track) => (youtubeArt(track) ? `https://i.ytimg.com/vi/${track.id}/mqdefault.jpg` : track.thumb || "");
 
 function clockTime(seconds) {
   const total = Math.max(0, Math.floor(seconds || 0));
@@ -2129,7 +2143,7 @@ function equalizer() {
 // Capinha (fila e cartão do chat). No YouTube, a imagem "hq" tem faixas pretas em cima e embaixo: o CSS corta.
 function musicArt(track, className) {
   const art = el("span", className);
-  const src = track.source === "youtube" ? `https://i.ytimg.com/vi/${track.id}/hqdefault.jpg` : track.thumb;
+  const src = youtubeArt(track) ? `https://i.ytimg.com/vi/${track.id}/hqdefault.jpg` : track.thumb;
   if (!src) {
     art.append(icon("music"));
     return art;
@@ -2139,7 +2153,7 @@ function musicArt(track, className) {
   image.loading = "lazy";
   image.decoding = "async";
   image.src = src;
-  art.classList.toggle("letterbox", track.source === "youtube");
+  art.classList.toggle("letterbox", youtubeArt(track));
   art.append(image);
   return art;
 }
@@ -2147,7 +2161,7 @@ function musicArt(track, className) {
 // Capa grande do tocador: no YouTube, a "maxres" quando existe (senão, a "hq" cortada).
 const covers = new Map();
 function bigCover(track) {
-  if (track.source !== "youtube") return Promise.resolve({ src: track.cover || track.thumb || "", sizes: track.cover ? "640x640" : "300x300", letterbox: false });
+  if (!youtubeArt(track)) return Promise.resolve({ src: track.cover || track.thumb || "", sizes: track.cover ? "640x640" : "300x300", letterbox: false });
   if (!covers.has(track.id)) covers.set(track.id, new Promise((resolve) => {
     const image = new Image();
     const fallback = () => resolve({ src: `https://i.ytimg.com/vi/${track.id}/hqdefault.jpg`, sizes: "480x360", letterbox: true });
@@ -2387,7 +2401,7 @@ function musicCard(message) {
   const title = el("strong", "dj-title", track.title);
   title.title = track.full || track.title;
   const artist = el("span", "dj-artist");
-  artist.append(brand(track.source), el("span", "", track.artist || SOURCE_NAME[track.source]));
+  artist.append(brand(shownSource(track)), el("span", "", track.artist || SOURCE_NAME[shownSource(track)]));
   const state = el("span", "dj-state");
   state.append(equalizer(), el("span", "dj-state-text"));
   const action = el("button", "dj-action");
@@ -2415,7 +2429,7 @@ function queueItem(item, index) {
   art.append(el("b", "music-order", String(index + 1)));
   const text = el("span", "music-item-text");
   const meta = el("small");
-  meta.append(brand(item.source), el("span", "", [item.artist, requestedBy(item.by)].filter(Boolean).join(" · ")));
+  meta.append(brand(shownSource(item)), el("span", "", [item.artist, requestedBy(item.by)].filter(Boolean).join(" · ")));
   text.append(el("strong", "", item.title), meta);
   const jump = el("button", "music-mini");
   jump.type = "button";
@@ -2439,11 +2453,13 @@ function paintTrack(track) {
   setMarquee(title, track.title);
   title.title = track.full || track.title;
   $("#music-meta").textContent = [track.artist, requestedBy(track.by)].filter(Boolean).join(" · ");
-  $("#music-source").textContent = SOURCE_NAME[track.source];
-  $("#music-logo").setAttribute("href", `#b-${track.source}`);
+  $("#music-caption-title").textContent = track.title;
+  $("#music-caption-artist").textContent = track.artist || SOURCE_NAME[shownSource(track)];
+  $("#music-source").textContent = track.origin ? `${SOURCE_NAME[track.origin.source]} · pelo YouTube` : SOURCE_NAME[track.source];
+  $("#music-logo").setAttribute("href", `#b-${shownSource(track)}`);
   const open = $("#music-open");
   open.href = trackLink(track);
-  open.title = `Abrir no ${SOURCE_NAME[track.source]}`;
+  open.title = `Abrir no ${SOURCE_NAME[shownSource(track)]}`;
   open.setAttribute("aria-label", open.title);
   const small = smallCover(track);
   const glow = $("#music-glow");
@@ -2485,6 +2501,7 @@ function paintMusic() {
   if ((track?.uid || null) !== paintedTrack) {
     paintedTrack = track?.uid || null;
     if (track) paintTrack(track);
+    else setExpanded(false);
   }
   // Som barrado aqui: o botão grande é o "ouvir junto" (e não o pausar dos dois).
   const toggle = $("#music-toggle");
@@ -2498,6 +2515,7 @@ function paintMusic() {
   paintMediaState();
   paintPosition();
   syncAnchor();
+  syncWakeLock();
 }
 
 function paintMusicTime() {
@@ -2520,27 +2538,63 @@ function paintMusicTime() {
   seek.style.setProperty("--fill", `${progress * 100}%`);
 }
 
+let bufferingSince = 0;
 setInterval(paintMusicTime, 500);
 setInterval(() => {
   if (!music.now) return;
   syncMusic();
+  // Travado "carregando" há mais de 8 s com o app na tela: carrega de novo, no ponto certo.
+  bufferingSince = musicPlayer.state() === 3 ? bufferingSince || Date.now() : 0;
+  if (music.playing && !document.hidden && bufferingSince && Date.now() - bufferingSince > 8000) {
+    bufferingSince = 0;
+    musicPlayer.revive(musicAt());
+  }
   // Já devia ter acabado (por exemplo, ninguém estava com o chat aberto quando terminou).
   const length = musicLength();
   if (music.playing && length && musicAt() > length + 4) socket?.emit("music", { op: "ended", uid: music.now.uid });
 }, 4000);
 
-// De volta ao app: acerta o tempo e volta a tocar, se o celular tiver pausado a música.
+// De volta ao app: no celular, o YouTube largou a música enquanto o app estava fora da tela (só o app dele,
+// com Premium, toca em segundo plano). Ela volta sozinha, já no ponto em que está para os dois.
 document.addEventListener("visibilitychange", () => {
+  syncWakeLock();
   if (document.hidden || !music.now) return;
   musicRetries = 0;
-  syncMusic();
+  if (music.playing && musicPlayer.revive(musicAt())) bufferingSince = 0;
+  else syncMusic();
   checkBlocked();
 });
 
-// ---- tela de bloqueio, notificação do celular e teclas de mídia ----
+// Celular ou tablet (toque, sem mouse).
+const phone = matchMedia("(hover: none) and (pointer: coarse)").matches;
+
+// No celular, a tela fica acesa enquanto a música toca com o chat aberto: com a tela apagada, o YouTube para.
+let wakeLock = null;
+let wakeAsking = false;
+const wantWake = () => phone && "wakeLock" in navigator && !document.hidden && Boolean(music.now && music.playing && !musicBlocked);
+async function syncWakeLock() {
+  if (wantWake() && !wakeLock && !wakeAsking) {
+    wakeAsking = true;
+    try {
+      const lock = await navigator.wakeLock.request("screen");
+      lock.addEventListener("release", () => {
+        if (wakeLock === lock) wakeLock = null;
+      });
+      wakeLock = lock;
+    } catch {}
+    wakeAsking = false;
+  }
+  if (!wantWake() && wakeLock) {
+    const lock = wakeLock;
+    wakeLock = null;
+    lock.release().catch(() => {});
+  }
+}
+
+// ---- tela de bloqueio, notificação e teclas de mídia (no computador) ----
 // Um silêncio tocando em loop nesta página, junto com a música, faz o sistema tratar o chat como o tocador:
-// a tela de bloqueio mostra a capa e os botões dela mandam no tocador dos dois. De quebra, o celular não
-// congela a página enquanto o app fica em segundo plano.
+// a notificação e as teclas de mídia mostram a capa e mandam no tocador dos dois. No celular ela fica
+// desligada: lá o YouTube para quando o app sai da tela, e a tela de bloqueio mostraria "tocando" em silêncio.
 const media = "mediaSession" in navigator ? navigator.mediaSession : null;
 let anchor = null;
 
@@ -2566,7 +2620,7 @@ function silence(seconds = 10, rate = 8000) {
 }
 
 function syncAnchor() {
-  if (!media) return;
+  if (!media || phone) return;
   if (!music.now || !music.playing || musicBlocked) return anchor?.pause();
   anchor ||= Object.assign(new Audio(silence()), { loop: true });
   if (anchor.paused) anchor.play().catch(() => {});
@@ -2577,7 +2631,7 @@ function paintMediaTrack(track, cover) {
   try {
     media.metadata = new MediaMetadata({
       title: track.title,
-      artist: track.artist || SOURCE_NAME[track.source],
+      artist: track.artist || SOURCE_NAME[shownSource(track)],
       album: `Potato Chat · ${requestedBy(track.by)}`,
       artwork: cover?.src ? [{ src: cover.src, sizes: cover.sizes, type: "image/jpeg" }] : []
     });
@@ -2618,8 +2672,10 @@ if (media) {
 
 function musicCommand(op, extra = {}) {
   if (!socket?.connected) return toast("Sem conexão agora. Tente de novo em instantes.", "error");
-  // Pelo nome demora um pouco (busca no YouTube); pelo link é na hora.
-  if (op === "play" && extra.query && !/https?:\/\/|spotify:/i.test(extra.query)) toast(`Procurando “${extra.query.slice(0, 60)}”…`, "music", "search");
+  // Pelo nome demora um pouco (busca no YouTube), e o link do Spotify também (procura a mesma música no YouTube).
+  if (op === "play" && extra.query && !/youtu\.?be/i.test(extra.query)) {
+    toast(/https?:\/\/|spotify:/i.test(extra.query) ? "Abrindo a música…" : `Procurando “${extra.query.slice(0, 60)}”…`, "music", "search");
+  }
   socket.timeout(25000).emit("music", { op, ...extra }, (error, result) => {
     if (error) return toast("O bot de música não respondeu. Tente de novo.", "error");
     if (!result?.ok) {
@@ -2709,9 +2765,28 @@ function openMusic() {
 }
 
 function closeMusic() {
+  setExpanded(false);
   musicPanel.classList.add("closed");
   musicButton.setAttribute("aria-expanded", "false");
 }
+
+// Tela cheia: a capa (ou o vídeo) grande. No computador e no Android vira tela cheia de verdade;
+// no iPhone, que não deixa, ocupa a tela do navegador.
+function setExpanded(on) {
+  if (musicPanel.classList.contains("expanded") === on) return;
+  musicPanel.classList.toggle("expanded", on);
+  const button = $("#music-expand");
+  button.title = on ? "Sair da tela cheia" : "Ver em tela cheia";
+  button.setAttribute("aria-label", button.title);
+  $("#music-expand-icon").setAttribute("href", on ? "#i-minimize" : "#i-maximize");
+  if (on && !document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {});
+  if (!on && document.fullscreenElement === document.documentElement) document.exitFullscreen?.().catch(() => {});
+}
+
+// Saiu da tela cheia pelo sistema (Esc, voltar do celular): a capa volta para o tocador.
+document.addEventListener("fullscreenchange", () => {
+  if (!document.fullscreenElement) setExpanded(false);
+});
 
 function showQueue() {
   if (!music.queue.length) return toast("A fila está vazia: peça outra com /play.", "music", "list-music");
@@ -2738,6 +2813,7 @@ musicPanel.addEventListener("click", (event) => {
   if (target.closest("#music-stop")) return musicCommand("stop");
   if (target.closest("#music-restart")) return musicCommand("seek", { position: 0 });
   if (target.closest("#music-video")) return setMusicVideo(!musicVideo);
+  if (target.closest("#music-expand")) return setExpanded(!musicPanel.classList.contains("expanded"));
   if (target.closest("#music-list")) return showQueue();
   if (target.closest("#music-mute")) {
     if (musicVolume > 0) volumeBefore = musicVolume;
@@ -2758,7 +2834,7 @@ musicPanel.addEventListener("click", (event) => {
 // Celular: arrastar o tocador para baixo (pelo topo ou pela capa) fecha, como no Spotify.
 let musicDrag = null;
 musicPanel.addEventListener("pointerdown", (event) => {
-  if (!matchMedia("(max-width: 760px)").matches || event.button > 0) return;
+  if (!matchMedia("(max-width: 760px)").matches || event.button > 0 || musicPanel.classList.contains("expanded")) return;
   if (!event.target.closest(".music-head, .music-hero") || event.target.closest("button, a, input")) return;
   musicDrag = { id: event.pointerId, y: event.clientY, dy: 0 };
 });
@@ -2805,6 +2881,9 @@ window.addEventListener("keydown", (event) => {
   if (!commandMenu.classList.contains("hidden")) {
     event.stopPropagation();
     commandMenu.classList.add("hidden");
+  } else if (musicPanel.classList.contains("expanded")) {
+    event.stopPropagation();
+    setExpanded(false);
   } else if (!musicPanel.classList.contains("closed")) {
     event.stopPropagation();
     closeMusic();
@@ -2864,19 +2943,49 @@ function peerOnline() {
 function paintPeerStatus() {
   const peer = presenceList.find((user) => user.name === peerName);
   peerStatus.classList.toggle("live", Boolean(peerTyping || peer?.online));
-  if (peerTyping) peerStatus.textContent = "digitando…";
-  else if (!peer) peerStatus.textContent = "Mande o link para a outra pessoa criar a conta dela";
-  else if (peer.online) peerStatus.textContent = peer.active ? "online agora" : "online";
-  else peerStatus.textContent = lastSeenLabel(peer.lastSeen);
+  if (peerTyping) setTicker(peerStatus, "digitando…");
+  else if (!peer) setTicker(peerStatus, "Mande o link para a outra pessoa criar a conta dela");
+  else if (peer.online) setTicker(peerStatus, peer.active ? "online agora" : "online");
+  else setTicker(peerStatus, lastSeenLabel(peer.lastSeen));
 }
+
+// Texto que não cabe (no celular, o "Visto por último…") passa devagar, como um letreiro.
+// Duas cópias andando juntas: quando a primeira sai, a segunda está no lugar dela, sem emenda.
+function setTicker(node, text, force = false) {
+  if (node.dataset.text === text && !force) return;
+  node.dataset.text = text;
+  const line = el("span", "ticker-line", text);
+  node.replaceChildren(line);
+  node.classList.remove("ticking");
+  requestAnimationFrame(() => {
+    if (line.offsetWidth <= node.clientWidth + 1) return;
+    const copy = el("span", "ticker-line", text);
+    copy.setAttribute("aria-hidden", "true");
+    node.append(copy);
+    node.style.setProperty("--ticker-time", `${(line.offsetWidth / 30 + 2).toFixed(1)}s`);
+    node.classList.add("ticking");
+  });
+}
+
+// A largura muda (girar o celular, fonte carregando): mede de novo.
+let tickerTimer = 0;
+const remeasureTicker = () => {
+  clearTimeout(tickerTimer);
+  tickerTimer = setTimeout(() => setTicker(peerStatus, peerStatus.dataset.text || peerStatus.textContent, true), 200);
+};
+addEventListener("resize", remeasureTicker);
+document.fonts?.ready.then(remeasureTicker);
 
 function setPeerTyping(active) {
   clearTimeout(peerTypingTimer);
   if (active) peerTypingTimer = setTimeout(() => setPeerTyping(false), 5000);
   if (active === peerTyping) return;
   peerTyping = active;
+  // O "digitando" só ocupa espaço enquanto aparece: quem estava no fim da conversa continua vendo a última mensagem.
+  const pinned = nearBottom();
   typingText.textContent = active ? `${peerName || "A outra pessoa"} está digitando` : "";
   fx.typing(typingEl, active);
+  if (active && pinned) setTimeout(() => scrollToLatest(true), 220);
   paintPeerStatus();
 }
 

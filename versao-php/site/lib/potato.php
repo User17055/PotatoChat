@@ -588,6 +588,13 @@ function https_url($url): ?string
     return is_string($url) && preg_match('~^https://[^\s"\'<>]+$~', $url) ? text_slice($url, 500) : null;
 }
 
+// "3:28" ou "1:02:03" → segundos.
+function parse_length(string $text): ?float
+{
+    if (!preg_match('~^(?:(\d+):)?(\d{1,2}):(\d{2})$~', trim($text), $match)) return null;
+    return (float) ((int) $match[1] * 3600 + (int) $match[2] * 60 + (int) $match[3]);
+}
+
 // Vídeos que o dono deixa tocar fora do YouTube respondem ao oEmbed; os bloqueados, não.
 function youtube_meta(string $id): ?array
 {
@@ -623,7 +630,10 @@ function youtube_search(string $query): array
             $video = $node['videoRenderer'];
             // Sem duração = transmissão ao vivo: fica de fora.
             if (!empty($video['lengthText'])) {
-                $found[] = ['id' => $video['videoId'], 'title' => $video['title']['runs'][0]['text'] ?? '', 'artist' => $video['ownerText']['runs'][0]['text'] ?? '', 'checked' => false];
+                $found[] = [
+                    'id' => $video['videoId'], 'title' => $video['title']['runs'][0]['text'] ?? '', 'artist' => $video['ownerText']['runs'][0]['text'] ?? '',
+                    'duration' => parse_length((string) ($video['lengthText']['simpleText'] ?? '')), 'checked' => false,
+                ];
             }
             return;
         }
@@ -654,14 +664,38 @@ function clean_video_title(string $title, string $channel): array
     return [$clean !== '' ? $clean : $title, $artist];
 }
 
-function youtube_track(string $id, string $title, string $channel): array
+function youtube_track(string $id, string $title, string $channel, ?float $duration = null): array
 {
     [$name, $artist] = clean_video_title($title, $channel);
     return [
         'source' => 'youtube', 'type' => 'video', 'id' => $id,
         'title' => text_slice($name, 200), 'artist' => text_slice($artist, 120), 'full' => text_slice($title, 200),
         'thumb' => "https://i.ytimg.com/vi/$id/mqdefault.jpg", 'cover' => "https://i.ytimg.com/vi/$id/hqdefault.jpg",
-    ];
+    ] + ($duration ? ['duration' => $duration] : []);
+}
+
+// A mesma música no YouTube, para tocar inteira (sem login, o player do Spotify só toca 30 s).
+// Vão primeiro os vídeos com o nome da música e, entre eles, o de duração mais perto da do Spotify:
+// costuma ser a versão de estúdio, sem os minutos a mais dos clipes.
+function youtube_match(string $title, string $artist, ?float $duration): ?array
+{
+    $simple = function (string $text): string {
+        $text = function_exists('mb_strtolower') ? mb_strtolower($text, 'UTF-8') : strtolower($text);
+        $text = strtr($text, ['á' => 'a', 'à' => 'a', 'â' => 'a', 'ã' => 'a', 'é' => 'e', 'ê' => 'e', 'í' => 'i', 'ó' => 'o', 'ô' => 'o', 'õ' => 'o', 'ú' => 'u', 'ü' => 'u', 'ç' => 'c', 'ñ' => 'n']);
+        return trim(preg_replace('~[^a-z0-9]+~', ' ', $text) ?? '');
+    };
+    $name = $simple(preg_replace('~\s*[-–(\[].*$~u', '', $title) ?? $title);
+    $ranked = [];
+    foreach (array_slice(youtube_search(trim("$artist $title")), 0, 6) as $index => $video) {
+        $named = $name === '' || strpos($simple($video['title']), $name) !== false;
+        $gap = $duration && !empty($video['duration']) ? abs($video['duration'] - $duration) : null;
+        $ranked[] = [$named ? 0 : 1, $gap !== null && $gap <= 60 ? $gap : 100 + $index, $video];
+    }
+    usort($ranked, fn($a, $b) => [$a[0], $a[1]] <=> [$b[0], $b[1]]);
+    foreach (array_slice($ranked, 0, 4) as [, , $video]) {
+        if ($video['checked'] || youtube_meta($video['id'])) return $video;
+    }
+    return null;
 }
 
 // Página do player do Spotify: nome, artistas, capa, duração e a cor que o próprio Spotify usa no cartão.
@@ -699,7 +733,7 @@ function resolve_track(string $query): array
         foreach (array_slice(youtube_search($query), 0, 4) as $video) {
             $meta = $video['checked'] ? null : youtube_meta($video['id']);
             if (!$video['checked'] && !$meta) continue;
-            return ['ok' => true, 'track' => youtube_track($video['id'], $video['title'] ?: (string) ($meta['title'] ?? 'Vídeo do YouTube'), $video['artist'] ?: (string) ($meta['author_name'] ?? ''))];
+            return ['ok' => true, 'track' => youtube_track($video['id'], $video['title'] ?: (string) ($meta['title'] ?? 'Vídeo do YouTube'), $video['artist'] ?: (string) ($meta['author_name'] ?? ''), $video['duration'] ?? null)];
         }
         return ['ok' => false, 'error' => "Não achei nada que dê para tocar com “{$query}”. Tente outro nome ou cole o link."];
     }
@@ -708,6 +742,18 @@ function resolve_track(string $query): array
         return ['ok' => true, 'track' => youtube_track($link['id'], (string) ($meta['title'] ?? 'Vídeo do YouTube'), (string) ($meta['author_name'] ?? ''))];
     }
     $meta = $lookup ? spotify_meta($link['type'], $link['id']) : null;
+    // Música do Spotify: sem login, o player dele só toca 30 s. Ela toca inteira pelo YouTube,
+    // com o nome, a capa e a cor do Spotify (origin guarda de onde veio o link).
+    $video = $meta && $link['type'] === 'track' && $meta['title'] !== '' ? youtube_match($meta['title'], $meta['artist'], $meta['duration']) : null;
+    if ($video) {
+        return ['ok' => true, 'track' => array_filter([
+            'source' => 'youtube', 'type' => 'video', 'id' => $video['id'],
+            'title' => $meta['title'], 'artist' => $meta['artist'], 'full' => text_slice($video['title'], 200),
+            'thumb' => $meta['thumb'], 'cover' => $meta['cover'], 'color' => $meta['color'],
+            'duration' => $video['duration'] ?? $meta['duration'],
+            'origin' => ['source' => 'spotify', 'type' => 'track', 'id' => $link['id']],
+        ], fn($value) => $value !== null)];
+    }
     // Sem a página do player, o oEmbed ainda dá o nome e a capa.
     $oembed = $lookup && !$meta ? http_json('https://open.spotify.com/oembed?' . http_build_query(['url' => "https://open.spotify.com/{$link['type']}/{$link['id']}"])) : null;
     $label = ['track' => 'Música', 'album' => 'Álbum', 'playlist' => 'Playlist', 'episode' => 'Episódio', 'show' => 'Podcast'][$link['type']];

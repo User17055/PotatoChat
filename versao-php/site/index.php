@@ -90,6 +90,7 @@ function asset(string $file): string
       <symbol id="i-message" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
       <symbol id="i-message-off" viewBox="0 0 24 24"><path d="M21 15V5a2 2 0 0 0-2-2H9"/><path d="m2 2 20 20"/><path d="M3.6 3.6c-.4.3-.6.8-.6 1.4v16l4-4h10"/></symbol>
       <symbol id="i-maximize" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></symbol>
+      <symbol id="i-minimize" viewBox="0 0 24 24"><path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/></symbol>
       <symbol id="i-volume" viewBox="0 0 24 24"><path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.364 18.364a9 9 0 0 0 0-12.728"/></symbol>
       <symbol id="i-volume-off" viewBox="0 0 24 24"><path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="m22 9-6 6"/><path d="m16 9 6 6"/></symbol>
       <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></symbol>
@@ -388,6 +389,8 @@ function asset(string $file): string
           <div id="music-stage" class="music-stage"></div>
           <img id="music-cover" class="music-cover" alt="" />
           <span class="music-cover-empty" aria-hidden="true"><svg class="icon"><use href="#i-music" /></svg></span>
+          <div class="music-caption" aria-hidden="true"><strong id="music-caption-title"></strong><span id="music-caption-artist"></span></div>
+          <button id="music-expand" class="music-expand" type="button" title="Ver em tela cheia" aria-label="Ver em tela cheia"><svg class="icon"><use id="music-expand-icon" href="#i-maximize" /></svg></button>
           <button id="music-unblock" class="music-unblock hidden" type="button"><svg class="icon"><use href="#i-headphones" /></svg>Toque no play para ouvir junto</button>
         </div>
         <div class="music-now">
@@ -430,6 +433,7 @@ function asset(string $file): string
           <ol id="music-queue" class="music-queue"></ol>
         </div>
         <p class="music-hint"><b>/play</b> nome ou link<i></i><b>/pause</b><i></i><b>/skip</b><i></i><b>/stop</b></p>
+        <p class="music-tip"><svg class="icon"><use href="#i-info" /></svg>No celular, o YouTube só toca com o chat na tela (tocar com o app fechado é coisa do YouTube Premium). Enquanto a música toca, a tela fica acesa, e ao voltar ela continua de onde está.</p>
       </section>
 
       <!-- ===================== PERFIL ===================== -->
