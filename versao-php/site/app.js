@@ -2929,6 +2929,8 @@ let watchBlockTimer = 0;
 let watchUnblockedAt = 0;
 // A sala está aberta aqui (cada um abre e sai quando quiser; o vídeo é o mesmo para os dois).
 let watchRoom = false;
+// A sala na tela (troca no meio da abertura de cinema, com as cortinas fechadas).
+let watchView = false;
 let watchSource = "youtube";
 const watchPanel = $("#watch-panel");
 const watchButton = $("#watch-button");
@@ -2969,7 +2971,7 @@ function checkWatchBlocked() {
 // Acompanha o servidor: troca de vídeo, play/pause e acerta o tempo se ficou mais de 2 s fora.
 function syncWatch() {
   const item = watch.now;
-  if (!watchRoom || !item || (item.source === "local" && !hasWatchFile(item))) return watchPlayer.destroy();
+  if (!watchView || !item || (item.source === "local" && !hasWatchFile(item))) return watchPlayer.destroy();
   if (watchPlayer.uid !== item.uid) return watchPlayer.open(item, watchAt, () => watch.playing, watchFile);
   if (!watchPlayer.ready) return;
   if (watch.playing) {
@@ -3016,17 +3018,19 @@ function applyWatch(state, measured = false, join = true) {
 function setWatchRoom(on) {
   if (watchRoom === on) return;
   watchRoom = on;
-  document.querySelector(".app-shell").classList.toggle("watching", on);
   watchButton.setAttribute("aria-pressed", String(on));
-  if (on) {
-    closeMusic();
-    if (!watch.now && matchMedia("(pointer: fine)").matches) setTimeout(() => $("#watch-query").focus(), 50);
-  } else {
-    setWatchExpanded(false);
-  }
+  if (on) closeMusic();
+  else setWatchExpanded(false);
   paintWatch();
-  syncWatch();
-  scrollToLatest();
+  // Abertura de cinema: o site muda por trás das cortinas.
+  fx.cinema(on, () => {
+    watchView = on;
+    document.querySelector(".app-shell").classList.toggle("watching", on);
+    paintWatch();
+    syncWatch();
+    scrollToLatest();
+    if (on && !watch.now && matchMedia("(pointer: fine)").matches) setTimeout(() => $("#watch-query").focus(), 50);
+  });
 }
 
 function setWatchSource(source) {
@@ -3038,7 +3042,7 @@ function setWatchSource(source) {
 
 function paintWatch() {
   const item = watch.now;
-  watchPanel.classList.toggle("hidden", !watchRoom);
+  watchPanel.classList.toggle("hidden", !watchView);
   watchPanel.classList.toggle("has-video", Boolean(item));
   watchButton.classList.toggle("live", Boolean(item) && !watchRoom);
   watchButton.title = item && !watchRoom ? `Watch Party rolando: ${item.title}` : "Watch Party";

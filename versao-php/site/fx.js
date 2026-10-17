@@ -14,6 +14,7 @@ function particle(content, className = "particle") {
 }
 
 const rand = (min, max) => min + Math.random() * (max - min);
+let cinemaTimeline = null;
 const pick = (list) => list[Math.floor(Math.random() * list.length)];
 
 export const fx = {
@@ -200,6 +201,62 @@ export const fx = {
       gsap.fromTo(element, { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.25 });
     } else {
       gsap.to(element, { opacity: 0, duration: 0.2, onComplete: () => element.classList.remove("on") });
+    }
+  },
+
+  // Watch Party: as cortinas de cinema fecham, o logo acende no facho do projetor, o site vira sala de cinema por
+  // trás delas (swap) e elas abrem revelando a sala. Saindo, as cortinas só fecham e abrem, rapidinho.
+  cinema(entering, swap) {
+    cinemaTimeline?.progress(1);
+    if (!motion()) return swap();
+    const overlay = document.createElement("div");
+    overlay.className = "wp-intro";
+    overlay.setAttribute("aria-hidden", "true");
+    overlay.innerHTML = '<i class="wp-curtain left"></i><i class="wp-curtain right"></i><i class="wp-beam"></i><div class="wp-logo"><svg class="icon"><use href="#i-tv"></use></svg><span>Watch Party</span></div>';
+    for (let i = 0; i < 18; i++) {
+      const spark = document.createElement("i");
+      spark.className = "wp-spark";
+      spark.style.left = `${rand(15, 85)}%`;
+      spark.style.top = `${rand(35, 75)}%`;
+      overlay.append(spark);
+    }
+    document.body.append(overlay);
+    const [left, right] = overlay.querySelectorAll(".wp-curtain");
+    const beam = overlay.querySelector(".wp-beam");
+    const logo = overlay.querySelector(".wp-logo");
+    const sparks = overlay.querySelectorAll(".wp-spark");
+    const close = entering ? 0.55 : 0.32;
+    const open = entering ? 1.55 : 0.42;
+    const timeline = cinemaTimeline = gsap.timeline({
+      onComplete: () => {
+        overlay.remove();
+        if (cinemaTimeline === timeline) cinemaTimeline = null;
+      }
+    });
+    timeline
+      .fromTo(left, { xPercent: -100 }, { xPercent: 0, duration: close, ease: "power3.inOut" }, 0)
+      .fromTo(right, { xPercent: 100 }, { xPercent: 0, duration: close, ease: "power3.inOut" }, 0);
+    if (entering) {
+      timeline
+        .fromTo(beam, { opacity: 0, scaleY: 0.4 }, { opacity: 1, scaleY: 1, duration: 0.5, ease: "power2.out" }, 0.4)
+        .fromTo(logo, { opacity: 0, scale: 0.6, filter: "blur(10px)" }, { opacity: 1, scale: 1, filter: "blur(0px)", duration: 0.55, ease: "back.out(1.7)" }, 0.45)
+        .fromTo(sparks, { opacity: 0, y: 20, scale: 0 }, { opacity: 1, y: () => rand(-90, -40), scale: 1, duration: 0.9, stagger: 0.03, ease: "power2.out" }, 0.5)
+        .add(swap, 0.7)
+        .to(sparks, { opacity: 0, duration: 0.4 }, 1.2)
+        .to(logo, { opacity: 0, scale: 1.25, filter: "blur(6px)", duration: 0.35, ease: "power2.in" }, 1.3)
+        .to(beam, { opacity: 0, duration: 0.35 }, 1.3);
+    } else {
+      timeline.add(swap, close + 0.02);
+    }
+    timeline
+      .to(left, { xPercent: -100, duration: entering ? 0.7 : 0.38, ease: "power3.inOut" }, open)
+      .to(right, { xPercent: 100, duration: entering ? 0.7 : 0.38, ease: "power3.inOut" }, open);
+    // A sala aparece: o vídeo cresce e a conversa desliza para o lugar.
+    if (entering) {
+      timeline.add(() => {
+        gsap.from(".watching .watch-panel", { scale: 0.92, opacity: 0, duration: 0.75, ease: "power3.out", clearProps: "transform,opacity" });
+        gsap.from(".watching .messages-wrap, .watching .composer", { x: 50, opacity: 0, duration: 0.6, stagger: 0.08, ease: "power3.out", clearProps: "transform,opacity" });
+      }, open + 0.1);
     }
   },
 
