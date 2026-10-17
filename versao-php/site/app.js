@@ -109,8 +109,9 @@ const dayKey = (iso) => new Date(iso).toDateString();
 
 function dayLabel(iso) {
   const date = new Date(iso);
-  const today = new Date();
-  const yesterday = new Date(Date.now() - 864e5);
+  // "Hoje" e "Ontem" pela hora do servidor: o relógio do celular pode estar errado.
+  const today = new Date(Date.now() + musicClock);
+  const yesterday = new Date(today - 864e5);
   if (date.toDateString() === today.toDateString()) return "Hoje";
   if (date.toDateString() === yesterday.toDateString()) return "Ontem";
   return new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "long", year: date.getFullYear() === today.getFullYear() ? undefined : "numeric" }).format(date);
@@ -537,6 +538,12 @@ function updateMessage(message) {
   });
 }
 
+function dayNode(iso) {
+  const node = el("div", "day", dayLabel(iso));
+  node.dataset.key = dayKey(iso);
+  return node;
+}
+
 function needsDay(previous, message) {
   return !previous || dayKey(previous.createdAt) !== dayKey(message.createdAt);
 }
@@ -562,7 +569,9 @@ function buildNode(message, previous) {
 
 function appendNode(message, animate) {
   const previous = lastRendered();
-  if (needsDay(previous, message)) messagesEl.append(el("div", "day", dayLabel(message.createdAt)));
+  // Nunca dois separadores seguidos do mesmo dia.
+  const lastDay = [...messagesEl.querySelectorAll(".day")].pop();
+  if (needsDay(previous, message) && lastDay?.dataset.key !== dayKey(message.createdAt)) messagesEl.append(dayNode(message.createdAt));
   const node = buildNode(message, previous);
   messagesEl.append(node);
   if (animate) fx.message(node, message.sender === me);
@@ -574,7 +583,7 @@ function renderAll() {
   const fragment = document.createDocumentFragment();
   let previous = null;
   for (const message of [...list, ...pending.values()]) {
-    if (needsDay(previous, message)) fragment.append(el("div", "day", dayLabel(message.createdAt)));
+    if (needsDay(previous, message)) fragment.append(dayNode(message.createdAt));
     fragment.append(buildNode(message, previous));
     previous = message;
   }
@@ -753,7 +762,8 @@ function send(text, gif = null, upload = null) {
     gif,
     file: upload && { url: null, preview: URL.createObjectURL(upload.blob), name: upload.blob.name, type: upload.blob.type, kind: fileKind(upload.blob.type), size: upload.blob.size, width: upload.width, height: upload.height },
     upload: upload && { blob: upload.blob, key: null, progress: 0, xhr: null },
-    createdAt: new Date().toISOString(),
+    // Hora do servidor (o relógio do celular pode estar errado e criaria um "Hoje" a cada mensagem).
+    createdAt: new Date(Date.now() + musicClock).toISOString(),
     replyTo: replyTo ? { id: replyTo.id, sender: replyTo.sender, text: previewText(replyTo).slice(0, 160) } : null,
     reactions: {},
     deleted: false,
