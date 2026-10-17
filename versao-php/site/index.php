@@ -97,6 +97,7 @@ function asset(string $file): string
       <symbol id="i-bell-off" viewBox="0 0 24 24"><path d="M8.7 3A6 6 0 0 1 18 8a21.3 21.3 0 0 0 .6 5"/><path d="M17 17H3s3-2 3-9a4.67 4.67 0 0 1 .3-1.7"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="m2 2 20 20"/></symbol>
       <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></symbol>
       <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+      <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></symbol>
       <symbol id="i-send" viewBox="0 0 24 24"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></symbol>
       <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
       <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
@@ -325,22 +326,57 @@ function asset(string $file): string
           </header>
           <div id="watch-stage" class="watch-stage">
             <div id="watch-host" class="watch-host"></div>
+            <!-- Nada passando: o catálogo, como no Rave. Primeiro os serviços; cada um abre a tela dele. -->
             <div id="watch-picker" class="watch-picker hidden">
-              <span class="watch-picker-icon"><svg viewBox="0 0 142 100" aria-hidden="true"><use href="#potato" /></svg></span>
-              <strong>O que vamos assistir?</strong>
-              <!-- De onde vem o vídeo: no celular, a fileira passa para o lado. -->
-              <div class="watch-sources" role="radiogroup" aria-label="De onde vem o vídeo">
-                <button type="button" class="watch-source active" data-watch-source="youtube" role="radio" aria-checked="true"><svg class="brand" aria-hidden="true"><use href="#b-youtube" /></svg><span>YouTube</span></button>
-                <button type="button" class="watch-source" data-watch-source="netflix" role="radio" aria-checked="false"><b class="wordmark netflix">NETFLIX</b><span>Netflix</span></button>
-                <button type="button" class="watch-source" data-watch-source="max" role="radio" aria-checked="false"><b class="wordmark max">max</b><span>HBO Max</span></button>
-                <button type="button" class="watch-source" data-watch-source="twitch" role="radio" aria-checked="false"><svg class="brand" aria-hidden="true"><use href="#b-twitch" /></svg><span>Twitch</span></button>
-                <button type="button" class="watch-source" data-watch-source="local" role="radio" aria-checked="false"><svg class="icon"><use href="#i-file" /></svg><span>Do aparelho</span></button>
+              <div id="watch-home" class="watch-home">
+                <span class="watch-picker-icon"><svg viewBox="0 0 142 100" aria-hidden="true"><use href="#potato" /></svg></span>
+                <strong>O que vamos assistir?</strong>
+                <p id="watch-browsing" class="watch-browsing hidden"></p>
+                <!-- No celular, a fileira passa para o lado. -->
+                <div class="watch-sources" aria-label="Onde escolher">
+                  <button type="button" class="watch-source" data-watch-source="youtube"><svg class="brand" aria-hidden="true"><use href="#b-youtube" /></svg><span>YouTube</span></button>
+                  <button type="button" class="watch-source" data-watch-source="netflix"><b class="wordmark netflix">NETFLIX</b><span>Netflix</span></button>
+                  <button type="button" class="watch-source" data-watch-source="max"><b class="wordmark max">max</b><span>HBO Max</span></button>
+                  <button type="button" class="watch-source" data-watch-source="twitch"><svg class="brand" aria-hidden="true"><use href="#b-twitch" /></svg><span>Twitch</span></button>
+                  <button type="button" class="watch-source" data-watch-source="local"><svg class="icon"><use href="#i-file" /></svg><span>Do aparelho</span></button>
+                </div>
+                <section id="watch-recent" class="watch-recent hidden" aria-label="Vistos por vocês">
+                  <h3>Vistos por vocês</h3>
+                  <div id="watch-recent-list" class="watch-row"></div>
+                </section>
               </div>
-              <form id="watch-form" class="watch-form">
-                <input id="watch-query" type="search" autocomplete="off" enterkeyhint="go" placeholder="Nome ou link do YouTube" aria-label="Nome ou link do vídeo" />
-                <button class="music-pill" type="submit" title="Assistir" aria-label="Assistir"><svg class="icon"><use href="#i-play" /></svg><span>Assistir</span></button>
-              </form>
-              <p id="watch-hint" class="watch-hint">Os dois veem o mesmo vídeo, no mesmo segundo. Play, pause e avanço valem para os dois.</p>
+              <!-- YouTube: o catálogo dentro da sala (prateleiras e busca). Tocar num vídeo começa para os dois. -->
+              <div id="watch-catalog" class="watch-catalog hidden">
+                <div class="catalog-head">
+                  <button class="watch-btn" type="button" data-watch-back title="Voltar" aria-label="Voltar"><svg class="icon"><use href="#i-arrow-left" /></svg></button>
+                  <svg class="brand" aria-hidden="true"><use href="#b-youtube" /></svg>
+                  <form id="catalog-form" class="catalog-search" role="search">
+                    <input id="catalog-query" type="search" autocomplete="off" enterkeyhint="search" placeholder="Pesquisar no YouTube" aria-label="Pesquisar no YouTube" />
+                    <button type="submit" title="Pesquisar" aria-label="Pesquisar"><svg class="icon"><use href="#i-search" /></svg></button>
+                  </form>
+                </div>
+                <div id="catalog-shelves" class="catalog-shelves" aria-label="Prateleiras"></div>
+                <div id="catalog-grid" class="catalog-grid" aria-live="polite"></div>
+              </div>
+              <!-- Netflix, HBO Max e Twitch: abre o serviço e a sala segue o que for escolhido lá. -->
+              <div id="watch-launch" class="watch-launch hidden">
+                <button class="watch-btn launch-back" type="button" data-watch-back title="Voltar" aria-label="Voltar"><svg class="icon"><use href="#i-arrow-left" /></svg></button>
+                <span id="watch-launch-mark" class="launch-mark"></span>
+                <strong id="watch-launch-title"></strong>
+                <p id="watch-launch-text" class="watch-hint"></p>
+                <div id="watch-launch-actions" class="launch-actions">
+                  <a id="watch-launch-open" class="music-pill" href="https://www.netflix.com/browse" target="_blank" rel="noopener noreferrer"><svg class="icon"><use href="#i-external" /></svg><span>Abrir a Netflix</span></a>
+                  <button id="watch-launch-start" class="watch-ghost" type="button" title="Sem a extensão (no celular): a sala começa a contar o tempo para os dois"><svg class="icon"><use href="#i-play" /></svg>Começar a sessão</button>
+                </div>
+                <form id="watch-twitch" class="watch-form hidden">
+                  <input id="watch-twitch-query" type="search" autocomplete="off" enterkeyhint="go" placeholder="Nome do canal" aria-label="Nome do canal da Twitch ou link de um vídeo" />
+                  <button class="music-pill" type="submit" title="Assistir" aria-label="Assistir"><svg class="icon"><use href="#i-play" /></svg><span>Assistir</span></button>
+                </form>
+                <section id="watch-launch-seen" class="watch-recent hidden" aria-label="Vistos por vocês aqui">
+                  <h3>Vistos por vocês</h3>
+                  <div id="watch-launch-recent" class="watch-row"></div>
+                </section>
+              </div>
             </div>
             <div id="watch-stream" class="watch-stream hidden">
               <b id="watch-stream-mark" class="wordmark"></b>

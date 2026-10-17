@@ -109,15 +109,16 @@ Escreva no campo de mensagem e aperte Enter (ao digitar `/`, aparece a lista dos
 
 Uma sala só para assistir junto: o vídeo grande, com cara de cinema, e a conversa do lado (no celular, embaixo). Abre pelo botão de TV no topo da conversa, pelo clipe de anexar → **Batata Watch Party** ou com `/watchparty`, sempre com uma abertura de cinema ao entrar e um encerramento ao sair (um toque na tela acelera; com "reduzir movimento" ligado no aparelho, a sala abre e fecha direto). Os dois veem o mesmo vídeo, no mesmo segundo: play, pause e avanço valem para os dois, e tem tela cheia.
 
-| De onde | Como |
+Escolher é como no Rave: um catálogo com os serviços (no celular, os cartões passam para o lado). Tocou num, abre o catálogo dele; o que um escolher começa para os dois. Enquanto alguém escolhe, a outra pessoa vê "Ana está escolhendo na Netflix…".
+
+| Serviço | Como escolhe |
 | --- | --- |
-| YouTube | Nome ou link (`/watchparty nome do vídeo` também funciona) |
-| Netflix | Nome do filme ou da série, ou o link (`netflix.com/watch/…` ou `netflix.com/title/…`). Veja abaixo |
-| HBO Max | Nome do filme ou da série, ou o link do `hbomax.com` / `max.com`. Veja abaixo |
-| Twitch | Nome do canal (ao vivo; aí só dá para pausar, não avançar) ou link de um vídeo gravado (`twitch.tv/videos/…`) |
+| YouTube | O catálogo abre dentro da sala: prateleiras (Em alta, Músicas, Trailers, Humor, Games, Podcasts, Esportes, Documentários, Receitas) e a busca. Tocou no vídeo, começa para os dois. Colar um link na busca também vale, e `/watchparty nome do vídeo` continua funcionando |
+| Netflix e HBO Max | Abre a Netflix ou a HBO Max de verdade (no celular, o app), na conta de cada um. Escolha lá e dê o play: com a extensão no computador, a sala começa sozinha para os dois. Veja abaixo |
+| Twitch | O nome do canal (ao vivo; aí só dá para pausar, não avançar) ou o link de um vídeo gravado (`twitch.tv/videos/…`) |
 | Do aparelho | Cada um escolhe o mesmo arquivo no próprio aparelho; nada sobe para o servidor |
 
-- No celular, os cartões de origem passam para o lado.
+- **Vistos por vocês:** o que vocês já assistiram juntos fica numa fileira no começo do catálogo (e na tela de cada serviço). Um toque assiste de novo, para os dois.
 - Quando um vídeo começa, a sala abre para os dois. Cada um sai quando quiser (o vídeo continua para o outro, e o botão de TV fica com um pontinho vermelho). O **X** embaixo do vídeo para para os dois.
 - Começar um vídeo pausa a música do bot. Clipes da Twitch não têm como sincronizar.
 
@@ -127,9 +128,10 @@ Os filmes da Netflix e da HBO Max são protegidos contra cópia: só tocam no si
 
 - **Mesma conta ou uma para cada:** cada um assiste na própria tela, logado na Netflix ou na HBO Max. Pode ser a mesma conta nos dois aparelhos (cada um no seu perfil; o plano precisa permitir 2 telas ao mesmo tempo) ou contas diferentes: o tempo é sincronizado pela sala, não pela conta. Se vocês moram em casas diferentes, a Netflix e a HBO Max podem pedir verificação ou cobrar à parte pelo uso fora de casa.
 - **Transmitir a tela da Netflix numa chamada não funciona:** a proteção deles deixa o vídeo preto para quem assiste.
-- A sala mostra o título, o relógio da sessão (igual para os dois) e o botão **Abrir na Netflix** / **Abrir na HBO Max**, que abre o link ou, se foi só o nome, a busca.
-- **No computador, com a extensão do Chrome (versão 2.1.0):** com o filme aberto na aba da Netflix ou da HBO Max, o player segue a sala sozinho (play, pause e o mesmo segundo), e o play, o pause ou o avanço dado lá vale para os dois.
-- **No celular:** os apps da Netflix e da HBO Max não deixam nenhum outro app mandar no player. Use a **Contagem 3, 2, 1**, que aparece nos dois aparelhos no mesmo instante, para darem o play juntos. Quando alguém pausa, o outro recebe o aviso para pausar também.
+- **No computador, com a extensão do Chrome (versão 2.2.0):** toque na Netflix (ou na HBO Max) no catálogo da sala; ela abre numa aba. Escolha o filme ou o episódio e dê o play: a sala começa sozinha para os dois, com o nome do que está passando. A aba da Netflix da outra pessoa vai junto para o mesmo título (se não estiver aberta, o botão **Abrir na Netflix** da sala abre ele). Depois, o player de cada um segue a sala (play, pause e o mesmo segundo), e o play, o pause ou o avanço dado lá vale para os dois. No próximo episódio, a sala e a outra aba vão junto.
+- Assistindo sozinho, sem ter aberto pela sala, a extensão não mexe em nada.
+- **No celular:** os apps da Netflix e da HBO Max não deixam nenhum outro app mandar no player nem dizer o que está passando. Escolha no app, volte para a sala e toque em **Começar a sessão**; depois, use a **Contagem 3, 2, 1**, que aparece nos dois aparelhos no mesmo instante, para darem o play juntos. Quando alguém pausa, o outro recebe o aviso para pausar também.
+- A sala mostra o título, o relógio da sessão (igual para os dois) e o botão **Abrir na Netflix** / **Abrir na HBO Max**.
 - **Nenhuma senha fica guardada:** salvar a senha da Netflix ou da HBO Max no banco não faria o filme tocar dentro do site e ainda deixaria as contas em risco.
 
 ## Chamadas e transmissão de tela
@@ -146,7 +148,7 @@ Os botões do topo da conversa ligam por voz, por vídeo ou já transmitindo a t
 
 1. Em `chrome://extensions`, ative o **Modo do desenvolvedor** e clique em **Carregar sem compactação**. Escolha a pasta `extensao/`. Se a versão antiga estiver instalada, remova-a antes.
 2. Nas opções da extensão, coloque o endereço do site (ex.: `https://chat.seudominio.com.br`) e clique em **Testar conexão**.
-3. **Atualizou os arquivos da pasta `extensao/`?** Em `chrome://extensions`, clique no botão de recarregar da extensão e recarregue as abas da Netflix e da HBO Max que estiverem abertas. A versão 2.1.0 é a que sincroniza a Batata Watch Party nesses dois sites.
+3. **Atualizou os arquivos da pasta `extensao/`?** Em `chrome://extensions`, clique no botão de recarregar da extensão e recarregue as abas da Netflix e da HBO Max que estiverem abertas. A versão 2.2.0 é a que começa a Batata Watch Party sozinha quando vocês escolhem na Netflix ou na HBO Max.
 
 Os atalhos continuam iguais: botão direito → *Enviar para o nosso chat*, `pc` + Espaço na barra de endereço, e `Alt+Shift+O`.
 

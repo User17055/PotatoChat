@@ -2136,9 +2136,12 @@ const trackLink = (track) => {
 };
 const smallCover = (track) => (youtubeArt(track) ? `https://i.ytimg.com/vi/${track.id}/mqdefault.jpg` : track.thumb || "");
 
+// "3:28"; com mais de uma hora, "1:02:03" (filmes, jogos completos, lives gravadas).
 function clockTime(seconds) {
   const total = Math.max(0, Math.floor(seconds || 0));
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+  const pad = (value) => String(value).padStart(2, "0");
+  if (total >= 3600) return `${Math.floor(total / 3600)}:${pad(Math.floor(total / 60) % 60)}:${pad(total % 60)}`;
+  return `${Math.floor(total / 60)}:${pad(total % 60)}`;
 }
 
 // Logo do YouTube ou do Spotify (sprite do index.php, nas cores das marcas).
@@ -2931,7 +2934,9 @@ let watchUnblockedAt = 0;
 let watchRoom = false;
 // A sala na tela (troca no meio da abertura de cinema, com as cortinas fechadas).
 let watchView = false;
-let watchSource = "youtube";
+// O catálogo na sala, como no Rave: home (os serviços), youtube (o catálogo aqui dentro) e netflix, max e twitch
+// (abrem o serviço; a sala segue o que for escolhido lá).
+let watchScreen = "home";
 const watchPanel = $("#watch-panel");
 const watchButton = $("#watch-button");
 const watchStage = $("#watch-stage");
@@ -2939,14 +2944,26 @@ const watchStage = $("#watch-stage");
 const watchAt = () => (watch.playing ? watch.position + Math.max(0, Date.now() + musicClock - watch.updatedAt) / 1000 : watch.position);
 // Netflix e HBO Max: nada toca aqui; cada um assiste na própria conta (a extensão sincroniza; no celular, a contagem).
 const STREAMING = {
-  netflix: { name: "Netflix", mark: "NETFLIX", placeholder: "Filme, série ou link da Netflix" },
-  max: { name: "HBO Max", mark: "max", placeholder: "Filme, série ou link da HBO Max" }
+  netflix: { name: "Netflix", mark: "NETFLIX", open: "https://www.netflix.com/browse" },
+  max: { name: "HBO Max", mark: "max", open: "https://play.hbomax.com/" }
 };
 const streaming = (item) => Boolean(item && STREAMING[item.source]);
 const WATCH_HINT = {
-  default: "Os dois veem o mesmo vídeo, no mesmo segundo. Play, pause e avanço valem para os dois.",
   streaming: "Pode ser a mesma conta nos dois (com plano de 2 telas) ou uma para cada. No computador, a extensão do Potato Chat faz o player seguir a sala; no celular, a contagem ajuda a darem o play juntos."
 };
+const WATCH_WHERE = { youtube: "no YouTube", netflix: "na Netflix", max: "na HBO Max", twitch: "na Twitch" };
+// Netflix, HBO Max e Twitch: a tela de cada um no catálogo.
+const WATCH_LAUNCH = {
+  netflix: { title: "Escolha na Netflix", text: "A Netflix abriu: escolha o filme ou o episódio e dê o play. No computador com a extensão do Potato Chat, a sala começa sozinha para os dois. No celular, volte aqui e toque em Começar a sessão." },
+  max: { title: "Escolha na HBO Max", text: "A HBO Max abriu: escolha o filme ou o episódio e dê o play. No computador com a extensão do Potato Chat, a sala começa sozinha para os dois. No celular, volte aqui e toque em Começar a sessão." },
+  twitch: { title: "Qual canal?", text: "O nome do canal (ao vivo) ou o link de um vídeo gravado." }
+};
+// Prateleiras do catálogo do YouTube (as buscas de cada uma ficam no servidor).
+const WATCH_SHELVES = [["alta", "Em alta"], ["musicas", "Músicas"], ["trailers", "Trailers"], ["humor", "Humor"], ["games", "Games"], ["podcasts", "Podcasts"], ["esportes", "Esportes"], ["documentarios", "Documentários"], ["receitas", "Receitas"]];
+let catalogShelf = "alta";
+let catalogAsk = 0;
+const catalogCache = new Map();
+const catalogVideos = new Map();
 let countdownAt = 0;
 let countdownTimer = 0;
 const hasWatchFile = (item) => Boolean(watchFile && (watchFileFor === item.uid || watchFile.name === item.name));
@@ -3021,6 +3038,8 @@ function applyWatch(state, measured = false, join = true) {
     // Quem começou um vídeo do aparelho já está com o arquivo.
     if (watchStarting && state.now.source === "local" && state.now.by === me) watchFileFor = state.now.uid;
     watchStarting = false;
+    // Quando o vídeo acabar, o catálogo volta do começo (os serviços).
+    watchScreen = "home";
   }
   // Começou um vídeo: a sala abre para os dois.
   if (started && join) setWatchRoom(true);
@@ -3034,6 +3053,8 @@ function setWatchRoom(on) {
   watchButton.setAttribute("aria-pressed", String(on));
   if (on) closeMusic();
   else setWatchExpanded(false);
+  // Saiu da sala no meio da escolha: para de aparecer "escolhendo" para a outra pessoa.
+  if (!on) setWatchScreen("home");
   paintWatch();
   // Abertura (ou encerramento) de cinema: o site muda por trás do clarão. Entrando, o player (pesado) só abre
   // quando a animação termina, para ela não engasgar; saindo, ele fecha na hora.
@@ -3043,24 +3064,196 @@ function setWatchRoom(on) {
     paintWatch();
     if (!on) syncWatch();
     scrollToLatest();
-    if (on && !watch.now && matchMedia("(pointer: fine)").matches) setTimeout(() => $("#watch-query").focus(), 50);
   }, (cue) => sound.play(cue), () => {
     if (watchView) syncWatch();
   });
 }
 
-function setWatchSource(source) {
-  watchSource = source;
-  for (const button of watchPanel.querySelectorAll("[data-watch-source]")) {
-    const on = button.dataset.watchSource === source;
-    button.classList.toggle("active", on);
-    button.setAttribute("aria-checked", String(on));
-    if (on) button.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
-  }
-  $("#watch-query").placeholder = STREAMING[source]?.placeholder || (source === "twitch" ? "Canal ou link da Twitch" : "Nome ou link do YouTube");
-  $("#watch-hint").textContent = STREAMING[source] ? WATCH_HINT.streaming : WATCH_HINT.default;
-  if (matchMedia("(pointer: fine)").matches) $("#watch-query").focus();
+// ---------- catálogo (como no Rave) ----------
+
+// Troca a tela do catálogo. A outra pessoa vê onde esta está escolhendo ("Ana está escolhendo na Netflix…"); na
+// Netflix e na HBO Max, é isso que diz à extensão para começar a sala quando esta pessoa der o play lá.
+function setWatchScreen(screen) {
+  if (watchScreen === screen) return paintWatchPicker();
+  watchScreen = screen;
+  socket?.emit("watch", { op: "browse", service: screen === "home" ? "" : screen });
+  if (screen === "youtube" && !$("#catalog-grid").childElementCount) loadCatalog({ shelf: catalogShelf });
+  paintWatchPicker();
+  if (!matchMedia("(pointer: fine)").matches) return;
+  if (screen === "youtube") $("#catalog-query").focus();
+  if (screen === "twitch") $("#watch-twitch-query").focus();
 }
+
+// Tocou num serviço: o vídeo do aparelho abre a escolha do arquivo; a Netflix e a HBO Max abrem de verdade (no
+// celular, o app), com a conta de cada um; YouTube e Twitch abrem a tela deles aqui na sala.
+function openWatchService(source) {
+  if (source === "local") return $("#pick-watch").click();
+  if (STREAMING[source]) window.open(STREAMING[source].open, "_blank", "noopener");
+  setWatchScreen(source);
+}
+
+// A outra pessoa escolhendo agora (o aviso vale por 10 minutos).
+function watchChooser() {
+  const fresh = Object.entries(watch.browsing || {}).find(([name, entry]) => name !== me && Date.now() + musicClock - entry.at < 600000);
+  return fresh ? { name: fresh[0], service: fresh[1].service } : null;
+}
+
+function paintWatchPicker() {
+  const screen = watchScreen;
+  $("#watch-home").classList.toggle("hidden", screen !== "home");
+  $("#watch-catalog").classList.toggle("hidden", screen !== "youtube");
+  $("#watch-launch").classList.toggle("hidden", !WATCH_LAUNCH[screen]);
+  // No celular, escolhendo, o catálogo ganha mais altura.
+  watchPanel.classList.toggle("browsing", screen !== "home");
+  const chooser = watchChooser();
+  const notice = $("#watch-browsing");
+  notice.classList.toggle("hidden", !chooser);
+  if (chooser) notice.textContent = `${chooser.name} está escolhendo ${WATCH_WHERE[chooser.service] || "algo"}…`;
+  const recent = watch.recent || [];
+  $("#watch-recent").classList.toggle("hidden", !recent.length);
+  paintWatchRow($("#watch-recent-list"), recent);
+  if (WATCH_LAUNCH[screen]) paintWatchLaunch(screen);
+}
+
+// A tela da Netflix, da HBO Max ou da Twitch.
+function paintWatchLaunch(screen) {
+  const service = STREAMING[screen];
+  const launch = $("#watch-launch");
+  launch.dataset.service = screen;
+  $("#watch-launch-mark").replaceChildren(service ? el("b", `wordmark ${screen}`, service.mark) : brand(screen));
+  $("#watch-launch-title").textContent = WATCH_LAUNCH[screen].title;
+  $("#watch-launch-text").textContent = WATCH_LAUNCH[screen].text;
+  $("#watch-launch-actions").classList.toggle("hidden", !service);
+  $("#watch-twitch").classList.toggle("hidden", Boolean(service));
+  if (service) {
+    const open = $("#watch-launch-open");
+    open.href = service.open;
+    open.querySelector("span").textContent = `Abrir a ${service.name}`;
+  }
+  const seen = (watch.recent || []).filter((entry) => entry.source === screen);
+  $("#watch-launch-seen").classList.toggle("hidden", !seen.length);
+  paintWatchRow($("#watch-launch-recent"), seen);
+}
+
+// "Vistos por vocês": capa do YouTube, logo da Twitch ou a marca da Netflix e da HBO Max, e o nome.
+function paintWatchRow(row, entries) {
+  const keys = entries.map((entry) => entry.key).join("|");
+  if (row.dataset.keys === keys) return;
+  row.dataset.keys = keys;
+  row.replaceChildren(...entries.map((entry) => {
+    const card = el("button", `recent-card ${entry.source}`);
+    card.type = "button";
+    card.dataset.recent = entry.key;
+    card.title = entry.title;
+    const art = el("span", "recent-art");
+    if (entry.source === "youtube") art.append(watchThumb(entry.id));
+    else if (STREAMING[entry.source]) art.append(el("b", `wordmark ${entry.source}`, STREAMING[entry.source].mark));
+    else art.append(brand(entry.source));
+    card.append(art, el("span", "recent-title", entry.title));
+    return card;
+  }));
+}
+
+function watchThumb(id) {
+  const image = new Image();
+  image.alt = "";
+  image.loading = "lazy";
+  image.decoding = "async";
+  image.src = `https://i.ytimg.com/vi/${id}/mqdefault.jpg`;
+  return image;
+}
+
+// De novo, para os dois. Na Netflix e na HBO Max, abre o mesmo título aqui e começa a sessão.
+function replayWatch(key) {
+  const entry = (watch.recent || []).find((item) => item.key === key);
+  if (!entry) return;
+  if (entry.source === "youtube") return watchCommand("start", { video: { id: entry.id, title: entry.title, channel: entry.channel, duration: entry.duration } });
+  if (entry.source === "twitch") return watchCommand("start", { query: entry.kind === "video" ? `https://www.twitch.tv/videos/${entry.id}` : `https://www.twitch.tv/${entry.id}` });
+  window.open(entry.url, "_blank", "noopener");
+  watchCommand("start", { query: entry.url, service: entry.source, title: entry.title });
+}
+
+// Uma prateleira ou a busca: os cartões cinza aparecem enquanto o YouTube responde (fica guardado 10 minutos).
+function loadCatalog({ shelf = "", query = "" }) {
+  catalogShelf = shelf;
+  for (const chip of $("#catalog-shelves").children) chip.classList.toggle("active", chip.dataset.shelf === shelf);
+  const key = shelf ? `shelf:${shelf}` : `query:${query.toLowerCase()}`;
+  const cached = catalogCache.get(key);
+  if (cached && Date.now() - cached.at < 600000) return paintCatalog(cached.results);
+  const ask = ++catalogAsk;
+  paintCatalog(null);
+  if (!socket?.connected) return paintCatalog([], "Sem conexão agora. Tente de novo em instantes.");
+  socket.timeout(25000).emit("watch", { op: "search", shelf, query }, (error, result) => {
+    if (ask !== catalogAsk) return;
+    if (error || !result?.ok) return paintCatalog([], "Não deu para carregar agora. Tente de novo.");
+    catalogCache.set(key, { at: Date.now(), results: result.results });
+    paintCatalog(result.results);
+  });
+}
+
+// Os vídeos em grade, como no YouTube: capa com a duração, o nome, o canal e as visualizações.
+function paintCatalog(results, message = "") {
+  const grid = $("#catalog-grid");
+  grid.scrollTop = 0;
+  grid.toggleAttribute("aria-busy", !results);
+  if (!results) {
+    grid.replaceChildren(...Array.from({ length: 8 }, () => {
+      const card = el("div", "catalog-card skeleton");
+      const info = el("span", "catalog-info");
+      info.append(el("i"), el("i"));
+      card.append(el("span", "catalog-thumb"), info);
+      return card;
+    }));
+    return;
+  }
+  if (!results.length) return grid.replaceChildren(el("p", "catalog-empty", message || "Nada por aqui. Tente outra busca."));
+  catalogVideos.clear();
+  grid.replaceChildren(...results.map((video) => {
+    catalogVideos.set(video.id, video);
+    const card = el("button", "catalog-card");
+    card.type = "button";
+    card.dataset.video = video.id;
+    const art = el("span", "catalog-thumb");
+    art.append(watchThumb(video.id));
+    if (video.duration) art.append(el("span", "catalog-time", clockTime(video.duration)));
+    const info = el("span", "catalog-info");
+    info.append(el("strong", "", video.title), el("small", "", [video.channel, video.views, video.age].filter(Boolean).join(" · ")));
+    card.append(art, info);
+    return card;
+  }));
+}
+
+$("#catalog-shelves").append(...WATCH_SHELVES.map(([key, label]) => {
+  const chip = el("button", "catalog-shelf", label);
+  chip.type = "button";
+  chip.dataset.shelf = key;
+  return chip;
+}));
+
+$("#catalog-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const input = $("#catalog-query");
+  const query = input.value.trim();
+  if (!query) return input.focus();
+  // Link colado (YouTube, Twitch, Netflix ou HBO Max): abre direto.
+  if (/^https?:\/\/|youtu\.?be|twitch\.tv|netflix\.com|max\.com/i.test(query)) {
+    input.value = "";
+    return watchCommand("start", { query });
+  }
+  input.blur();
+  loadCatalog({ query });
+});
+
+$("#watch-twitch").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const input = $("#watch-twitch-query");
+  let query = input.value.trim();
+  if (!query) return input.focus();
+  // Só o nome do canal já basta.
+  if (!/twitch\.tv/i.test(query)) query = `twitch.tv/${query.replace(/^@/, "")}`;
+  watchCommand("start", { query });
+  input.value = "";
+});
 
 function paintWatch() {
   const item = watch.now;
@@ -3071,11 +3264,18 @@ function paintWatch() {
   $("#watch-picker").classList.toggle("hidden", Boolean(item));
   $("#watch-who").textContent = peerName ? `com ${peerName}` : "";
   watchPanel.dataset.source = item?.source || "";
-  if (!item) return setWatchExpanded(false);
+  // Fechou o vídeo: sai também o cartão da Netflix ou da HBO Max e os avisos de cima do palco.
+  const service = item ? STREAMING[item.source] : null;
+  $("#watch-stream").classList.toggle("hidden", !service);
+  if (!item) {
+    $("#watch-need").classList.add("hidden");
+    $("#watch-unblock").classList.add("hidden");
+    paintWatchPicker();
+    return setWatchExpanded(false);
+  }
+  watchPanel.classList.remove("browsing");
   const needFile = item.source === "local" && !hasWatchFile(item);
   const live = item.source === "twitch" && item.kind === "channel";
-  const service = STREAMING[item.source];
-  $("#watch-stream").classList.toggle("hidden", !service);
   if (service) {
     const mark = $("#watch-stream-mark");
     mark.textContent = service.mark;
@@ -3129,7 +3329,7 @@ setInterval(() => {
 
 function watchCommand(op, extra = {}) {
   if (!socket?.connected) return toast("Sem conexão agora. Tente de novo em instantes.", "error");
-  if (op === "start" && extra.query) toast("Abrindo o vídeo…", "music", "tv");
+  if (op === "start" && (extra.query || extra.video)) toast("Abrindo o vídeo…", "music", "tv");
   socket.timeout(20000).emit("watch", { op, ...extra }, (error, result) => {
     if (error) return toast("Não deu para mexer no vídeo agora. Tente de novo.", "error");
     if (!result?.ok) {
@@ -3215,22 +3415,6 @@ watchButton.addEventListener("click", () => {
   setWatchRoom(!watchRoom);
 });
 
-$("#watch-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  let query = $("#watch-query").value.trim();
-  // Netflix e HBO Max: o nome é opcional (cada um escolhe lá na própria conta).
-  if (STREAMING[watchSource]) {
-    watchCommand("start", { query, service: watchSource });
-    $("#watch-query").value = "";
-    return;
-  }
-  if (!query) return $("#watch-query").focus();
-  // Na Twitch, só o nome do canal já basta.
-  if (watchSource === "twitch" && !/twitch\.tv/i.test(query)) query = `twitch.tv/${query.replace(/^@/, "")}`;
-  watchCommand("start", { query });
-  $("#watch-query").value = "";
-});
-
 // Contagem 3, 2, 1 nos dois aparelhos ao mesmo tempo (pelo relógio do servidor), para darem o play juntos.
 function showCountdown(at) {
   if (!at || at === countdownAt) return;
@@ -3262,10 +3446,19 @@ watchPanel.addEventListener("click", async (event) => {
   if (target.closest("#watch-leave")) return setWatchRoom(false);
   if (target.closest("#watch-countdown")) return watchCommand("countdown");
   const source = target.closest("[data-watch-source]");
-  if (source) {
-    if (source.dataset.watchSource === "local") return $("#pick-watch").click();
-    return setWatchSource(source.dataset.watchSource);
+  if (source) return openWatchService(source.dataset.watchSource);
+  if (target.closest("[data-watch-back]")) return setWatchScreen("home");
+  const shelf = target.closest("[data-shelf]");
+  if (shelf) {
+    $("#catalog-query").value = "";
+    return loadCatalog({ shelf: shelf.dataset.shelf });
   }
+  const video = target.closest("[data-video]");
+  if (video) return watchCommand("start", { video: catalogVideos.get(video.dataset.video) });
+  const recent = target.closest("[data-recent]");
+  if (recent) return replayWatch(recent.dataset.recent);
+  // Sem a extensão (no celular): já escolheram lá e deram o play; a sala começa a contar o tempo.
+  if (target.closest("#watch-launch-start")) return watchCommand("start", { service: watchScreen, query: "" });
   if (target.closest("#watch-unblock")) return watchListen();
   if (target.closest("#watch-pick")) {
     watchPicking = true;

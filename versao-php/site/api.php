@@ -76,6 +76,12 @@ function ops(array $input): array
 {
     $list = $input['ops'] ?? null;
     if (!is_array($list) || count($list) > 50) throw new HttpError(400, 'Ações inválidas.');
+    // O catálogo da Watch Party só lê o YouTube (leva um ou dois segundos): fica fora da trava, para não segurar o chat.
+    $data = $list[0]['data'] ?? null;
+    if (count($list) === 1 && str($list[0]['event'] ?? '') === 'watch' && is_array($data) && str($data['op'] ?? '') === 'search') {
+        authenticate($input);
+        return ['results' => [watch_catalog($data)]];
+    }
     return transaction(function () use ($input, $list) {
         $session = authenticate($input);
         $conn = conn_id($input);

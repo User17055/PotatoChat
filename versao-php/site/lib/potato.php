@@ -602,15 +602,16 @@ function youtube_meta(string $id): ?array
 }
 
 // Busca pelo nome. Com a chave da API, pelo jeito oficial; sem ela, lendo a página de resultados do YouTube.
-function youtube_search(string $query): array
+// $filter é o filtro da página de resultados (padrão: só vídeos; o catálogo da sala usa "mais vistos da semana").
+function youtube_search(string $query, int $limit = 6, string $filter = 'EgIQAQ=='): array
 {
     $key = str(config()['youtube_key']);
     $found = [];
     if ($key !== '') {
         $data = http_json('https://www.googleapis.com/youtube/v3/search?' . http_build_query([
             'part' => 'snippet', 'type' => 'video', 'videoEmbeddable' => 'true', 'videoSyndicated' => 'true',
-            'maxResults' => 5, 'regionCode' => 'BR', 'relevanceLanguage' => 'pt', 'q' => $query, 'key' => $key,
-        ]));
+            'maxResults' => max(5, min(25, $limit)), 'regionCode' => 'BR', 'relevanceLanguage' => 'pt', 'q' => $query, 'key' => $key,
+        ] + ($filter !== 'EgIQAQ==' ? ['order' => 'viewCount', 'publishedAfter' => gmdate('Y-m-d\TH:i:s\Z', time() - 30 * 86400)] : [])));
         foreach ($data['items'] ?? [] as $item) {
             if (empty($item['id']['videoId'])) continue;
             $found[] = [
@@ -622,10 +623,10 @@ function youtube_search(string $query): array
         }
         return $found;
     }
-    [$status, $html] = http_get('https://www.youtube.com/results?' . http_build_query(['search_query' => $query, 'sp' => 'EgIQAQ==', 'hl' => 'pt-BR', 'gl' => 'BR']));
+    [$status, $html] = http_get('https://www.youtube.com/results?' . http_build_query(['search_query' => $query, 'sp' => $filter, 'hl' => 'pt-BR', 'gl' => 'BR']));
     if ($status !== 200 || !preg_match('/var ytInitialData = (\{.*?\});<\/script>/s', $html, $match)) return [];
-    $walk = function ($node) use (&$walk, &$found) {
-        if (!is_array($node) || count($found) >= 6) return;
+    $walk = function ($node) use (&$walk, &$found, $limit) {
+        if (!is_array($node) || count($found) >= $limit) return;
         if (isset($node['videoRenderer']['videoId'])) {
             $video = $node['videoRenderer'];
             // Sem duração = transmissão ao vivo: fica de fora.
@@ -633,6 +634,7 @@ function youtube_search(string $query): array
                 $found[] = [
                     'id' => $video['videoId'], 'title' => $video['title']['runs'][0]['text'] ?? '', 'artist' => $video['ownerText']['runs'][0]['text'] ?? '',
                     'duration' => parse_length((string) ($video['lengthText']['simpleText'] ?? '')), 'checked' => false,
+                    'views' => (string) ($video['shortViewCountText']['simpleText'] ?? ''), 'age' => (string) ($video['publishedTimeText']['simpleText'] ?? ''),
                 ];
             }
             return;
@@ -967,9 +969,52 @@ function parse_watch_link(string $query): ?array
     return null;
 }
 
+// browsing: quem está escolhendo e onde, por pessoa (a outra vê "Ana está escolhendo na Netflix…"; na Netflix e na
+// HBO Max, a extensão começa a sessão sozinha quando essa pessoa der o play lá). recent: "Vistos por vocês".
 function watch_blank(): array
 {
-    return ['now' => null, 'playing' => false, 'position' => 0, 'updatedAt' => 0];
+    return ['now' => null, 'playing' => false, 'position' => 0, 'updatedAt' => 0, 'browsing' => null, 'recent' => []];
+}
+
+const WATCH_SERVICES = ['youtube', 'netflix', 'max', 'twitch'];
+
+// Prateleiras do catálogo do YouTube na sala: buscas com filtro (mais vistos da semana ou do mês, só vídeos).
+const WATCH_SHELVES = [
+    'alta' => ['brasil', 'CAMSBAgDEAE='],
+    'musicas' => ['clipe oficial música brasileira', 'CAMSBAgEEAE='],
+    'trailers' => ['trailer oficial dublado', 'CAMSBAgEEAE='],
+    'humor' => ['humor brasileiro', 'CAMSBAgEEAE='],
+    'games' => ['jogando gameplay pt-br', 'CAMSBAgDEAE='],
+    'podcasts' => ['cortes podcast', 'CAMSBAgDEAE='],
+    'esportes' => ['melhores momentos', 'CAMSBAgDEAE='],
+    'documentarios' => ['documentário completo', 'CAMSBAgEEAE='],
+    'receitas' => ['receita', 'CAMSBAgEEAE='],
+];
+
+// O catálogo: uma prateleira ou a busca de quem digitou. Só lê o YouTube; a sala não muda.
+function watch_catalog(array $body): array
+{
+    $shelf = WATCH_SHELVES[str($body['shelf'] ?? '')] ?? null;
+    $query = $shelf[0] ?? text_slice(text_trim(str($body['query'] ?? '')), 120);
+    if ($query === '' || !config()['music_lookup']) return ['ok' => true, 'results' => []];
+    $results = array_map(fn($video) => [
+        'id' => $video['id'], 'title' => text_slice((string) $video['title'], 200), 'channel' => text_slice((string) $video['artist'], 120),
+        'duration' => $video['duration'] ?? null, 'views' => text_slice((string) ($video['views'] ?? ''), 40), 'age' => text_slice((string) ($video['age'] ?? ''), 40),
+    ], youtube_search($query, 18, $shelf[1] ?? 'EgIQAQ=='));
+    return ['ok' => true, 'results' => $results];
+}
+
+// "Vistos por vocês": os 12 últimos da sala, sem repetir. O vídeo do aparelho fica de fora (o arquivo é de cada
+// um), e da Netflix e da HBO Max só entra o que tem título certo (o endereço de um filme ou episódio).
+function watch_recent(array $recent, array $item): array
+{
+    $source = $item['source'];
+    if ($source === 'local' || (in_array($source, ['netflix', 'max'], true) && !preg_match('~/watch/~', $item['url'] ?? ''))) return $recent;
+    $key = $source . ':' . ($item['id'] ?? $item['url'] ?? '');
+    $entry = ['key' => $key] + array_intersect_key($item, array_flip(['source', 'kind', 'id', 'url', 'title', 'channel', 'duration']));
+    $recent = array_values(array_filter($recent, fn($old) => ($old['key'] ?? '') !== $key));
+    array_unshift($recent, $entry);
+    return array_slice($recent, 0, 12);
 }
 
 function watch_state(bool $lock = false): array
@@ -990,14 +1035,28 @@ function watch_public(array $state): array
     return $state + ['serverNow' => now_ms()];
 }
 
-// Comandos: start (query = link; local = vídeo do aparelho), pause, resume, seek, ended e stop.
+// Comandos: start (query = link ou nome; video = escolhido no catálogo; local = vídeo do aparelho), pause, resume,
+// seek, ended, countdown, browse (quem está escolhendo), stop e search (o catálogo, sem mexer na sala).
 function watch_act(array $me, array $body): array
 {
     $op = str($body['op'] ?? '');
+    if ($op === 'search') return watch_catalog($body);
     $item = null;
     if ($op === 'start') {
         $local = is_array($body['local'] ?? null) ? $body['local'] : null;
-        if ($local) {
+        $video = is_array($body['video'] ?? null) ? $body['video'] : null;
+        if ($video) {
+            // Escolhido no catálogo: já vem com nome, canal e duração. Os que o dono não deixa passar fora do YouTube
+            // não respondem ao oEmbed: melhor avisar agora do que abrir um player com erro para os dois.
+            $id = str($video['id'] ?? '');
+            if (!preg_match('/^[A-Za-z0-9_-]{11}$/', $id)) return ['ok' => false, 'error' => 'Vídeo inválido.'];
+            if (config()['music_lookup'] && !youtube_meta($id)) return ['ok' => false, 'error' => 'Esse vídeo não deixa passar fora do YouTube. Escolha outro.'];
+            $title = text_slice(text_trim(str($video['title'] ?? '')), 200);
+            $channel = text_slice(text_trim(str($video['channel'] ?? '')), 120);
+            $duration = max(0, min(86400, (float) ($video['duration'] ?? 0)));
+            $item = ['source' => 'youtube', 'id' => $id, 'title' => $title !== '' ? $title : 'Vídeo do YouTube']
+                + ($channel !== '' ? ['channel' => $channel] : []) + ($duration > 0 ? ['duration' => $duration] : []);
+        } elseif ($local) {
             $name = clean_file_name(str($local['name'] ?? ''));
             $item = ['source' => 'local', 'title' => $name, 'name' => $name, 'size' => max(0, (int) ($local['size'] ?? 0)), 'duration' => max(0, min(86400, (float) ($local['duration'] ?? 0)))];
         } else {
@@ -1024,7 +1083,9 @@ function watch_act(array $me, array $body): array
                 $meta = !isset($link['title']) && config()['music_lookup'] ? youtube_meta($link['id']) : null;
                 $item = $link + ['title' => text_slice((string) ($meta['title'] ?? 'Vídeo do YouTube'), 200)];
             } elseif (in_array($link['source'], ['netflix', 'max'], true)) {
-                $item = $link;
+                // A extensão manda o nome que aparece no player de lá (o link sozinho não diz o que é).
+                $named = text_slice(text_trim(str($body['title'] ?? '')), 120);
+                $item = ($named !== '' ? ['title' => $named] : []) + $link;
             } else {
                 $item = $link + ['title' => $link['kind'] === 'channel' ? "Ao vivo: {$link['id']}" : 'Vídeo da Twitch'];
             }
@@ -1043,7 +1104,11 @@ function watch_act(array $me, array $body): array
     }
     switch ($op) {
         case 'start':
-            $state = ['now' => $item, 'playing' => true, 'position' => 0, 'updatedAt' => $now];
+            // O mesmo filme ou episódio que já está na sala (as duas extensões avisando juntas): nada muda.
+            $streamed = in_array($item['source'], ['netflix', 'max'], true);
+            if ($streamed && ($state['now']['url'] ?? '') === ($item['url'] ?? '')) return ['ok' => true, 'state' => watch_public($state), 'action' => ['op' => 'same', 'by' => $me['name']]];
+            // Da extensão vem também o segundo em que o player de lá já está.
+            $state = ['now' => $item, 'playing' => true, 'position' => $streamed ? ($reported ?? 0) : 0, 'updatedAt' => $now, 'browsing' => null, 'recent' => watch_recent($state['recent'], $item)];
             $action['item'] = $item;
             // Os dois sons juntos não dá: a música pausa.
             $music = music_state(true);
@@ -1086,8 +1151,16 @@ function watch_act(array $me, array $body): array
             $state['position'] = max(0, min(86400, (float) ($body['position'] ?? 0)));
             $state['updatedAt'] = $now;
             break;
+        case 'browse':
+            // Abriu um serviço no catálogo da sala (ou voltou: sem serviço). Cada um tem o seu: os dois podem estar escolhendo.
+            $service = str($body['service'] ?? '');
+            $browsing = is_array($state['browsing']) ? $state['browsing'] : [];
+            unset($browsing[$me['name']]);
+            if (in_array($service, WATCH_SERVICES, true)) $browsing[$me['name']] = ['service' => $service, 'at' => $now];
+            $state['browsing'] = $browsing ?: null;
+            break;
         case 'stop':
-            $state = watch_blank();
+            $state = array_merge(watch_blank(), ['recent' => $state['recent']]);
             break;
         default:
             return ['ok' => false, 'error' => 'Comando desconhecido.'];

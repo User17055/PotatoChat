@@ -164,16 +164,33 @@ async function onWatch(state) {
   for (const tab of tabs) chrome.tabs.sendMessage(tab.id, { type: "potato-watch", ...watch }).catch(() => {});
 }
 
-async function watchAction({ op, position, duration }) {
+async function watchAction({ op, position, duration, query, service, title }) {
   const [{ siteUrl }, session, { link }] = await Promise.all([settings(), getSession(), chrome.storage.session.get("link")]);
-  if (!session || !["pause", "resume", "seek"].includes(op)) return;
-  const data = { op, position: Number(position) || 0, duration: Number(duration) || 0 };
+  if (!session || !["pause", "resume", "seek", "start"].includes(op)) return;
+  const data = op === "start"
+    ? { op, query: String(query || ""), service, title: String(title || "").slice(0, 120), position: Number(position) || 0 }
+    : { op, position: Number(position) || 0, duration: Number(duration) || 0 };
   const body = { token: session.token, conn: link?.conn || crypto.randomUUID(), client: "extension", ops: [{ event: "watch", data }] };
   const result = await call(siteUrl, "ops", body).then(({ results }) => results?.[0]).catch(() => null);
   if (result?.state) onWatch(result.state);
 }
 
+// Deu o play num título na Netflix ou na HBO Max. A sala começa com ele (ou troca para ele) só quando a pessoa abriu
+// o serviço pelo catálogo da sala ou quando a sala já está nesse serviço; assistindo sozinha, a sala não se mete.
+async function watchPlaying({ service, url, title, position }) {
+  const saved = watch || (await chrome.storage.session.get("watch")).watch;
+  const session = await getSession();
+  const state = saved?.state;
+  if (!state || !session || !["netflix", "max"].includes(service)) return;
+  const titleId = (value) => (String(value || "").match(/\/watch\/([^?#]+)/) || [])[1] || "";
+  const mine = state.browsing?.[session.name];
+  const choosing = mine?.service === service && Date.now() + saved.offset - mine.at < 30 * 60 * 1000;
+  if (state.now?.source === service ? titleId(state.now.url) === titleId(url) : !choosing) return;
+  await watchAction({ op: "start", query: url, service, title, position });
+}
+
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  if (message?.type === "potato-watch-playing") watchPlaying(message);
   if (message?.type === "potato-watch-hello") {
     // A aba da Netflix acabou de abrir: manda o estado da sala (guardado, se o serviço de fundo dormiu).
     (watch ? Promise.resolve(watch) : chrome.storage.session.get("watch").then((saved) => saved.watch || null)).then(reply);

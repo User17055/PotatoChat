@@ -664,6 +664,27 @@ try {
   assert.deepEqual([hbo.state.now.source, hbo.state.now.url], ["max", "https://play.max.com/video/watch/abc-1/def-2"]);
   assert.equal((await withAck(dj1, "watch", { op: "start", query: "https://www.netflix.com/br/watch/81231974?t=1" })).state.now.url, "https://www.netflix.com/watch/81231974");
   assert.deepEqual((await withAck(dj1, "watch", { op: "stop" })).state.now, null);
+  // Catálogo: buscar não mexe na sala (sem internet nos testes, volta vazio); quem está escolhendo aparece para os dois.
+  assert.deepEqual(await withAck(dj1, "watch", { op: "search", shelf: "alta" }), { ok: true, results: [] });
+  const browseSeen = until(dj2, "watch", (payload) => payload.action.op === "browse");
+  const browsing = await withAck(dj1, "watch", { op: "browse", service: "netflix" });
+  assert.equal(browsing.state.browsing["Pessoa 1"].service, "netflix");
+  assert.equal((await browseSeen).state.browsing["Pessoa 1"].service, "netflix");
+  // Os dois escolhendo ao mesmo tempo: um não apaga o do outro; voltar tira só o seu.
+  assert.deepEqual(Object.keys((await withAck(dj2, "watch", { op: "browse", service: "youtube" })).state.browsing).sort(), ["Pessoa 1", "Pessoa 2"]);
+  assert.deepEqual(Object.keys((await withAck(dj2, "watch", { op: "browse", service: "" })).state.browsing), ["Pessoa 1"]);
+  // A extensão viu o play num episódio: a sala começa com o nome e o segundo de lá; o mesmo episódio de novo não reinicia.
+  const picked = await withAck(dj1, "watch", { op: "start", query: "https://www.netflix.com/watch/80057281", service: "netflix", title: "Stranger Things · T1:E1", position: 12.5 });
+  assert.deepEqual([picked.state.now.title, picked.state.now.url, picked.state.position, picked.state.browsing], ["Stranger Things · T1:E1", "https://www.netflix.com/watch/80057281", 12.5, null]);
+  const pickedAgain = await withAck(dj2, "watch", { op: "start", query: "https://www.netflix.com/watch/80057281", service: "netflix", title: "Stranger Things" });
+  assert.deepEqual([pickedAgain.action.op, pickedAgain.state.now.uid], ["same", picked.state.now.uid]);
+  // Do catálogo do YouTube: vem com nome, canal e duração; id inválido não passa.
+  const fromCatalog = await withAck(dj2, "watch", { op: "start", video: { id: "dQw4w9WgXcQ", title: "Never Gonna Give You Up", channel: "Rick Astley", duration: 213 } });
+  assert.deepEqual([fromCatalog.state.now.source, fromCatalog.state.now.title, fromCatalog.state.now.channel, fromCatalog.state.now.duration], ["youtube", "Never Gonna Give You Up", "Rick Astley", 213]);
+  assert.equal((await withAck(dj2, "watch", { op: "start", video: { id: "nope" } })).error, "Vídeo inválido.");
+  // "Vistos por vocês": o mais novo primeiro, sem repetir e sem o vídeo do aparelho; fechar o vídeo não apaga.
+  const recent = (await withAck(dj1, "watch", { op: "stop" })).state.recent.map((entry) => entry.key);
+  assert.deepEqual(recent, ["youtube:dQw4w9WgXcQ", "netflix:https://www.netflix.com/watch/80057281", "netflix:https://www.netflix.com/watch/81231974", "max:https://play.max.com/video/watch/abc-1/def-2", "twitch:gaules", "twitch:123456789", "youtube:aqz-KE-bpKQ"]);
   await withAck(dj1, "music", { op: "stop" });
 
   // O cartão do bot não conta como mensagem no perfil.
