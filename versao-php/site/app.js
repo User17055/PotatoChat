@@ -1553,6 +1553,7 @@ const recorderEl = $("#recorder");
 const recTime = $("#rec-time");
 const recWave = $("#rec-wave");
 const recSlide = $("#rec-slide");
+const recLock = $("#rec-lock");
 // MP4/AAC primeiro: toca em qualquer aparelho, inclusive no iPhone, que nem sempre toca o WebM/Opus.
 const VOICE_TYPES = ["audio/mp4;codecs=mp4a.40.2", "audio/webm;codecs=opus", "audio/mp4", "audio/ogg;codecs=opus", "audio/webm"];
 const VOICE_EXTENSION = { mp4: "m4a", webm: "webm", ogg: "ogg" };
@@ -1561,9 +1562,12 @@ const VOICE_MAX = 15 * 60;
 const VOICE_PEAKS = 40;
 const VOICE_SPEEDS = [1, 1.5, 2];
 const VOICE_SPEED_KEY = "potato.voiceSpeed";
-// Segurar o microfone menos que isso é um toque (grava sem segurar); deslizar CANCEL_SLIDE px para a esquerda cancela.
+// Segurar o microfone menos que isso é um toque (grava sem segurar). Segurando, deslizar CANCEL_SLIDE px para a
+// esquerda cancela e LOCK_SLIDE px para cima trava (continua gravando sem o dedo).
 const HOLD_MS = 350;
 const CANCEL_SLIDE = 110;
+const LOCK_SLIDE = 80;
+const NOISE_KEY = "potato.noise";
 const canRecord = Boolean(window.MediaRecorder && navigator.mediaDevices?.getUserMedia);
 if (!canRecord) messageForm.classList.add("no-voice");
 
@@ -1600,7 +1604,47 @@ function paintRecorder() {
   messageForm.classList.toggle("rec-locked", locked);
   micButton.setAttribute("aria-label", locked ? "Enviar áudio" : "Gravar áudio");
   micButton.title = locked ? "Enviar áudio" : "Gravar áudio: toque para gravar, ou segure e solte para enviar";
-  recSlide.style.transform = recSlide.style.opacity = "";
+  recSlide.style.transform = recSlide.style.opacity = recLock.style.transform = "";
+  recLock.classList.remove("ready");
+}
+
+// Redução de ruído (ligada no Perfil): o microfone passa por um corte dos graves (ronco abaixo de 80 Hz) e pelo
+// RNNoise, uma rede neural de voz que roda no próprio aparelho (vendor/noise), antes de ir para o gravador.
+// Sem AudioWorklet (ou se algo falhar), grava direto, só com o filtro de ruído do navegador.
+const noiseOn = () => store.get("localStorage", NOISE_KEY) !== false;
+let noiseKit = null;
+
+function loadNoiseKit() {
+  noiseKit ||= import("./vendor/noise/index.js")
+    .then(async ({ RnnoiseWorkletNode, loadRnnoise }) => ({
+      RnnoiseWorkletNode,
+      wasm: await loadRnnoise({ url: new URL("vendor/noise/rnnoise.wasm", document.baseURI).href, simdUrl: new URL("vendor/noise/rnnoise_simd.wasm", document.baseURI).href })
+    }))
+    .catch((error) => {
+      noiseKit = null;
+      throw error;
+    });
+  return noiseKit;
+}
+
+async function cleanMic(stream, context) {
+  const { RnnoiseWorkletNode, wasm } = await loadNoiseKit();
+  await context.audioWorklet.addModule(new URL("vendor/noise/rnnoise-worklet.js", document.baseURI).href);
+  // Um canal só: o RNNoise limpa um canal, e um segundo sairia mudo.
+  const lowCut = new BiquadFilterNode(context, { type: "highpass", frequency: 80, channelCount: 1, channelCountMode: "explicit" });
+  const denoise = new RnnoiseWorkletNode(context, { wasmBinary: wasm, maxChannels: 1 });
+  const output = context.createMediaStreamDestination();
+  output.channelCount = 1;
+  context.createMediaStreamSource(stream).connect(lowCut).connect(denoise).connect(output);
+  await context.resume();
+  return { stream: output.stream, denoise };
+}
+
+// Solta o microfone e desmonta a redução de ruído.
+function releaseMicStream(session) {
+  session.stream?.getTracks().forEach((track) => track.stop());
+  session.denoise?.destroy();
+  session.context?.close().catch(() => {});
 }
 
 function addRecBar(level) {
@@ -1624,10 +1668,17 @@ async function startRecording(mode) {
   fx.show(recorderEl, { x: 24 });
   sound.play("record");
   navigator.vibrate?.(15);
-  let stream;
+  // O contexto de áudio da redução de ruído nasce ainda no toque: criado depois, o navegador pode deixá-lo parado,
+  // e o áudio sairia mudo. A redução começa a baixar junto com o pedido do microfone.
+  const denoising = noiseOn() && Boolean(window.AudioWorkletNode);
+  if (denoising) {
+    session.context = new AudioContext({ sampleRate: 48000 });
+    loadNoiseKit().catch(() => {});
+  }
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    session.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: noiseOn(), autoGainControl: true } });
   } catch (error) {
+    releaseMicStream(session);
     if (rec === session) stopRecording(false);
     toast(inExtension ? "O painel lateral não consegue usar o microfone. Abra nosso chat numa aba (botão no topo do painel) para gravar áudio."
       : error.name === "NotAllowedError" ? "Libere o microfone para o chat nas configurações do navegador."
@@ -1635,17 +1686,28 @@ async function startRecording(mode) {
     sound.play("error");
     return;
   }
+  let stream = session.stream;
+  if (session.context) {
+    try {
+      const clean = await cleanMic(stream, session.context);
+      stream = clean.stream;
+      session.denoise = clean.denoise;
+    } catch (error) {
+      console.warn("Redução de ruído indisponível; gravando sem ela.", error);
+      session.context.close().catch(() => {});
+      session.context = null;
+    }
+  }
   // Cancelou enquanto o navegador pedia a permissão.
-  if (rec !== session) return stream.getTracks().forEach((track) => track.stop());
+  if (rec !== session) return releaseMicStream(session);
   const type = VOICE_TYPES.find((candidate) => MediaRecorder.isTypeSupported(candidate));
   try {
     session.recorder = new MediaRecorder(stream, type ? { mimeType: type, audioBitsPerSecond: 48000 } : { audioBitsPerSecond: 48000 });
   } catch {
-    stream.getTracks().forEach((track) => track.stop());
+    releaseMicStream(session);
     stopRecording(false);
     return toast("Este navegador não conseguiu gravar o áudio.", "error");
   }
-  session.stream = stream;
   session.meter = sound.meter(stream);
   session.recorder.addEventListener("dataavailable", (event) => {
     if (!event.data.size) return;
@@ -1708,7 +1770,7 @@ function stopRecording(keep) {
   if (!recorder) return;
   const seconds = (performance.now() - session.started) / 1000;
   const finish = () => {
-    session.stream.getTracks().forEach((track) => track.stop());
+    releaseMicStream(session);
     if (!keep) return;
     if (seconds < VOICE_MIN) return toast("Áudio curto demais.");
     const type = recorder.mimeType || session.chunks[0]?.type || "audio/webm";
@@ -1725,28 +1787,42 @@ micButton.addEventListener("pointerdown", (event) => {
   if (rec || event.button !== 0 || !event.isPrimary) return;
   event.preventDefault();
   micButton.setPointerCapture?.(event.pointerId);
-  micHold = { id: event.pointerId, x: event.clientX, at: performance.now() };
+  micHold = { id: event.pointerId, x: event.clientX, y: event.clientY, at: performance.now() };
   startRecording("hold");
 });
 
-// Segurando: o "deslize para cancelar" acompanha o dedo; passou do limite, cancela.
+// Segurando: para a esquerda, o "deslize para cancelar" acompanha o dedo e, passando do limite, cancela;
+// para cima, o cadeado sobe junto e, chegando nele, a gravação trava (dá para soltar o dedo e enviar depois).
 micButton.addEventListener("pointermove", (event) => {
   if (micHold?.id !== event.pointerId || rec?.mode !== "hold") return;
-  const offset = Math.min(0, event.clientX - micHold.x);
-  if (offset > -CANCEL_SLIDE) {
-    recSlide.style.transform = `translateX(${offset * 0.8}px)`;
-    recSlide.style.opacity = String(1 + offset / CANCEL_SLIDE * 0.7);
-    return;
+  const left = Math.min(0, event.clientX - micHold.x);
+  const up = Math.max(0, micHold.y - event.clientY);
+  // Vale a direção principal: deslizando para o lado com o dedo subindo um pouco, não trava (e vice-versa).
+  if (up >= LOCK_SLIDE && up > -left) {
+    navigator.vibrate?.(10);
+    sound.play("tap");
+    return lockRecording();
   }
-  sound.play("discard");
-  navigator.vibrate?.(10);
-  stopRecording(false);
+  if (left <= -CANCEL_SLIDE && -left > up) {
+    sound.play("discard");
+    navigator.vibrate?.(10);
+    return stopRecording(false);
+  }
+  recSlide.style.transform = `translateX(${left * 0.8}px)`;
+  recSlide.style.opacity = String(1 + left / CANCEL_SLIDE * 0.7);
+  recLock.style.transform = `translateY(${-up * 0.5}px)`;
+  recLock.classList.toggle("ready", up > LOCK_SLIDE * 0.6);
 });
 
 function releaseMic(event) {
   if (micHold?.id !== event.pointerId) return;
   const held = performance.now() - micHold.at;
   micHold = null;
+  // Travou arrastando para cima: soltar o dedo não envia (nem o clique que vem logo depois).
+  if (rec?.mode === "locked") {
+    rec.lockedAt = performance.now();
+    return;
+  }
   if (rec?.mode !== "hold") return;
   if (event.type === "pointercancel" || held < HOLD_MS || !rec.recorder) lockRecording();
   else stopRecording(true);
@@ -2253,6 +2329,23 @@ $("#toggle-sound-setting").addEventListener("click", (event) => {
   paintSound();
   fx.press(event.currentTarget);
 });
+
+// Redução de ruído nos áudios que a pessoa grava (só neste aparelho). Desligada, grava o som como ele está.
+function paintNoise() {
+  const button = $("#toggle-noise");
+  button.classList.toggle("hidden", !canRecord);
+  button.classList.toggle("is-off", !noiseOn());
+  button.setAttribute("aria-checked", String(noiseOn()));
+  $("#noise-state").textContent = noiseOn() ? "Ligada nos áudios que você grava" : "Desligada: o áudio vai como o microfone ouve";
+}
+
+$("#toggle-noise").addEventListener("click", (event) => {
+  store.set("localStorage", NOISE_KEY, !noiseOn());
+  paintNoise();
+  fx.press(event.currentTarget);
+  sound.play("tap");
+});
+paintNoise();
 
 // ---------- abas: conversa e perfil ----------
 

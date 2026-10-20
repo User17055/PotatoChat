@@ -61,7 +61,24 @@ class MainActivity : ComponentActivity() {
     private val filePicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val callback = fileCallback ?: return@registerForActivityResult
         fileCallback = null
-        callback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data))
+        if (result.resultCode != RESULT_OK) {
+            callback.onReceiveValue(null)
+            return@registerForActivityResult
+        }
+
+        val data = result.data
+        val uris = buildList {
+            data?.clipData?.let { clip ->
+                for (index in 0 until clip.itemCount) add(clip.getItemAt(index).uri)
+            }
+            data?.data?.let { if (it !in this) add(it) }
+        }
+        uris.forEach { uri ->
+            runCatching {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        }
+        callback.onReceiveValue(uris.takeIf { it.isNotEmpty() }?.toTypedArray())
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -139,9 +156,23 @@ class MainActivity : ComponentActivity() {
                 override fun onShowFileChooser(view: WebView?, callback: ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {
                     fileCallback?.onReceiveValue(null)
                     fileCallback = callback
-                    val intent = runCatching { params?.createIntent() }.getOrNull()
-                        ?: Intent(Intent.ACTION_OPEN_DOCUMENT).apply { type = "*/*"; addCategory(Intent.CATEGORY_OPENABLE) }
-                    filePicker.launch(intent)
+                    val acceptedTypes = params?.acceptTypes
+                        ?.flatMap { it.split(',') }
+                        ?.map { it.trim() }
+                        ?.filter { it.isNotEmpty() }
+                        ?.distinct()
+                        .orEmpty()
+                    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+                        type = acceptedTypes.singleOrNull() ?: "*/*"
+                        if (acceptedTypes.size > 1) putExtra(Intent.EXTRA_MIME_TYPES, acceptedTypes.toTypedArray())
+                        putExtra(Intent.EXTRA_ALLOW_MULTIPLE, params?.mode == FileChooserParams.MODE_OPEN_MULTIPLE)
+                    }
+                    runCatching { filePicker.launch(intent) }.onFailure {
+                        fileCallback = null
+                        callback?.onReceiveValue(null)
+                    }
                     return true
                 }
             }

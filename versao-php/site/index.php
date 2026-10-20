@@ -102,6 +102,9 @@ function asset(string $file): string
       <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
       <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
       <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+      <symbol id="i-chevron-up" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+      <symbol id="i-audio-lines" viewBox="0 0 24 24"><path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/></symbol>
       <symbol id="i-captions" viewBox="0 0 24 24"><rect width="18" height="14" x="3" y="5" rx="2" ry="2"/><path d="M7 15h4M15 15h2M7 11h2M13 11h4"/></symbol>
       <symbol id="i-reply" viewBox="0 0 24 24"><path d="m9 17-5-5 5-5"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></symbol>
       <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></symbol>
@@ -482,6 +485,8 @@ function asset(string $file): string
             <div id="rec-wave" class="rec-wave" aria-hidden="true"></div>
             <span id="rec-slide" class="rec-slide"><svg class="icon"><use href="#i-chevron-left" /></svg>Deslize para cancelar</span>
           </div>
+          <!-- Segurando o microfone: arrastar para cima até o cadeado trava a gravação (dá para soltar o dedo). -->
+          <span id="rec-lock" class="rec-lock" aria-hidden="true"><svg class="icon"><use href="#i-lock" /></svg><svg class="icon"><use href="#i-chevron-up" /></svg></span>
           <button class="send" type="submit" aria-label="Enviar mensagem" title="Enviar">
             <svg class="icon"><use href="#i-send" /></svg>
           </button>
@@ -623,6 +628,12 @@ function asset(string $file): string
               <svg class="icon when-on"><use href="#i-volume" /></svg>
               <svg class="icon when-off"><use href="#i-volume-off" /></svg>
               <span class="setting-text"><strong>Sons</strong><small class="sound-state">Ligados</small></span>
+              <span class="switch" aria-hidden="true"></span>
+            </button>
+            <button id="toggle-noise" class="setting-row swap" type="button" role="switch" aria-checked="true">
+              <svg class="icon when-on"><use href="#i-audio-lines" /></svg>
+              <svg class="icon when-off"><use href="#i-mic" /></svg>
+              <span class="setting-text"><strong>Redução de ruído</strong><small id="noise-state">Nos áudios que você grava</small></span>
               <span class="switch" aria-hidden="true"></span>
             </button>
           </section>

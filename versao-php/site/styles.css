@@ -427,6 +427,14 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .rec-slide { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 2px; overflow: hidden; color: var(--muted); font-size: 13px; white-space: nowrap; }
 .rec-slide .icon { width: 16px; height: 16px; animation: rec-nudge 1.2s ease-in-out infinite; }
 @keyframes rec-nudge { 50% { translate: -4px 0; } }
+/* Segurando: o cadeado acima do microfone (arrastar até ele trava a gravação); ele sobe junto com o dedo e acende perto do fim. */
+.rec-lock { position: absolute; right: 7px; bottom: calc(100% + 16px); z-index: 3; width: 42px; padding: 10px 0 8px; display: none; flex-direction: column; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--muted); box-shadow: 0 10px 26px #0007; transition: color .15s, border-color .15s; }
+.recording:not(.rec-locked) .rec-lock { display: flex; animation: lock-in .25s cubic-bezier(.34, 1.56, .64, 1); }
+.rec-lock.ready { border-color: var(--accent); color: var(--accent); }
+.rec-lock .icon { width: 18px; height: 18px; }
+.rec-lock .icon + .icon { width: 16px; height: 16px; animation: rec-nudge-up 1.2s ease-in-out infinite; }
+@keyframes lock-in { from { opacity: 0; translate: 0 14px; } }
+@keyframes rec-nudge-up { 50% { translate: 0 -4px; } }
 /* Segurando: só o tempo e o "deslize para cancelar". Sem segurar: lixeira, tempo e a onda ao vivo. */
 .composer:not(.rec-locked) :is(.rec-cancel, .rec-wave), .rec-locked .rec-slide { display: none; }
 
@@ -1447,5 +1455,5 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
   .message.show-tools .bubble, .message.show-tools .bubble::after,
   button.person.active, button.person.active::before, button.person.active .avatar::before,
   .typing.on .typing-bubble, .typing.on .typing-bubble i, .eq i, .music-unblock, .music-empty-art, .marquee > span, .ticker-line,
-  .rec-dot, .rec-slide .icon, .recording .mic, .typing-mic, .voice-play.loading::after { animation: none !important; }
+  .rec-dot, .rec-slide .icon, .rec-lock .icon, .recording .mic, .typing-mic, .voice-play.loading::after { animation: none !important; }
 }

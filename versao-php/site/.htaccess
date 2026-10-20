@@ -4,6 +4,7 @@ AddDefaultCharset UTF-8
 
 <IfModule mod_mime.c>
   AddType text/javascript .js
+  AddType application/wasm .wasm
 </IfModule>
 
 # Arquivos internos nunca são servidos ao navegador.
@@ -22,7 +23,7 @@ AddDefaultCharset UTF-8
   <FilesMatch "\.(js|css)$">
     Header set Cache-Control "no-cache"
   </FilesMatch>
-  <FilesMatch "\.(png|svg|ico)$">
+  <FilesMatch "\.(png|svg|ico|wasm)$">
     Header set Cache-Control "public, max-age=604800"
   </FilesMatch>
 </IfModule>

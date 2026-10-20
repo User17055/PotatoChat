@@ -86,7 +86,8 @@ O clipe, ao lado do botão GIF, abre duas opções: **Foto ou vídeo** (no celul
 Com o campo de mensagem vazio, o botão de enviar vira um **microfone**:
 
 - **Um toque** começa a gravar sem precisar segurar. A faixa mostra o tempo e a onda da voz; depois, é só tocar em enviar (o mesmo botão) ou na lixeira.
-- **Segurando**, grava enquanto o dedo (ou o mouse) estiver no botão e envia ao soltar. Deslizar para a esquerda cancela.
+- **Segurando**, grava enquanto o dedo (ou o mouse) estiver no botão e envia ao soltar. Deslizar para a esquerda cancela; **arrastar para cima até o cadeado** trava a gravação, e aí dá para soltar o dedo e falar à vontade (depois é só tocar em enviar ou na lixeira).
+- **Redução de ruído:** antes de gravar, o som do microfone passa por um corte dos graves (ronco abaixo de 80 Hz) e pelo [RNNoise](https://github.com/xiph/rnnoise), uma rede neural feita para separar a voz do barulho de fundo (ventilador, trânsito, TV), que roda no próprio aparelho (nada vai para fora). Num teste com fala e ruído de ventilador, o fundo caiu cerca de 37 dB e a voz ficou com o mesmo volume. Vem ligada; no **Perfil**, a chave *Redução de ruído* desliga (vale só para o aparelho). Os arquivos ficam em `site/vendor/noise` ([web-noise-suppressor](https://github.com/sapphi-red/web-noise-suppressor), licença MIT, com o RNNoise da Xiph, licença BSD) e são baixados só na primeira gravação.
 - No computador, `Enter` com o microfone em foco começa a gravar e `Esc` cancela.
 - Enquanto alguém grava, a outra pessoa vê **"gravando áudio…"** no lugar do "digitando".
 - No balão: play, a forma de onda (tocar ou arrastar nela pula para aquele ponto), a velocidade no canto direito (1×, 1,5× ou 2×, guardada no aparelho) e, embaixo, o tempo na mesma linha da hora. Áudios seguidos da mesma pessoa tocam em sequência, e a música do bot abaixa enquanto um áudio toca (só para quem está ouvindo).
