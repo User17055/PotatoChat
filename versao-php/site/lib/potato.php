@@ -54,6 +54,10 @@ function config(): array
             'giphy_key' => '',
             // Bot de música: chave da YouTube Data API (opcional; sem ela, a busca pelo nome lê a página de resultados do YouTube).
             'youtube_key' => '',
+            // Transcrição das mensagens de voz: qualquer API no formato da OpenAI (vazio = desligada; veja o LEIA-ME).
+            'transcribe_key' => '',
+            'transcribe_url' => 'https://api.groq.com/openai/v1/audio/transcriptions',
+            'transcribe_model' => 'whisper-large-v3-turbo',
             // false = não consulta YouTube nem Spotify (só para os testes automáticos, que rodam sem internet).
             'music_lookup' => true,
         ], $custom);
@@ -564,6 +568,23 @@ function http_get(string $url, int $timeout = 6): array
     $body = @file_get_contents($url, false, $context);
     $status = isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $match) ? (int) $match[1] : 0;
     return [$status, is_string($body) ? $body : ''];
+}
+
+function http_post(string $url, array $headers, string $body, int $timeout): array
+{
+    if (function_exists('curl_init')) {
+        $curl = curl_init($url);
+        curl_setopt_array($curl, [
+            CURLOPT_POST => true, CURLOPT_POSTFIELDS => $body, CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER => $headers, CURLOPT_TIMEOUT => $timeout, CURLOPT_CONNECTTIMEOUT => 10,
+        ]);
+        $response = curl_exec($curl);
+        return [(int) curl_getinfo($curl, CURLINFO_HTTP_CODE), is_string($response) ? $response : ''];
+    }
+    $context = stream_context_create(['http' => ['method' => 'POST', 'timeout' => $timeout, 'ignore_errors' => true, 'header' => implode("\r\n", $headers) . "\r\n", 'content' => $body]]);
+    $response = @file_get_contents($url, false, $context);
+    $status = isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $match) ? (int) $match[1] : 0;
+    return [$status, is_string($response) ? $response : ''];
 }
 
 function http_json(string $url): ?array
@@ -1371,6 +1392,58 @@ function clean_voice($voice): ?array
     return ['duration' => $duration, 'peaks' => $peaks];
 }
 
+// Transcreve uma mensagem de voz (qualquer um dos dois pode pedir). O texto fica na mensagem (voice.text) e
+// chega para os dois; pedir de novo devolve o que já foi feito. Roda fora da trava do banco: a API leva uns segundos.
+function transcribe_message(string $id): array
+{
+    if (str(config()['transcribe_key']) === '') return ['ok' => false, 'error' => 'A transcrição ainda não foi ativada: falta a chave no config.php (veja o LEIA-ME).'];
+    $voiceFile = function (?array $row): ?array {
+        $media = $row && !$row['deleted'] && !empty($row['media']) ? json_decode((string) $row['media'], true) : null;
+        return is_array($media['file']['voice'] ?? null) ? $media : null;
+    };
+    $media = $voiceFile(find_message($id));
+    if (!$media) return ['ok' => false, 'error' => 'Só dá para transcrever mensagens de voz.'];
+    if (isset($media['file']['voice']['text'])) return ['ok' => true, 'text' => $media['file']['voice']['text']];
+    $audio = query('SELECT type, data FROM ' . t('files') . ' WHERE file_key = ?', [$media['file']['key']])->fetch();
+    if (!$audio) return ['ok' => false, 'error' => 'Esse áudio não está mais no servidor.'];
+    try {
+        $text = speech_to_text((string) $audio['data'], (string) $audio['type']);
+    } catch (RuntimeException $error) {
+        return ['ok' => false, 'error' => $error->getMessage()];
+    }
+    return transaction(function () use ($id, $text, $voiceFile) {
+        $row = find_message($id);
+        $media = $voiceFile($row);
+        if (!$media) return ['ok' => false, 'error' => 'A mensagem foi apagada.'];
+        $media['file']['voice']['text'] = $text;
+        $row['media'] = encode($media);
+        query('UPDATE ' . t('messages') . ' SET media = ? WHERE n = ?', [$row['media'], $row['n']]);
+        emit('message:update', to_message($row));
+        return ['ok' => true, 'text' => $text];
+    });
+}
+
+// Áudio → texto pela API configurada (Groq, OpenAI ou outra no mesmo formato). Falha vira RuntimeException com o motivo.
+function speech_to_text(string $audio, string $type): string
+{
+    $config = config();
+    $extension = ['audio/mp4' => 'm4a', 'video/mp4' => 'mp4', 'audio/webm' => 'webm', 'video/webm' => 'webm', 'audio/ogg' => 'ogg', 'audio/wav' => 'wav', 'audio/mpeg' => 'mp3'][$type] ?? 'webm';
+    $boundary = 'potato-' . bin2hex(random_bytes(12));
+    $body = '';
+    foreach (['model' => str($config['transcribe_model']), 'language' => 'pt', 'response_format' => 'json'] as $field => $value) {
+        $body .= "--$boundary\r\nContent-Disposition: form-data; name=\"$field\"\r\n\r\n$value\r\n";
+    }
+    $body .= "--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.$extension\"\r\nContent-Type: $type\r\n\r\n$audio\r\n--$boundary--\r\n";
+    $headers = ['Authorization: Bearer ' . str($config['transcribe_key']), "Content-Type: multipart/form-data; boundary=$boundary", 'Accept: application/json'];
+    [$status, $response] = http_post(str($config['transcribe_url']), $headers, $body, 90);
+    $data = json_decode($response, true);
+    if ($status === 200 && is_array($data) && isset($data['text'])) return text_slice(text_trim(str($data['text'])), 10000);
+    error_log("Potato Chat: a transcrição falhou (HTTP $status): " . text_slice(is_array($data) ? str($data['error']['message'] ?? '') : $response, 300));
+    throw new RuntimeException($status === 401 || $status === 403 ? 'O serviço de transcrição não aceitou a chave do config.php.'
+        : ($status === 429 ? 'Muitas transcrições agora. Tente de novo daqui a pouco.'
+        : ($status === 0 ? 'O servidor não conseguiu falar com o serviço de transcrição.' : 'O serviço de transcrição não conseguiu transcrever esse áudio.')));
+}
+
 // ---------- mensagens ----------
 
 function to_message(array $row): array
@@ -1440,6 +1513,7 @@ function history(string $me): array
         'wallpaper' => wallpaper_info(find_account($me)),
         'gifKey' => str(config()['giphy_key']),
         'fileMax' => file_max(),
+        'transcribe' => str(config()['transcribe_key']) !== '',
         'music' => music_public(music_state()),
         'watch' => watch_public(watch_state()),
     ];
@@ -1591,8 +1665,10 @@ function act(array $me, string $event, $data)
         case 'avatar':
             return set_avatar($name, $body['image'] ?? null);
 
+        // Números do perfil: os seus ou, com name, os da outra pessoa (só quem tem conta no chat).
         case 'stats':
-            return stats($name);
+            $who = str($body['name'] ?? '');
+            return stats(in_array($who, array_column(accounts(), 'name'), true) ? $who : $name);
 
         case 'wallpaper':
             return set_wallpaper($me, $body);

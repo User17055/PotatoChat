@@ -53,6 +53,7 @@ Para atualizar o site depois, envie de novo só os arquivos alterados. Os navega
 
 Foto, tema, notificações, sons e *Sair* ficam juntos na aba **Perfil**, separada da conversa: no computador, em *Ver seu perfil*, no pé da barra lateral; no celular (e no painel da extensão), na sua foto, na barra de baixo. O perfil também mostra quantas mensagens você mandou, quantas reações deu e há quantos dias vocês conversam.
 
+- **Perfil da outra pessoa:** tocar no nome ou na foto dela, no topo da conversa, abre o perfil dela: a foto (toque para ampliar), o status ao vivo ("online agora", "digitando…", "Visto por último…"), quantas mensagens ela mandou, quantas reações deu, há quantos dias vocês conversam e atalhos para chamada de voz, de vídeo ou para escrever.
 - **Senha:** fica no banco só como *hash* (`pass_hash` na tabela `potato_users`), nunca o texto da senha.
 - **Foto:** no Perfil, clique na foto ou em *Trocar foto* e escolha uma imagem. O navegador recorta o centro num quadrado, reduz e envia. GIF animado também vale (até 700 KB): ele vai inteiro, sem recorte, para não perder a animação. A foto fica no banco e aparece para a outra pessoa na conversa, nas chamadas e nas notificações.
 - **Tema:** também no Perfil. Cada pessoa escolhe o seu, e ele só muda para ela. A escolha fica na conta (coluna `theme`), então vale em qualquer aparelho em que ela entrar, e as outras abas abertas mudam na hora. O navegador guarda uma cópia para o tema aparecer já na tela de login, sem piscar. No tema Claro, a chamada continua escura, porque o vídeo fica melhor assim.
@@ -88,7 +89,12 @@ Com o campo de mensagem vazio, o botão de enviar vira um **microfone**:
 - **Segurando**, grava enquanto o dedo (ou o mouse) estiver no botão e envia ao soltar. Deslizar para a esquerda cancela.
 - No computador, `Enter` com o microfone em foco começa a gravar e `Esc` cancela.
 - Enquanto alguém grava, a outra pessoa vê **"gravando áudio…"** no lugar do "digitando".
-- No balão: play, a forma de onda (tocar ou arrastar nela pula para aquele ponto), o tempo e a velocidade (1×, 1,5× ou 2×, guardada no aparelho). Áudios seguidos da mesma pessoa tocam em sequência, e a música do bot abaixa enquanto um áudio toca (só para quem está ouvindo).
+- No balão: play, a forma de onda (tocar ou arrastar nela pula para aquele ponto), a velocidade no canto direito (1×, 1,5× ou 2×, guardada no aparelho) e, embaixo, o tempo na mesma linha da hora. Áudios seguidos da mesma pessoa tocam em sequência, e a música do bot abaixa enquanto um áudio toca (só para quem está ouvindo).
+- **Transcrição:** com a chave configurada, cada áudio ganha o botão **Transcrever**. O texto aparece embaixo do player, para os dois, e fica guardado na mensagem (transcrever de novo não gasta nada). Para ativar:
+  1. Crie uma chave grátis em [console.groq.com/keys](https://console.groq.com/keys) (o plano grátis dá para centenas de áudios por dia).
+  2. Coloque a chave em `transcribe_key` no `config.php` e envie o `config.php` de novo.
+  - Sem a chave, o botão nem aparece. O áudio só vai para o serviço quando alguém toca em **Transcrever**.
+  - Prefere a OpenAI? Use `transcribe_url` = `https://api.openai.com/v1/audio/transcriptions` e `transcribe_model` = `gpt-4o-mini-transcribe`, com a chave de lá.
 - **Formato:** o navegador grava em MP4/AAC quando sabe (Chrome no computador, Safari), que toca em qualquer aparelho; senão, em WebM/Opus. Se um aparelho não conseguir tocar o formato (por exemplo, um iPhone antigo com um áudio WebM), o chat converte o áudio na hora e toca do mesmo jeito.
 - O áudio sobe como os outros arquivos (mesma tabela `potato_files` e o mesmo limite de tamanho); a duração e a forma de onda ficam na mensagem. A gravação para sozinha em 15 minutos, ou antes, se chegar ao tamanho máximo, e é enviada.
 - O microfone precisa de HTTPS e da permissão do navegador. No painel lateral da extensão o Chrome não libera o microfone: para gravar, abra o chat numa aba. Durante uma chamada a gravação fica desligada.
@@ -174,6 +180,8 @@ Os atalhos continuam iguais: botão direito → *Enviar para o nosso chat*, `pc`
 | `poll_wait` | Segundos que cada consulta espera por novidades (padrão 20). Use `0` se a hospedagem derrubar requisições demoradas: o chat passa a consultar a cada 1,5 s |
 | `giphy_key` | Chave do GIPHY para a busca de GIFs. Vazio = GIFs desligados |
 | `youtube_key` | Opcional: chave da YouTube Data API para o `/play` buscar pelo nome do jeito oficial. Vazio = busca pela página de resultados do YouTube |
+| `transcribe_key` | Opcional: chave do serviço de transcrição dos áudios (Groq, grátis). Vazio = sem o botão Transcrever |
+| `transcribe_url`, `transcribe_model` | Opcionais: endereço e modelo da transcrição. O padrão é o Groq (`whisper-large-v3-turbo`); qualquer serviço no formato da OpenAI serve |
 
 ## Problemas comuns
 

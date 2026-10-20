@@ -13,6 +13,9 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0.0"
+        // Endereço do site. Para testar com o PHP local: ./gradlew assembleDebug -PpotatoSite=http://localhost:8000/
+        // (no emulador, antes: adb reverse tcp:8000 tcp:8000).
+        buildConfigField("String", "SITE_URL", "\"${project.findProperty("potatoSite") ?: "https://potato.andrejrs.com.br/"}\"")
         // APK enxuto para aparelhos Android atuais; evita empacotar quatro cópias do WebRTC nativo.
         ndk { abiFilters += "arm64-v8a" }
     }
@@ -29,6 +32,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+    buildFeatures { buildConfig = true }
 }
 
 dependencies {

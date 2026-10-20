@@ -6,6 +6,7 @@
 //   wallpaper → papel de parede da conversa;
 //   upload  → recebe a foto ou o arquivo de uma mensagem (a mensagem vai depois, pelo ops);
 //   file    → entrega a foto ou o arquivo de uma mensagem;
+//   transcribe → transcreve uma mensagem de voz (se a chave estiver no config.php);
 //   connect → entra na sala e recebe o histórico;
 //   ops     → envia ações (mensagem, reação, leitura, digitando, sinalização da chamada…);
 //   poll    → espera por novidades (long polling) e recebe os eventos da conversa.
@@ -186,6 +187,15 @@ function upload(): array
     });
 }
 
+// Transcrição de uma mensagem de voz. Fora do ops: a API de transcrição leva alguns segundos e não pode
+// segurar a fila de ações (nem a trava do banco) enquanto responde.
+function transcribe(array $input): array
+{
+    @set_time_limit(120);
+    authenticate($input);
+    return transcribe_message(str($input['id'] ?? ''));
+}
+
 // Entrega o arquivo. Imagem, vídeo e áudio abrem no chat; o resto sempre baixa.
 // O endereço só chega a quem está logado e a chave é aleatória (igual à foto de perfil).
 // Faixas de bytes (Range) deixam o vídeo avançar e tocar no iPhone.
@@ -262,6 +272,8 @@ try {
             serve_file(str($_GET['k'] ?? ''), isset($_GET['dl']));
         case 'upload':
             respond(200, upload());
+        case 'transcribe':
+            respond(200, transcribe(input()));
         case 'login':
             respond(200, login(input(), (string) ($_SERVER['REMOTE_ADDR'] ?? '?')));
         case 'connect':

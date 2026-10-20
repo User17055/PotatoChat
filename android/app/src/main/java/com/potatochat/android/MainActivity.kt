@@ -77,10 +77,13 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            // Teclado aberto: o site encolhe até em cima dele. Sem isso o teclado cobria o fim da conversa, e o site
+            // não tinha como saber que ele abriu (as abas de baixo dependem disso).
+            val bottom = maxOf(bars.bottom, insets.getInsets(WindowInsetsCompat.Type.ime()).bottom)
             val params = webView.layoutParams as FrameLayout.LayoutParams
-            if (params.topMargin != bars.top || params.bottomMargin != bars.bottom) {
+            if (params.topMargin != bars.top || params.bottomMargin != bottom) {
                 params.topMargin = bars.top
-                params.bottomMargin = bars.bottom
+                params.bottomMargin = bottom
                 webView.layoutParams = params
             }
             insets
@@ -188,7 +191,8 @@ class MainActivity : ComponentActivity() {
             "notification" -> showNotification(
                 message.optString("title", "Potato Chat"),
                 message.optString("body"),
-                message.optString("tag") == "potato-call"
+                message.optString("tag") == "potato-call",
+                message.optString("icon").takeIf { it.startsWith(SITE_ORIGIN) }
             )
             "permission" -> requestNotificationPermission()
         }
@@ -225,7 +229,7 @@ class MainActivity : ComponentActivity() {
                 }
                 constructor(title, options = {}) {
                   this.onclick = null;
-                  send({ type: 'notification', title: String(title || 'Potato Chat'), body: String(options.body || ''), tag: String(options.tag || '') });
+                  send({ type: 'notification', title: String(title || 'Potato Chat'), body: String(options.body || ''), tag: String(options.tag || ''), icon: String(options.icon || '') });
                 }
                 close() {}
               }
@@ -248,11 +252,13 @@ class MainActivity : ComponentActivity() {
         """.trimIndent()
     }
 
-    private fun showNotification(title: String, body: String, call: Boolean) {
+    private fun showNotification(title: String, body: String, call: Boolean, icon: String?) {
         if (!getSharedPreferences(PREFS, 0).getBoolean("notifications", true)) return
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         if (!call) {
-            ChatNotifications.showIncoming(this, title, body)
+            // A foto de quem mandou pode precisar ser baixada: fora da thread principal.
+            val context = applicationContext
+            Thread { ChatNotifications.showIncoming(context, title, body, icon) }.start()
             return
         }
         val intent = Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -320,9 +326,9 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
-        const val SITE_URL = "https://potato.andrejrs.com.br/"
-        const val SITE_ORIGIN = "https://potato.andrejrs.com.br"
-        const val SITE_HOST = "potato.andrejrs.com.br"
+        const val SITE_URL = BuildConfig.SITE_URL
+        val SITE_ORIGIN: String = SITE_URL.trimEnd('/')
+        val SITE_HOST: String = Uri.parse(SITE_URL).host.orEmpty()
         const val PREFS = "potato.webview"
         const val MESSAGE_CHANNEL = "potato_messages"
         const val CALL_CHANNEL = "potato_calls"

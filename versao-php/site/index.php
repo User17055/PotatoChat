@@ -102,6 +102,7 @@ function asset(string $file): string
       <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
       <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
       <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+      <symbol id="i-captions" viewBox="0 0 24 24"><rect width="18" height="14" x="3" y="5" rx="2" ry="2"/><path d="M7 15h4M15 15h2M7 11h2M13 11h4"/></symbol>
       <symbol id="i-reply" viewBox="0 0 24 24"><path d="m9 17-5-5 5-5"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></symbol>
       <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></symbol>
       <symbol id="i-paperclip" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></symbol>
@@ -219,7 +220,8 @@ function asset(string $file): string
         <!-- Papel de parede da conversa (a foto, a iluminação e a cor do tema vêm do app.js). -->
         <div class="wallpaper" aria-hidden="true"><i class="wall-photo"></i><i class="wall-shade"></i></div>
         <header class="topbar">
-          <div class="peer">
+          <!-- Tocar no nome ou na foto abre o perfil da outra pessoa. -->
+          <div id="peer-open" class="peer" role="button" tabindex="0" aria-haspopup="dialog" aria-controls="peer-profile">
             <div id="peer-avatar" class="avatar" aria-hidden="true">?</div>
             <div class="peer-text">
               <h2 id="room-title">Aguardando alguém</h2>
@@ -721,6 +723,30 @@ function asset(string $file): string
         <div class="modal-actions">
           <button id="share-cancel" class="pill ghost" type="button">Cancelar</button>
           <button id="share-go" class="pill share-go" type="button"><svg class="icon"><use href="#i-monitor-up" /></svg>Transmitir</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Perfil da outra pessoa: foto (toque para ampliar), status, números e atalhos. A foto ampliada abre por cima. -->
+    <div id="peer-profile" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="peer-profile-name">
+      <div class="modal-card peer-card">
+        <button id="peer-profile-close" class="peer-close" type="button" title="Fechar" aria-label="Fechar"><svg class="icon"><use href="#i-x" /></svg></button>
+        <button id="peer-profile-photo" class="profile-photo" type="button" aria-label="Ver a foto">
+          <span class="photo-ring" aria-hidden="true"></span>
+          <span id="peer-profile-face" class="avatar big">?</span>
+        </button>
+        <h3 id="peer-profile-name"></h3>
+        <p id="peer-profile-status" class="peer-profile-status"></p>
+        <section class="profile-stats" aria-label="Números no chat">
+          <div><strong data-stat="messages">–</strong><span>mensagens</span></div>
+          <div><strong data-stat="reactions">–</strong><span>reações</span></div>
+          <div><strong data-stat="days">–</strong><span>dias de conversa</span></div>
+        </section>
+        <p id="peer-profile-since" class="muted peer-since"></p>
+        <div class="peer-actions">
+          <button type="button" data-peer-action="audio"><span><svg class="icon"><use href="#i-phone" /></svg></span>Voz</button>
+          <button type="button" data-peer-action="video"><span><svg class="icon"><use href="#i-video" /></svg></span>Vídeo</button>
+          <button type="button" data-peer-action="message"><span><svg class="icon"><use href="#i-message" /></svg></span>Mensagem</button>
         </div>
       </div>
     </div>

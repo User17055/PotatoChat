@@ -28,4 +28,9 @@ return [
     // Bot de música (/play): chave da YouTube Data API, opcional. Vazio = a busca pelo nome funciona assim mesmo
     // (lendo a página de resultados do YouTube); com a chave, fica no jeito oficial. Veja o LEIA-ME.
     'youtube_key' => '',
+
+    // Transcrição das mensagens de voz (botão "Transcrever" no áudio). Chave grátis do Groq: https://console.groq.com/keys
+    // Vazio = sem transcrição (o botão nem aparece). O áudio vai para o serviço só quando alguém toca em "Transcrever".
+    // Para usar a OpenAI: 'transcribe_url' => 'https://api.openai.com/v1/audio/transcriptions', 'transcribe_model' => 'gpt-4o-mini-transcribe'.
+    'transcribe_key' => '',
 ];

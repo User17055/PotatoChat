@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,7 +27,20 @@ const prefix = `teste${Date.now().toString(36)}_`;
 const db = { host: env("HOST", "127.0.0.1"), port: Number(env("PORT", 3399)), name: env("NAME", "potato_teste"), user: env("USER", "potato"), pass: env("PASS", "senha-teste"), prefix };
 
 const giphyKey = "chave-de-teste-do-giphy";
-await fs.writeFile(configFile, `<?php return ${phpValue({ token_secret: secret, db, poll_wait: 3, giphy_key: giphyKey, music_lookup: false })};`);
+// Serviço de transcrição falso (no formato da OpenAI/Groq): guarda o que recebeu e responde o texto (ou o erro) combinado.
+const transcriber = { calls: [], status: 200, text: "  Oi, tudo bem? Chego às oito.  " };
+const transcriberServer = http.createServer((request, response) => {
+  const chunks = [];
+  request.on("data", (chunk) => chunks.push(chunk));
+  request.on("end", () => {
+    transcriber.calls.push({ headers: request.headers, body: Buffer.concat(chunks) });
+    response.writeHead(transcriber.status, { "Content-Type": "application/json" });
+    response.end(JSON.stringify(transcriber.status === 200 ? { text: transcriber.text } : { error: { message: "chave inválida" } }));
+  });
+});
+await new Promise((resolve) => transcriberServer.listen(0, "127.0.0.1", resolve));
+const transcribeUrl = `http://127.0.0.1:${transcriberServer.address().port}/v1/audio/transcriptions`;
+await fs.writeFile(configFile, `<?php return ${phpValue({ token_secret: secret, db, poll_wait: 3, giphy_key: giphyKey, music_lookup: false, transcribe_key: "chave-de-transcricao", transcribe_url: transcribeUrl, transcribe_model: "modelo-de-teste" })};`);
 
 function phpValue(value) {
   if (typeof value === "boolean") return value ? "true" : "false";
@@ -692,6 +706,9 @@ try {
   await withAck(dj1, "music", { op: "play", query: "https://youtu.be/dQw4w9WgXcQ" });
   assert.equal((await withAck(dj1, "stats")).messages, statsBefore);
   await withAck(dj1, "music", { op: "stop" });
+  // Perfil da outra pessoa: os números dela; um nome que não é do chat devolve os seus.
+  assert.deepEqual(await withAck(dj1, "stats", { name: "Pessoa 2" }), await withAck(dj2, "stats"));
+  assert.deepEqual(await withAck(dj1, "stats", { name: "Intrusa" }), await withAck(dj1, "stats"));
 
   // Mensagem de voz. O áudio gravado no navegador vem em MP4 com marca de vídeo (Chrome, Safari) ou em WebM
   // (Chrome, Firefox): o servidor vê pelas faixas que é só som. Os arquivos abaixo têm só o que a detecção lê.
@@ -735,6 +752,35 @@ try {
     assert.equal(sentPlain.ok, true);
     assert.equal("voice" in sentPlain.message.file, false, `voz ruim ${index}`);
   }
+  // Transcrição: o servidor manda o áudio ao serviço do config.php e o texto fica na mensagem, para os dois.
+  assert.equal(dj1.history.transcribe, true);
+  const transcribe = (token, id) => api("transcribe", { token, id });
+  const transcribedSeen = until(dj2, "message:update", (message) => message.id === voiceSent.message.id && message.file?.voice?.text !== undefined);
+  const transcribed = await transcribe(secondLogin.body.token, voiceSent.message.id);
+  assert.deepEqual(transcribed.body, { ok: true, text: "Oi, tudo bem? Chego às oito." });
+  assert.equal((await transcribedSeen).file.voice.text, "Oi, tudo bem? Chego às oito.");
+  const sentToService = transcriber.calls[0];
+  assert.equal(sentToService.headers.authorization, "Bearer chave-de-transcricao");
+  assert.match(sentToService.headers["content-type"], /^multipart\/form-data; boundary=/);
+  const form = sentToService.body.toString("latin1");
+  assert.match(form, /name="model"\r\n\r\nmodelo-de-teste\r\n/);
+  assert.match(form, /name="language"\r\n\r\npt\r\n/);
+  assert.match(form, /name="file"; filename="audio\.m4a"\r\nContent-Type: audio\/mp4\r\n\r\n/);
+  assert.ok(sentToService.body.includes(mp4("soun")), "o áudio vai inteiro");
+  // Pedir de novo devolve o que já foi feito, sem chamar o serviço; quem abre o chat depois já recebe o texto.
+  assert.equal((await transcribe(firstLogin.body.token, voiceSent.message.id)).body.text, "Oi, tudo bem? Chego às oito.");
+  assert.equal(transcriber.calls.length, 1);
+  const reopenedAgain = await connect(firstLogin.body.token);
+  assert.equal(reopenedAgain.history.items.find((message) => message.id === voiceSent.message.id).file.voice.text, "Oi, tudo bem? Chego às oito.");
+  reopenedAgain.disconnect();
+  // Só mensagem de voz; sessão vale; o erro do serviço chega explicado.
+  assert.equal((await transcribe(firstLogin.body.token, (await withAck(dj1, "message", { text: "texto", clientId: "cliente-texto-transcricao" })).message.id)).body.error, "Só dá para transcrever mensagens de voz.");
+  assert.equal((await transcribe("sessao-falsa", voiceSent.message.id)).status, 401);
+  transcriber.status = 401;
+  const otherVoice = await upload(firstLogin.body.token, "outro.webm", webm("A_OPUS"));
+  const otherSent = await withAck(dj1, "message", { file: otherVoice.body.file.key, voice: { duration: 2, peaks: [5] }, clientId: "cliente-voz-sem-chave" });
+  assert.equal((await transcribe(firstLogin.body.token, otherSent.message.id)).body.error, "O serviço de transcrição não aceitou a chave do config.php.");
+  assert.equal("text" in sql(`SELECT media FROM {p}messages WHERE id = '${otherSent.message.id}'`).map((row) => JSON.parse(row.media).file.voice)[0], false);
   // Gravando: a outra pessoa vê "gravando um áudio".
   const recording = next(dj2, "typing");
   dj1.emit("typing", "audio");
@@ -747,9 +793,10 @@ try {
   for (let i = 0; i < 14; i += 1) if ((await login("Pessoa 1", "errada")).status === 429) blocked += 1;
   assert.ok(blocked >= 1);
 
-  console.log("Integração PHP + MySQL aprovada: atualização do banco antigo, página, contas com senha própria, sala de duas pessoas, GIFs, fotos e arquivos (envio, entrega protegida, faixas de bytes, limpeza), foto de perfil (também em GIF), tema, papel de parede, bot de música, mensagens de voz (áudio do navegador em MP4 e WebM, duração e forma de onda), extensão, confirmação, deduplicação, respostas, reações, leitura, apagar, digitando (e gravando áudio), chamadas, long polling, sessões da versão Node, paginação, senha esquecida e persistência.");
+  console.log("Integração PHP + MySQL aprovada: atualização do banco antigo, página, contas com senha própria, sala de duas pessoas, GIFs, fotos e arquivos (envio, entrega protegida, faixas de bytes, limpeza), foto de perfil (também em GIF), perfil da outra pessoa, tema, papel de parede, bot de música, mensagens de voz (áudio do navegador em MP4 e WebM, duração, forma de onda e transcrição), extensão, confirmação, deduplicação, respostas, reações, leitura, apagar, digitando (e gravando áudio), chamadas, long polling, sessões da versão Node, paginação, senha esquecida e persistência.");
 } finally {
   servers.forEach((server) => server.kill());
+  transcriberServer.close();
   try {
     const tables = sql(`SELECT table_name AS name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name LIKE '${prefix}%'`);
     if (tables.length) sql(`DROP TABLE ${tables.map((table) => `\`${table.name}\``).join(", ")}`);

@@ -11,6 +11,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.potatochat.android.data.ChatEvent
 import com.potatochat.android.data.ChatRepository
+import com.potatochat.android.model.ChatMessage
 import com.potatochat.android.model.Session
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -18,6 +19,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import java.time.Instant
 import java.util.UUID
 
 /** Mantem o long polling ativo quando a WebView esta em segundo plano. */
@@ -27,6 +29,9 @@ class ChatNotificationService : Service() {
     private var myName = ""
     private var connected = false
     private val pendingReplies = ArrayDeque<String>()
+    // Fotos de perfil (nome → endereço) e as últimas mensagens da conversa, que entram como contexto na notificação.
+    private val avatars = mutableMapOf<String, String?>()
+    private val recent = ArrayDeque<ChatMessage>()
 
     override fun onCreate() {
         super.onCreate()
@@ -59,8 +64,29 @@ class ChatNotificationService : Service() {
                         connected = event.connected
                         if (connected) sendPendingReplies()
                     }
-                    is ChatEvent.Message -> if (!event.message.sender.equals(myName, ignoreCase = true)) {
-                        ChatNotifications.showIncoming(this@ChatNotificationService, event.message.sender, event.message.text)
+                    is ChatEvent.History -> {
+                        recent.clear()
+                        recent.addAll(event.messages.filter { !it.deleted }.takeLast(RECENT))
+                    }
+                    is ChatEvent.Presence -> {
+                        val next = event.people.associate { it.name to it.avatar }
+                        if (next != avatars) {
+                            avatars.clear()
+                            avatars.putAll(next)
+                            ChatNotifications.rememberAvatars(this@ChatNotificationService, avatars)
+                        }
+                    }
+                    is ChatEvent.Message -> {
+                        val message = event.message
+                        val earlier = recent.filter { it.id != message.id }.map { line(it) }
+                        recent.addLast(message)
+                        while (recent.size > RECENT) recent.removeFirst()
+                        if (!message.sender.equals(myName, ignoreCase = true)) {
+                            val avatar = avatars[message.sender]
+                            launch(Dispatchers.IO) {
+                                ChatNotifications.showIncoming(this@ChatNotificationService, message.sender, message.preview, avatar, earlier)
+                            }
+                        }
                     }
                     is ChatEvent.Signal -> if (event.event == "webrtc-offer") {
                         val name = event.data.optString("name", "Potato Chat")
@@ -79,6 +105,12 @@ class ChatNotificationService : Service() {
         return START_STICKY
     }
 
+    private fun line(message: ChatMessage) = ChatNotifications.Line(
+        message.sender, message.preview,
+        runCatching { Instant.parse(message.createdAt).toEpochMilli() }.getOrDefault(System.currentTimeMillis()),
+        message.sender.equals(myName, ignoreCase = true)
+    )
+
     private fun sendPendingReplies() {
         val chat = repository ?: return
         if (!connected || pendingReplies.isEmpty()) return
@@ -86,7 +118,7 @@ class ChatNotificationService : Service() {
             while (connected && pendingReplies.isNotEmpty()) {
                 val text = pendingReplies.removeFirst()
                 chat.send(text, "android-reply-${UUID.randomUUID()}", null)
-                    .onSuccess { ChatNotifications.showOutgoing(this@ChatNotificationService, text) }
+                    .onSuccess { scope.launch(Dispatchers.IO) { ChatNotifications.showOutgoing(this@ChatNotificationService, text) } }
             }
         }
     }
@@ -146,6 +178,7 @@ class ChatNotificationService : Service() {
     companion object {
         const val ACTION_SEND_REPLY = "com.potatochat.android.SEND_REPLY"
         const val EXTRA_REPLY_TEXT = "reply_text"
+        private const val RECENT = 8
         private const val FOREGROUND_ID = 900
         private const val BACKGROUND_CHANNEL = "potato_background_silent"
     }

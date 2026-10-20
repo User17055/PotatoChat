@@ -63,6 +63,8 @@ let chatShown = false;
 let gifKey = "";
 // Maior foto ou arquivo que o servidor aceita (também vem com o histórico; 0 = ainda não chegou).
 let fileMax = 0;
+// Transcrição das mensagens de voz ligada no config.php (também vem com o histórico).
+let transcribeOn = false;
 
 let call = null;
 let peerConnection = null;
@@ -422,6 +424,7 @@ function connect(token, animate) {
     hasMore = payload.hasMore;
     gifKey = payload.gifKey || "";
     fileMax = payload.fileMax || 0;
+    transcribeOn = Boolean(payload.transcribe);
     syncTheme(payload.theme);
     applyWallpaper(payload.wallpaper);
     applyMusic(payload.music, true);
@@ -1326,7 +1329,10 @@ messagesEl.addEventListener("click", (event) => {
   const quote = event.target.closest(".reply-quote");
   if (quote) return focusMessage(quote.dataset.target);
   const voiceAction = event.target.closest("[data-voice]")?.dataset.voice;
-  if (voiceAction && message.file?.voice) return voiceAction === "speed" ? cycleSpeed() : toggleVoice(message);
+  if (voiceAction && message.file?.voice) {
+    if (voiceAction === "speed") return cycleSpeed();
+    return voiceAction === "transcribe" ? transcribeVoice(message) : toggleVoice(message);
+  }
   if (event.target.closest("[data-view]")) return openViewer(message.file);
   const musicAction = event.target.closest("[data-music-action]");
   if (musicAction && message.music) return cardAction(musicAction.dataset.musicAction, message.music);
@@ -1793,7 +1799,8 @@ function voiceState(message) {
   return { playing: current && voicePlaying(), loading: current && playback.loading, position: current ? playback.audio.currentTime : 0, total: voiceTotal(message) };
 }
 
-// Player dentro do balão.
+// Player dentro do balão. As peças vão direto para a grade do balão (styles.css): play à esquerda, a onda com a
+// velocidade no canto direito e, embaixo, o tempo (com o "Transcrever") alinhado com a hora; a transcrição por último.
 function voiceView(message) {
   const { voice } = message.file;
   const node = el("div", "voice");
@@ -1818,6 +1825,10 @@ function voiceView(message) {
   const played = bars.cloneNode(true);
   played.classList.add("played");
   wave.append(bars, played, el("span", "voice-thumb"));
+  const speed = el("button", "voice-speed voice-ctl", speedLabel(playback.speed));
+  speed.type = "button";
+  speed.dataset.voice = "speed";
+  speed.title = "Mudar a velocidade";
   const meta = el("div", "voice-meta");
   meta.append(el("span", "voice-time"));
   if (message.upload && !message.id) {
@@ -1825,16 +1836,49 @@ function voiceView(message) {
     bar.style.setProperty("--p", message.upload.progress);
     bar.append(el("i"));
     meta.append(bar);
-  } else {
-    const speed = el("button", "voice-speed voice-ctl", speedLabel(playback.speed));
-    speed.type = "button";
-    speed.dataset.voice = "speed";
-    speed.title = "Mudar a velocidade";
-    meta.append(speed);
+  } else if (transcribeOn && message.id && voice.text === undefined) {
+    const busy = transcribing.has(message.id);
+    const ask = el("button", `voice-transcribe voice-ctl${busy ? " busy" : ""}`);
+    ask.type = "button";
+    ask.dataset.voice = "transcribe";
+    ask.disabled = busy;
+    ask.append(icon("captions"), busy ? "Transcrevendo…" : "Transcrever");
+    meta.append(ask);
   }
-  node.append(play, wave, meta);
+  node.append(play, wave, speed, meta);
+  if (voice.text !== undefined) node.append(el("p", `voice-text${voice.text ? "" : " empty"}`, voice.text || "Não deu para entender a fala desse áudio."));
   paintVoiceNode(node, voiceState(message));
   return node;
+}
+
+// Transcrição (botão "Transcrever"): o servidor manda o áudio para o serviço do config.php e guarda o texto na
+// mensagem, que chega atualizada para os dois.
+const transcribing = new Set();
+
+async function transcribeVoice(message) {
+  const { id } = message;
+  if (!id || transcribing.has(id)) return;
+  const repaint = () => {
+    const node = messagesEl.querySelector(`[data-id="${CSS.escape(id)}"]`);
+    if (node && byId.has(id)) fill(node, byId.get(id));
+  };
+  transcribing.add(id);
+  repaint();
+  try {
+    const response = await fetch(apiUrl("transcribe"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: socket.auth.token, id }) });
+    const result = await response.json().catch(() => null);
+    if (!response.ok || !result?.ok) throw new Error(result?.error || "Não deu para transcrever agora.");
+    // Normalmente a mensagem atualizada já chegou pela conexão; se não, aplica o texto aqui.
+    const current = byId.get(id);
+    if (current?.file?.voice && current.file.voice.text === undefined) {
+      updateMessage({ ...current, file: { ...current.file, voice: { ...current.file.voice, text: result.text } } });
+    }
+  } catch (error) {
+    toast(error.message === "Failed to fetch" ? "Sem conexão para transcrever agora." : error.message, "error");
+  } finally {
+    transcribing.delete(id);
+    repaint();
+  }
 }
 
 function paintVoiceNode(node, { playing, loading, position, total }) {
@@ -2030,9 +2074,10 @@ function cycleSpeed() {
 
 // Tocar na forma de onda pula para aquele ponto; arrastar na horizontal mostra onde vai parar e pula ao soltar.
 // Arrastar na vertical continua rolando a conversa (touch-action: pan-y no styles.css).
+// A onda fica 6 px para dentro dos lados da área (styles.css).
 const waveFraction = (wave, x) => {
   const box = wave.getBoundingClientRect();
-  return Math.min(1, Math.max(0, (x - box.left) / box.width));
+  return Math.min(1, Math.max(0, (x - box.left - 6) / (box.width - 12)));
 };
 
 messagesEl.addEventListener("pointerdown", (event) => {
@@ -2244,6 +2289,25 @@ document.addEventListener("click", (event) => {
   if (target.classList.contains("tab")) fx.press(target);
 });
 
+// Teclado do celular aberto = um campo de texto com o foco e a tela mais baixa que o normal (styles.css esconde as
+// abas). Só o foco não basta: no Android, fechar o teclado não tira o foco do campo, e as abas sumiam até tocar fora.
+let screenWidth = innerWidth;
+let tallest = 0;
+function paintKeyboard() {
+  const height = Math.min(innerHeight, window.visualViewport?.height || innerHeight);
+  if (innerWidth !== screenWidth) {
+    screenWidth = innerWidth;
+    tallest = 0;
+  }
+  tallest = Math.max(tallest, height);
+  const typing = document.activeElement?.matches?.("textarea, input:not([type=range]):not([type=file]):not([type=checkbox])");
+  document.documentElement.classList.toggle("keyboard-open", Boolean(typing) && height < tallest - 120);
+}
+window.visualViewport?.addEventListener("resize", paintKeyboard);
+addEventListener("resize", paintKeyboard);
+document.addEventListener("focusin", paintKeyboard);
+document.addEventListener("focusout", () => setTimeout(paintKeyboard));
+
 // No perfil, Esc volta para a conversa (a não ser que uma janela esteja aberta: aí o Esc é dela).
 window.addEventListener("keydown", (event) => {
   if (event.key !== "Escape" || tab !== "profile" || document.querySelector(".modal:not(.hidden)")) return;
@@ -2263,7 +2327,7 @@ function openProfile() {
   $("#profile-name").textContent = me;
   $("#photo-remove").classList.toggle("hidden", !avatars.has(me));
   repaintAvatars();
-  loadStats();
+  loadStats(profileView, "", (date) => { $("#profile-since").textContent = `No chat${peerName ? ` com ${peerName}` : ""} desde ${date}`; });
 }
 
 // Dias de calendário desde a primeira mensagem, contando hoje.
@@ -2275,17 +2339,18 @@ function daysSince(iso) {
   return Math.round((today - start) / 864e5) + 1;
 }
 
-function loadStats() {
+// Números do perfil dentro de box: os seus ou, com name, os da outra pessoa. since recebe a data da primeira mensagem.
+function loadStats(box, name, since) {
   if (!socket?.connected) return;
-  socket.timeout(8000).emit("stats", null, (error, result) => {
+  socket.timeout(8000).emit("stats", name ? { name } : null, (error, result) => {
     if (error || !result) return;
     const values = { messages: result.messages, reactions: result.reactions, days: result.since ? daysSince(result.since) : 0 };
     for (const [key, value] of Object.entries(values)) {
-      const node = profileView.querySelector(`[data-stat="${key}"]`);
+      const node = box.querySelector(`[data-stat="${key}"]`);
       fx.count(node, value);
       node.nextElementSibling.textContent = STAT_LABELS[key][value === 1 ? 0 : 1];
     }
-    if (result.since) $("#profile-since").textContent = `No chat${peerName ? ` com ${peerName}` : ""} desde ${longDate(result.since)}`;
+    if (result.since) since(longDate(result.since));
   });
 }
 
@@ -4054,6 +4119,10 @@ function updatePresence(users) {
   peerWasOnline = peer ? peer.online : null;
 
   roomTitle.textContent = peer ? peer.name : "Aguardando alguém";
+  peerOpen.classList.toggle("has-peer", Boolean(peer));
+  peerOpen.tabIndex = peer ? 0 : -1;
+  peerOpen.title = peer ? `Ver o perfil de ${peer.name}` : "";
+  peerOpen.setAttribute("aria-label", peer ? `Ver o perfil de ${peer.name}` : "Ninguém na conversa ainda");
   paintAvatar(peerAvatar, peerName);
   peerAvatar.classList.toggle("online", Boolean(peer?.online));
   paintPeerStatus();
@@ -4084,14 +4153,94 @@ function peerOnline() {
   return presenceList.some((user) => user.name === peerName && user.online);
 }
 
+// "digitando…", "online agora", "Visto por último hoje às 14:03"… (no topo e no perfil da outra pessoa).
+function peerStatusText(peer) {
+  if (peerTyping) return peerTyping === "audio" ? "gravando áudio…" : "digitando…";
+  if (!peer) return "Mande o link para a outra pessoa criar a conta dela";
+  if (peer.online) return peer.active ? "online agora" : "online";
+  return lastSeenLabel(peer.lastSeen);
+}
+
 function paintPeerStatus() {
   const peer = presenceList.find((user) => user.name === peerName);
   peerStatus.classList.toggle("live", Boolean(peerTyping || peer?.online));
-  if (peerTyping) setTicker(peerStatus, peerTyping === "audio" ? "gravando áudio…" : "digitando…");
-  else if (!peer) setTicker(peerStatus, "Mande o link para a outra pessoa criar a conta dela");
-  else if (peer.online) setTicker(peerStatus, peer.active ? "online agora" : "online");
-  else setTicker(peerStatus, lastSeenLabel(peer.lastSeen));
+  setTicker(peerStatus, peerStatusText(peer));
+  if (!peerProfile.classList.contains("hidden")) paintPeerProfile();
 }
+
+// ---------- perfil da outra pessoa ----------
+
+// Abre tocando no nome ou na foto dela, no topo da conversa: a foto (toque para ampliar), o status ao vivo,
+// os números dela e atalhos para ligar ou escrever.
+const peerProfile = $("#peer-profile");
+const peerOpen = $("#peer-open");
+
+function openPeerProfile() {
+  if (!peerName) return;
+  closeTools();
+  $("#peer-profile-since").textContent = "";
+  paintPeerProfile();
+  peerProfile.classList.remove("hidden");
+  fx.incoming(peerProfile.querySelector(".modal-card"));
+  $("#peer-profile-close").focus();
+  sound.play("tap");
+  document.addEventListener("keydown", onPeerProfileKey, true);
+  loadStats(peerProfile, peerName, (date) => { $("#peer-profile-since").textContent = `Conversando com você desde ${date}`; });
+}
+
+function closePeerProfile() {
+  if (peerProfile.classList.contains("hidden")) return;
+  peerProfile.classList.add("hidden");
+  document.removeEventListener("keydown", onPeerProfileKey, true);
+  peerOpen.focus({ preventScroll: true });
+}
+
+function paintPeerProfile() {
+  if (!peerName) return closePeerProfile();
+  const peer = presenceList.find((user) => user.name === peerName);
+  const hasPhoto = avatars.has(peerName);
+  $("#peer-profile-name").textContent = peerName;
+  paintAvatar($("#peer-profile-face"), peerName);
+  const photo = $("#peer-profile-photo");
+  photo.classList.toggle("no-photo", !hasPhoto);
+  photo.setAttribute("aria-label", hasPhoto ? `Ver a foto de ${peerName}` : `${peerName} ainda não tem foto`);
+  const status = $("#peer-profile-status");
+  status.textContent = peerStatusText(peer);
+  status.classList.toggle("live", Boolean(peerTyping || peer?.online));
+  // Ligar só com a pessoa online (como os botões do topo; tocar mesmo assim explica por quê).
+  peerProfile.querySelectorAll('[data-peer-action="audio"], [data-peer-action="video"]').forEach((button) => button.classList.toggle("unavailable", !peer?.online));
+}
+
+// Esc fecha o perfil (com a foto ampliada aberta, o Esc é dela).
+function onPeerProfileKey(event) {
+  if (event.key !== "Escape" || !viewer.classList.contains("hidden")) return;
+  event.stopPropagation();
+  closePeerProfile();
+}
+
+peerOpen.addEventListener("click", openPeerProfile);
+peerOpen.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  openPeerProfile();
+});
+
+peerProfile.addEventListener("click", (event) => {
+  if (event.target === peerProfile || event.target.closest("#peer-profile-close")) return closePeerProfile();
+  if (event.target.closest("#peer-profile-photo")) {
+    if (avatars.has(peerName)) openViewer({ url: avatars.get(peerName), name: peerName });
+    return;
+  }
+  const action = event.target.closest("[data-peer-action]")?.dataset.peerAction;
+  if (!action) return;
+  closePeerProfile();
+  if (action === "message") {
+    if (tab !== "chat") showTab("chat");
+    messageInput.focus();
+  } else {
+    $(action === "audio" ? "#audio-call" : "#video-call").click();
+  }
+});
 
 // Texto que não cabe no celular (o "Visto por último…") passa devagar, como um letreiro. Só no celular: no
 // computador, o que não couber (na sala da Watch Party) termina em "…", com o texto inteiro ao passar o mouse.
