@@ -101,6 +101,7 @@ function asset(string $file): string
       <symbol id="i-send" viewBox="0 0 24 24"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></symbol>
       <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
       <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+      <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
       <symbol id="i-reply" viewBox="0 0 24 24"><path d="m9 17-5-5 5-5"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></symbol>
       <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></symbol>
       <symbol id="i-paperclip" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></symbol>
@@ -430,7 +431,7 @@ function asset(string $file): string
         </div>
 
         <div id="typing" class="typing" aria-live="polite">
-          <div class="typing-bubble"><i></i><i></i><i></i></div><span id="typing-text"></span>
+          <div class="typing-bubble"><i></i><i></i><i></i><svg class="icon typing-mic"><use href="#i-mic" /></svg></div><span id="typing-text"></span>
         </div>
 
         <div id="reply-bar" class="reply-bar hidden">
@@ -472,8 +473,20 @@ function asset(string $file): string
           </button>
           <button id="gif-button" class="gif-button" type="button" title="Enviar GIF" aria-label="Enviar GIF" aria-haspopup="dialog" aria-expanded="false" aria-controls="gif-panel">GIF</button>
           <textarea id="message-input" rows="1" maxlength="2000" placeholder="Escreva uma mensagem…" aria-label="Mensagem"></textarea>
+          <!-- Gravando um áudio: a faixa cobre o campo. Segurando o microfone, deslizar para a esquerda cancela. -->
+          <div id="recorder" class="recorder hidden">
+            <button id="rec-cancel" class="rec-cancel" type="button" title="Apagar o áudio" aria-label="Apagar o áudio"><svg class="icon"><use href="#i-trash" /></svg></button>
+            <span class="rec-clock" role="timer" aria-label="Tempo de gravação"><i class="rec-dot"></i><span id="rec-time">0:00</span></span>
+            <div id="rec-wave" class="rec-wave" aria-hidden="true"></div>
+            <span id="rec-slide" class="rec-slide"><svg class="icon"><use href="#i-chevron-left" /></svg>Deslize para cancelar</span>
+          </div>
           <button class="send" type="submit" aria-label="Enviar mensagem" title="Enviar">
             <svg class="icon"><use href="#i-send" /></svg>
+          </button>
+          <!-- Campo vazio: o microfone no lugar do enviar. Toque para gravar sem segurar, ou segure e solte para enviar. -->
+          <button id="mic-button" class="mic" type="button" aria-label="Gravar áudio" title="Gravar áudio: toque para gravar, ou segure e solte para enviar">
+            <svg class="icon when-mic"><use href="#i-mic" /></svg>
+            <svg class="icon when-send"><use href="#i-send" /></svg>
           </button>
         </form>
       </section>

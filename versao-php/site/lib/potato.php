@@ -19,6 +19,9 @@ const AVATAR_GIF_MAX = 700000;
 // Fotos e arquivos das mensagens: até 10 MB (menos, se o PHP ou o MySQL da hospedagem não aguentarem; veja file_max).
 const FILE_MAX = 10000000;
 const FILE_UPLOADS_PER_10_MIN = 60;
+// Mensagem de voz: até 1 hora (o chat já para a gravação em 15 minutos) e até 64 barras na forma de onda.
+const VOICE_MAX = 3600;
+const VOICE_PEAKS = 64;
 // Papel de parede: foto reduzida no navegador (lado maior até 1600 px). Cabe numa requisição mesmo em base64.
 const WALLPAPER_MAX = 650000;
 const MUSIC_QUEUE_MAX = 50;
@@ -1277,16 +1280,40 @@ function sniff_file(string $raw): array
     $head = substr($raw, 0, 12);
     if (substr($head, 4, 4) === 'ftyp') {
         $brand = substr($head, 8, 4);
-        if (in_array($brand, ['M4A ', 'M4B '], true)) return ['kind' => 'audio', 'type' => 'audio/mp4'];
+        if (in_array($brand, ['M4A ', 'M4B '], true) || mp4_only_sound($raw)) return ['kind' => 'audio', 'type' => 'audio/mp4'];
         return ['kind' => 'video', 'type' => $brand === 'qt  ' ? 'video/quicktime' : 'video/mp4'];
     }
-    if (strncmp($head, "\x1A\x45\xDF\xA3", 4) === 0) return ['kind' => 'video', 'type' => 'video/webm'];
+    if (strncmp($head, "\x1A\x45\xDF\xA3", 4) === 0) {
+        return webm_only_sound($raw) ? ['kind' => 'audio', 'type' => 'audio/webm'] : ['kind' => 'video', 'type' => 'video/webm'];
+    }
     if (strncmp($head, 'OggS', 4) === 0) return ['kind' => 'audio', 'type' => 'audio/ogg'];
     if (strncmp($head, 'RIFF', 4) === 0 && substr($head, 8, 4) === 'WAVE') return ['kind' => 'audio', 'type' => 'audio/wav'];
     if (strncmp($head, 'ID3', 3) === 0 || (strlen($head) > 1 && ord($head[0]) === 0xFF && (ord($head[1]) & 0xE0) === 0xE0)) {
         return ['kind' => 'audio', 'type' => 'audio/mpeg'];
     }
     return ['kind' => 'file', 'type' => 'application/octet-stream'];
+}
+
+// MP4 só com som: o Chrome e o Safari gravam áudio em MP4 com marca de vídeo (isom, mp42), então vale o tipo
+// de cada faixa (caixa hdlr: "soun" ou "vide"), que pode estar no fim do arquivo.
+function mp4_only_sound(string $raw): bool
+{
+    $sound = false;
+    for ($at = strpos($raw, 'hdlr'); $at !== false; $at = strpos($raw, 'hdlr', $at + 4)) {
+        $handler = substr($raw, $at + 12, 4);
+        if ($handler === 'vide') return false;
+        $sound = $sound || $handler === 'soun';
+    }
+    return $sound;
+}
+
+// WebM só com som (como o Chrome e o Firefox gravam áudio). As faixas ficam antes do primeiro Cluster:
+// codec A_… ou TrackType 2 é som; V_… ou TrackType 1 é vídeo.
+function webm_only_sound(string $raw): bool
+{
+    $cluster = strpos($raw, "\x1F\x43\xB6\x75");
+    $head = substr($raw, 0, $cluster === false ? 65536 : min($cluster, 65536));
+    return preg_match('/\x86[\x81-\xA0]A_|\x83\x81\x02/', $head) === 1 && preg_match('/\x86[\x81-\xA0]V_|\x83\x81\x01/', $head) === 0;
 }
 
 function clean_file_name(string $name): string
@@ -1320,7 +1347,7 @@ function find_file(string $key): ?array
 // Dados do arquivo guardados na mensagem (coluna media), com o endereço para baixar.
 function file_info(array $file): array
 {
-    return [
+    $info = [
         'url' => file_url((string) $file['key']),
         'name' => (string) $file['name'],
         'type' => (string) $file['type'],
@@ -1329,6 +1356,19 @@ function file_info(array $file): array
         'width' => isset($file['width']) ? (int) $file['width'] : null,
         'height' => isset($file['height']) ? (int) $file['height'] : null,
     ];
+    if (isset($file['voice']) && is_array($file['voice'])) $info['voice'] = $file['voice'];
+    return $info;
+}
+
+// Mensagem de voz gravada no chat: duração (segundos) e forma de onda (barras de 0 a 100), para o player
+// aparecer pronto antes de o áudio baixar. null = não é de voz (vira um áudio comum).
+function clean_voice($voice): ?array
+{
+    if (!is_array($voice) || !is_array($voice['peaks'] ?? null)) return null;
+    $duration = round((float) str($voice['duration'] ?? ''), 1);
+    if ($duration <= 0 || $duration > VOICE_MAX) return null;
+    $peaks = array_map(fn($peak) => max(0, min(100, (int) str($peak))), array_slice(array_values($voice['peaks']), 0, VOICE_PEAKS));
+    return ['duration' => $duration, 'peaks' => $peaks];
 }
 
 // ---------- mensagens ----------
@@ -1609,8 +1649,9 @@ function act(array $me, string $event, $data)
             emit('presence');
             return null;
 
+        // Digitando (true ou false) ou gravando um áudio ("audio").
         case 'typing':
-            emit('typing', ['name' => $name, 'active' => (bool) $data], 'peer', $me);
+            emit('typing', ['name' => $name, 'active' => (bool) $data, 'audio' => $data === 'audio'], 'peer', $me);
             return null;
 
         // Sinalização WebRTC: sempre para a outra pessoa, nunca para as próprias abas.
@@ -1674,6 +1715,10 @@ function preview_text(array $row): string
     if ($row['deleted']) return '';
     if ($row['text'] !== '') return text_slice($row['text'], 160);
     $media = empty($row['media']) ? null : json_decode((string) $row['media'], true);
+    if (isset($media['file']['voice'])) {
+        $seconds = (int) $media['file']['voice']['duration'];
+        return sprintf('Mensagem de voz (%d:%02d)', intdiv($seconds, 60), $seconds % 60);
+    }
     if (isset($media['file'])) return ['image' => 'Foto', 'video' => 'Vídeo', 'audio' => 'Áudio'][$media['file']['kind']] ?? text_slice((string) $media['file']['name'], 160);
     if (isset($media['music'])) return text_slice('Música: ' . $media['music']['title'], 160);
     return $media ? 'GIF' : '';
@@ -1681,7 +1726,7 @@ function preview_text(array $row): string
 
 function send_message(array $me, array $body): array
 {
-    // Foto ou arquivo já enviado em api.php?action=upload (chave).
+    // Foto ou arquivo já enviado em api.php?action=upload (chave). Áudio gravado no chat vem com voice.
     $fileKey = str($body['file'] ?? '');
     $gif = $fileKey === '' ? clean_gif($body['gif'] ?? null) : null;
     if ($gif === false) return ['ok' => false, 'error' => 'GIF inválido.'];
@@ -1706,6 +1751,9 @@ function send_message(array $me, array $body): array
     if ($fileKey !== '') {
         $file = query('SELECT file_key AS `key`, name, type, kind, size, width, height FROM ' . t('files') . ' WHERE file_key = ? AND owner = ? AND message_id IS NULL', [$fileKey, $me['name']])->fetch();
         if (!$file) return ['ok' => false, 'error' => 'Arquivo não encontrado. Tente enviar de novo.'];
+        // Player de voz só para o que toca (um WebM estranho pode ter sido visto como vídeo; o som toca igual).
+        $voice = in_array($file['kind'], ['audio', 'video'], true) ? clean_voice($body['voice'] ?? null) : null;
+        if ($voice) $file['voice'] = $voice;
     }
 
     $original = find_message(str($body['replyTo'] ?? ''));

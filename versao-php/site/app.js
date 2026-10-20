@@ -48,7 +48,8 @@ let reads = {};
 let presenceList = [];
 let peerName = "";
 let peerWasOnline = null;
-let peerTyping = false;
+// "" (nada), "text" (digitando) ou "audio" (gravando um áudio).
+let peerTyping = "";
 let replyTo = null;
 let hasMore = false;
 let loadingOlder = false;
@@ -169,6 +170,7 @@ function isJumbo(text) {
 const FILE_LABEL = { image: "Foto", video: "Vídeo", audio: "Áudio" };
 const previewText = (message) => (message.gif ? "GIF"
   : message.music ? `Música: ${message.music.title}`
+  : message.file?.voice ? `Mensagem de voz (${clockTime(message.file.voice.duration)})`
   : message.file && !message.text ? FILE_LABEL[message.file.kind] || message.file.name
   : message.text);
 
@@ -433,7 +435,7 @@ function connect(token, animate) {
   socket.on("message:update", updateMessage);
   socket.on("seen", ({ name, id, at }) => { reads[name] = { id, at }; refreshStatuses(); });
   socket.on("presence", updatePresence);
-  socket.on("typing", ({ active }) => setPeerTyping(active));
+  socket.on("typing", ({ active, audio }) => setPeerTyping(active, audio));
   // Tema trocado em outra aba ou aparelho da mesma pessoa.
   // Papel de parede trocado em outra aba ou aparelho da mesma pessoa.
   socket.on("wallpaper", ({ wallpaper: next }) => applyWallpaper(next));
@@ -533,6 +535,7 @@ function receive(message, live) {
 function updateMessage(message) {
   const previous = byId.get(message.id);
   if (!previous) return;
+  if (message.deleted && playback.key === voiceKey(previous)) stopVoice();
   const index = list.indexOf(previous);
   list[index] = message;
   byId.set(message.id, message);
@@ -633,6 +636,9 @@ function fill(article, message) {
     article.classList.add("music-note");
     bubble.classList.add("music-card");
     bubble.append(musicCard(message));
+  } else if (message.file?.voice && !message.deleted) {
+    bubble.classList.add("attachment", "is-voice");
+    bubble.append(voiceView(message));
   } else if (message.file && !message.deleted) {
     bubble.classList.add("attachment", `is-${message.file.kind}`);
     bubble.append(fileView(message.file));
@@ -758,7 +764,8 @@ function refreshStatuses() {
 }
 
 // Mensagem de texto, de GIF (gif = { url, width, height, title }, sem texto) ou com foto/arquivo
-// (upload = o arquivo escolhido, que sobe antes da mensagem; ver uploadFile).
+// (upload = o arquivo escolhido, que sobe antes da mensagem; ver uploadFile). Áudio gravado no chat
+// leva upload.voice = { duration, peaks } (ver stopRecording).
 function send(text, gif = null, upload = null) {
   const clean = gif || upload ? "" : text.trim();
   if ((!clean && !gif && !upload) || !me) return;
@@ -768,7 +775,7 @@ function send(text, gif = null, upload = null) {
     sender: me,
     text: clean.slice(0, 2000),
     gif,
-    file: upload && { url: null, preview: URL.createObjectURL(upload.blob), name: upload.blob.name, type: upload.blob.type, kind: fileKind(upload.blob.type), size: upload.blob.size, width: upload.width, height: upload.height },
+    file: upload && { url: null, preview: URL.createObjectURL(upload.blob), name: upload.blob.name, type: upload.blob.type, kind: fileKind(upload.blob.type), size: upload.blob.size, width: upload.width, height: upload.height, voice: upload.voice },
     upload: upload && { blob: upload.blob, key: null, progress: 0, xhr: null },
     // Hora do servidor (o relógio do celular pode estar errado e criaria um "Hoje" a cada mensagem).
     createdAt: new Date(Date.now() + musicClock).toISOString(),
@@ -793,7 +800,7 @@ function deliver(message) {
   const node = () => messagesEl.querySelector(`[data-client-id="${message.clientId}"]`);
   message.status = "pending";
   if (node()) paintStatus(node());
-  socket.timeout(10000).emit("message", { text: message.text, gif: message.gif, file: message.upload?.key, clientId: message.clientId, replyTo: message.replyTo?.id }, (error, result) => {
+  socket.timeout(10000).emit("message", { text: message.text, gif: message.gif, file: message.upload?.key, voice: message.file?.voice, clientId: message.clientId, replyTo: message.replyTo?.id }, (error, result) => {
     if (!pending.has(message.clientId)) return;
     if (!error && result?.ok) return receive(result.message, true);
     message.status = "failed";
@@ -1318,6 +1325,8 @@ messagesEl.addEventListener("click", (event) => {
 
   const quote = event.target.closest(".reply-quote");
   if (quote) return focusMessage(quote.dataset.target);
+  const voiceAction = event.target.closest("[data-voice]")?.dataset.voice;
+  if (voiceAction && message.file?.voice) return voiceAction === "speed" ? cycleSpeed() : toggleVoice(message);
   if (event.target.closest("[data-view]")) return openViewer(message.file);
   const musicAction = event.target.closest("[data-music-action]");
   if (musicAction && message.music) return cardAction(musicAction.dataset.musicAction, message.music);
@@ -1373,7 +1382,7 @@ function closeTools() {
 // Devolve a mensagem que pode receber ações, ou null (links mantêm o menu do navegador;
 // em vídeo e áudio o toque é dos controles, para arrastar a barra sem abrir o menu nem responder).
 function actionableMessage(target) {
-  if (!target.closest(".bubble") || target.closest("a, video, audio")) return null;
+  if (!target.closest(".bubble") || target.closest("a, video, audio, .voice-ctl")) return null;
   const article = target.closest(".message");
   return article?.msg?.id && !article.msg.deleted ? article : null;
 }
@@ -1475,7 +1484,8 @@ window.addEventListener("keydown", (event) => {
 messagesEl.addEventListener("dblclick", (event) => {
   const article = event.target.closest(".message");
   const message = article?.msg;
-  if (!message?.id || message.deleted || !event.target.closest(".bubble")) return;
+  // Dois toques rápidos no play (tocar e pausar) não viram coração.
+  if (!message?.id || message.deleted || !event.target.closest(".bubble") || event.target.closest(".voice-ctl")) return;
   window.getSelection()?.removeAllRanges();
   closeTools();
   if (!message.reactions?.["❤️"]?.includes(me)) socket?.emit("react", { id: message.id, emoji: "❤️" });
@@ -1524,6 +1534,542 @@ function loadOlder() {
     messagesEl.scrollTop += messagesEl.scrollHeight - previousHeight;
   });
 }
+
+// ---------- mensagens de voz ----------
+
+// Gravar: com o campo vazio, o microfone fica no lugar do enviar. Um toque grava sem segurar (depois é só enviar
+// ou apagar); segurando, a pessoa fala e solta para enviar, e deslizar para a esquerda cancela.
+// Ouvir: um áudio por vez, com forma de onda (tocar ou arrastar nela pula), velocidade e, no fim, o próximo
+// áudio seguido da mesma pessoa.
+const micButton = $("#mic-button");
+const recorderEl = $("#recorder");
+const recTime = $("#rec-time");
+const recWave = $("#rec-wave");
+const recSlide = $("#rec-slide");
+// MP4/AAC primeiro: toca em qualquer aparelho, inclusive no iPhone, que nem sempre toca o WebM/Opus.
+const VOICE_TYPES = ["audio/mp4;codecs=mp4a.40.2", "audio/webm;codecs=opus", "audio/mp4", "audio/ogg;codecs=opus", "audio/webm"];
+const VOICE_EXTENSION = { mp4: "m4a", webm: "webm", ogg: "ogg" };
+const VOICE_MIN = 1;
+const VOICE_MAX = 15 * 60;
+const VOICE_PEAKS = 40;
+const VOICE_SPEEDS = [1, 1.5, 2];
+const VOICE_SPEED_KEY = "potato.voiceSpeed";
+// Segurar o microfone menos que isso é um toque (grava sem segurar); deslizar CANCEL_SLIDE px para a esquerda cancela.
+const HOLD_MS = 350;
+const CANCEL_SLIDE = 110;
+const canRecord = Boolean(window.MediaRecorder && navigator.mediaDevices?.getUserMedia);
+if (!canRecord) messageForm.classList.add("no-voice");
+
+// Gravação em andamento (ou esperando a permissão do microfone); null = parada.
+let rec = null;
+// Dedo (ou mouse) segurando o microfone.
+let micHold = null;
+
+// Nível do microfone (RMS) numa escala parecida com a do ouvido: -50 dB (silêncio) = 0, -10 dB (voz alta) = 1.
+const voiceLevel = (rms) => Math.min(1, Math.max(0, (20 * Math.log10(rms || 1e-5) + 50) / 40));
+
+// Forma de onda que vai na mensagem: VOICE_PEAKS barras de 0 a 100, na proporção do trecho mais alto.
+function voicePeaks(levels) {
+  if (!levels.length) return [];
+  const peaks = Array.from({ length: VOICE_PEAKS }, (_, index) => {
+    const from = Math.floor(index * levels.length / VOICE_PEAKS);
+    return Math.max(...levels.slice(from, Math.max(from + 1, Math.floor((index + 1) * levels.length / VOICE_PEAKS))));
+  });
+  const top = Math.max(0.35, ...peaks);
+  return peaks.map((peak) => Math.round(peak / top * 100));
+}
+
+// "Áudio 2026-10-19 14.03.12.m4a", como o gravador do celular dá nome (aparece ao baixar).
+function voiceFileName(type) {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+  const extension = VOICE_EXTENSION[type.split(/[/;]/)[1]] || "webm";
+  return `Áudio ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}.${pad(now.getMinutes())}.${pad(now.getSeconds())}.${extension}`;
+}
+
+function paintRecorder() {
+  const locked = rec?.mode === "locked";
+  messageForm.classList.toggle("recording", Boolean(rec));
+  messageForm.classList.toggle("rec-locked", locked);
+  micButton.setAttribute("aria-label", locked ? "Enviar áudio" : "Gravar áudio");
+  micButton.title = locked ? "Enviar áudio" : "Gravar áudio: toque para gravar, ou segure e solte para enviar";
+  recSlide.style.transform = recSlide.style.opacity = "";
+}
+
+function addRecBar(level) {
+  const bar = el("i");
+  bar.style.setProperty("--h", level.toFixed(2));
+  recWave.append(bar);
+  if (recWave.childElementCount > 150) recWave.firstElementChild.remove();
+}
+
+async function startRecording(mode) {
+  if (rec) return;
+  if (call) return toast("Durante a chamada não dá para gravar áudio.");
+  closeAttach();
+  closeGifs();
+  commandMenu.classList.add("hidden");
+  stopVoice();
+  const session = rec = { mode, chunks: [], size: 0, levels: [], peak: 0, lockedAt: performance.now() };
+  recTime.textContent = "0:00";
+  recWave.replaceChildren();
+  paintRecorder();
+  fx.show(recorderEl, { x: 24 });
+  sound.play("record");
+  navigator.vibrate?.(15);
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  } catch (error) {
+    if (rec === session) stopRecording(false);
+    toast(inExtension ? "O painel lateral não consegue usar o microfone. Abra nosso chat numa aba (botão no topo do painel) para gravar áudio."
+      : error.name === "NotAllowedError" ? "Libere o microfone para o chat nas configurações do navegador."
+      : "Não deu para usar o microfone.", "error");
+    sound.play("error");
+    return;
+  }
+  // Cancelou enquanto o navegador pedia a permissão.
+  if (rec !== session) return stream.getTracks().forEach((track) => track.stop());
+  const type = VOICE_TYPES.find((candidate) => MediaRecorder.isTypeSupported(candidate));
+  try {
+    session.recorder = new MediaRecorder(stream, type ? { mimeType: type, audioBitsPerSecond: 48000 } : { audioBitsPerSecond: 48000 });
+  } catch {
+    stream.getTracks().forEach((track) => track.stop());
+    stopRecording(false);
+    return toast("Este navegador não conseguiu gravar o áudio.", "error");
+  }
+  session.stream = stream;
+  session.meter = sound.meter(stream);
+  session.recorder.addEventListener("dataavailable", (event) => {
+    if (!event.data.size) return;
+    session.chunks.push(event.data);
+    session.size += event.data.size;
+    // Quase no maior arquivo que o servidor aceita: envia o que já tem.
+    if (rec === session && fileMax && session.size > fileMax * 0.95) {
+      toast("O áudio chegou ao tamanho máximo e foi enviado.");
+      stopRecording(true);
+    }
+  });
+  session.recorder.start(1000);
+  session.started = session.lastBar = performance.now();
+  session.timer = setInterval(() => recordTick(session), 30);
+  // A outra pessoa vê "gravando áudio…" (o aviso some sozinho em 5 s, então vai de novo a cada 3 s).
+  socket?.emit("typing", "audio");
+  session.typing = setInterval(() => socket?.emit("typing", "audio"), 3000);
+}
+
+function recordTick(session) {
+  const now = performance.now();
+  session.peak = Math.max(session.peak, voiceLevel(session.meter()));
+  // Uma barra a cada 100 ms. Com a aba em segundo plano o timer atrasa: as barras que faltam repetem o nível.
+  if (now - session.lastBar >= 100) {
+    for (let drawn = 0; now - session.lastBar >= 100; session.lastBar += 100, drawn++) {
+      session.levels.push(session.peak);
+      if (drawn < 8) addRecBar(session.peak);
+    }
+    session.peak = 0;
+  }
+  const seconds = (now - session.started) / 1000;
+  const label = clockTime(seconds);
+  if (recTime.textContent !== label) recTime.textContent = label;
+  if (seconds >= VOICE_MAX) {
+    toast("O áudio chegou a 15 minutos e foi enviado.");
+    stopRecording(true);
+  }
+}
+
+// Toque rápido no microfone (ou a janela de permissão interrompeu o gesto): continua gravando sem segurar.
+function lockRecording() {
+  rec.mode = "locked";
+  rec.lockedAt = performance.now();
+  paintRecorder();
+}
+
+// Para a gravação. keep = enviar (se tiver pelo menos VOICE_MIN segundos); senão, joga fora.
+function stopRecording(keep) {
+  const session = rec;
+  if (!session) return;
+  rec = null;
+  micHold = null;
+  clearInterval(session.timer);
+  clearInterval(session.typing);
+  if (session.started) socket?.emit("typing", false);
+  recorderEl.classList.add("hidden");
+  paintRecorder();
+  const recorder = session.recorder;
+  // Ainda esperando a permissão: o startRecording solta o microfone quando ela chegar.
+  if (!recorder) return;
+  const seconds = (performance.now() - session.started) / 1000;
+  const finish = () => {
+    session.stream.getTracks().forEach((track) => track.stop());
+    if (!keep) return;
+    if (seconds < VOICE_MIN) return toast("Áudio curto demais.");
+    const type = recorder.mimeType || session.chunks[0]?.type || "audio/webm";
+    const blob = new File(session.chunks, voiceFileName(type), { type });
+    if (fileMax && blob.size > fileMax) return toast(`O áudio ficou grande demais (máximo de ${formatSize(fileMax)}).`, "error");
+    send("", null, { blob, voice: { duration: Math.round(seconds * 10) / 10, peaks: voicePeaks(session.levels) } });
+  };
+  if (recorder.state === "inactive") return finish();
+  recorder.addEventListener("stop", finish, { once: true });
+  recorder.stop();
+}
+
+micButton.addEventListener("pointerdown", (event) => {
+  if (rec || event.button !== 0 || !event.isPrimary) return;
+  event.preventDefault();
+  micButton.setPointerCapture?.(event.pointerId);
+  micHold = { id: event.pointerId, x: event.clientX, at: performance.now() };
+  startRecording("hold");
+});
+
+// Segurando: o "deslize para cancelar" acompanha o dedo; passou do limite, cancela.
+micButton.addEventListener("pointermove", (event) => {
+  if (micHold?.id !== event.pointerId || rec?.mode !== "hold") return;
+  const offset = Math.min(0, event.clientX - micHold.x);
+  if (offset > -CANCEL_SLIDE) {
+    recSlide.style.transform = `translateX(${offset * 0.8}px)`;
+    recSlide.style.opacity = String(1 + offset / CANCEL_SLIDE * 0.7);
+    return;
+  }
+  sound.play("discard");
+  navigator.vibrate?.(10);
+  stopRecording(false);
+});
+
+function releaseMic(event) {
+  if (micHold?.id !== event.pointerId) return;
+  const held = performance.now() - micHold.at;
+  micHold = null;
+  if (rec?.mode !== "hold") return;
+  if (event.type === "pointercancel" || held < HOLD_MS || !rec.recorder) lockRecording();
+  else stopRecording(true);
+}
+
+micButton.addEventListener("pointerup", releaseMic);
+micButton.addEventListener("pointercancel", releaseMic);
+micButton.addEventListener("contextmenu", (event) => event.preventDefault());
+
+micButton.addEventListener("click", (event) => {
+  // Pelo teclado (Enter ou espaço), começa a gravar sem segurar.
+  if (!rec) {
+    if (event.detail === 0) startRecording("locked");
+    return;
+  }
+  // O clique que chega logo depois do toque que começou a gravação não envia.
+  if (rec.mode === "locked" && performance.now() - rec.lockedAt > 300) stopRecording(true);
+});
+
+$("#rec-cancel").addEventListener("click", () => {
+  sound.play("discard");
+  stopRecording(false);
+});
+
+window.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !rec) return;
+  event.stopPropagation();
+  sound.play("discard");
+  stopRecording(false);
+}, true);
+
+addEventListener("pagehide", () => stopRecording(false));
+
+// Áudio tocando agora (um por vez, num só <audio>). key = clientId ou id da mensagem, que não muda depois de enviada.
+const savedSpeed = store.get("localStorage", VOICE_SPEED_KEY);
+const playback = { key: "", message: null, audio: null, frame: 0, loading: false, drag: null, speed: VOICE_SPEEDS.includes(savedSpeed) ? savedSpeed : 1, converted: new Map() };
+const voiceKey = (message) => message.clientId || message.id;
+const voiceNode = (key) => (key ? messagesEl.querySelector(`.voice[data-voice-key="${CSS.escape(key)}"]`) : null);
+const voiceSource = (message) => message.file.preview || new URL(message.file.url, document.baseURI).href;
+const voicePlaying = () => Boolean(playback.key && !playback.audio.paused);
+const speedLabel = (speed) => `${String(speed).replace(".", ",")}×`;
+
+// Duração: a do arquivo, quando o navegador sabe (o WebM gravado no Chrome não diz); senão, a medida ao gravar.
+function voiceTotal(message) {
+  const duration = playback.audio?.duration;
+  return voiceKey(message) === playback.key && Number.isFinite(duration) && duration > 0 ? duration : message.file.voice.duration;
+}
+
+function voiceState(message) {
+  const current = voiceKey(message) === playback.key;
+  return { playing: current && voicePlaying(), loading: current && playback.loading, position: current ? playback.audio.currentTime : 0, total: voiceTotal(message) };
+}
+
+// Player dentro do balão.
+function voiceView(message) {
+  const { voice } = message.file;
+  const node = el("div", "voice");
+  node.dataset.voiceKey = voiceKey(message);
+  const play = el("button", "voice-play voice-ctl swap");
+  play.type = "button";
+  play.dataset.voice = "play";
+  play.append(icon("pause", "icon when-on"), icon("play", "icon when-off"));
+  const wave = el("div", "voice-wave voice-ctl");
+  wave.tabIndex = 0;
+  wave.setAttribute("role", "slider");
+  wave.setAttribute("aria-label", "Posição do áudio");
+  wave.setAttribute("aria-valuemin", "0");
+  wave.setAttribute("aria-valuemax", String(Math.round(voice.duration)));
+  const bars = el("span", "voice-bars");
+  for (const peak of voice.peaks.length ? voice.peaks : Array(VOICE_PEAKS).fill(0)) {
+    const bar = el("i");
+    bar.style.setProperty("--h", (peak / 100).toFixed(2));
+    bars.append(bar);
+  }
+  // A mesma onda por cima, na cor forte, cortada até onde já tocou.
+  const played = bars.cloneNode(true);
+  played.classList.add("played");
+  wave.append(bars, played, el("span", "voice-thumb"));
+  const meta = el("div", "voice-meta");
+  meta.append(el("span", "voice-time"));
+  if (message.upload && !message.id) {
+    const bar = el("span", "upload-bar");
+    bar.style.setProperty("--p", message.upload.progress);
+    bar.append(el("i"));
+    meta.append(bar);
+  } else {
+    const speed = el("button", "voice-speed voice-ctl", speedLabel(playback.speed));
+    speed.type = "button";
+    speed.dataset.voice = "speed";
+    speed.title = "Mudar a velocidade";
+    meta.append(speed);
+  }
+  node.append(play, wave, meta);
+  paintVoiceNode(node, voiceState(message));
+  return node;
+}
+
+function paintVoiceNode(node, { playing, loading, position, total }) {
+  const wave = node.querySelector(".voice-wave");
+  wave.style.setProperty("--p", total ? Math.min(1, position / total).toFixed(4) : "0");
+  wave.setAttribute("aria-valuenow", String(Math.floor(position)));
+  wave.setAttribute("aria-valuetext", `${clockTime(position)} de ${clockTime(total)}`);
+  // Parado no começo mostra a duração; tocando (ou pausado no meio), onde está.
+  const label = clockTime(playing || position > 0 ? position : total);
+  const time = node.querySelector(".voice-time");
+  if (time.textContent !== label) time.textContent = label;
+  const button = node.querySelector(".voice-play");
+  button.classList.toggle("is-off", !playing);
+  button.classList.toggle("loading", loading);
+  button.setAttribute("aria-label", playing ? "Pausar o áudio" : "Ouvir o áudio");
+  node.classList.toggle("is-playing", playing);
+}
+
+// Repinta o player de uma mensagem (o que está sendo arrastado fica como o dedo deixou).
+function paintVoice(key = playback.key) {
+  const node = voiceNode(key);
+  if (!node || (playback.drag?.moved && playback.drag.wave.closest(".voice") === node)) return;
+  paintVoiceNode(node, voiceState(node.closest(".message").msg));
+}
+
+function voiceAudio() {
+  if (playback.audio) return playback.audio;
+  const audio = playback.audio = new Audio();
+  audio.preload = "auto";
+  audio.addEventListener("play", () => {
+    duckMusic(true);
+    if (!playback.frame) playback.frame = requestAnimationFrame(voiceFrame);
+  });
+  audio.addEventListener("playing", () => {
+    playback.loading = false;
+    paintVoice();
+  });
+  audio.addEventListener("waiting", () => {
+    playback.loading = true;
+    paintVoice();
+  });
+  audio.addEventListener("pause", () => {
+    duckMusic(false);
+    playback.loading = false;
+    paintVoice();
+  });
+  audio.addEventListener("ended", voiceEnded);
+  audio.addEventListener("error", voiceFailed);
+  return audio;
+}
+
+function voiceFrame() {
+  playback.frame = 0;
+  if (!voicePlaying()) return;
+  paintVoice();
+  playback.frame = requestAnimationFrame(voiceFrame);
+}
+
+// Enquanto um áudio toca, a música do bot abaixa (só neste aparelho).
+function duckMusic(on) {
+  musicPlayer.setVolume(on ? Math.round(musicVolume * 0.2) : musicVolume);
+}
+
+function openVoice(message, at = 0) {
+  stopVoice();
+  const audio = voiceAudio();
+  const key = playback.key = voiceKey(message);
+  playback.message = message;
+  audio.src = playback.converted.get(key) || voiceSource(message);
+  audio.defaultPlaybackRate = audio.playbackRate = playback.speed;
+  if (at > 0) audio.addEventListener("loadedmetadata", () => { if (playback.key === key) audio.currentTime = at; }, { once: true });
+  playVoice();
+}
+
+function playVoice() {
+  const { audio, key } = playback;
+  playback.loading = true;
+  audio.play().catch((error) => {
+    if (playback.key !== key) return;
+    if (error.name === "NotAllowedError") toast("Toque no play de novo para ouvir.");
+    playback.loading = false;
+    paintVoice();
+  });
+  paintVoice();
+}
+
+function toggleVoice(message) {
+  if (playback.key !== voiceKey(message)) return openVoice(message);
+  if (playback.audio.paused) playVoice();
+  else playback.audio.pause();
+}
+
+function stopVoice() {
+  const { key } = playback;
+  if (!key) return;
+  playback.key = "";
+  playback.message = null;
+  playback.loading = false;
+  cancelAnimationFrame(playback.frame);
+  playback.frame = 0;
+  playback.audio.pause();
+  paintVoice(key);
+}
+
+function seekVoice(message, fraction) {
+  if (playback.key !== voiceKey(message)) return openVoice(message, fraction * message.file.voice.duration);
+  playback.audio.currentTime = fraction * voiceTotal(message);
+  paintVoice();
+}
+
+// Áudios seguidos da mesma pessoa tocam em sequência, como no WhatsApp.
+function nextVoice(node) {
+  const article = node?.closest(".message");
+  let next = article?.nextElementSibling;
+  while (next && !next.classList.contains("message")) next = next.nextElementSibling;
+  const message = next?.msg;
+  return message?.file?.voice && !message.deleted && message.sender === article.msg.sender ? message : null;
+}
+
+function voiceEnded() {
+  const next = nextVoice(voiceNode(playback.key));
+  stopVoice();
+  if (next) openVoice(next);
+}
+
+// O aparelho não toca o formato (ex.: um iPhone com o WebM gravado num Android): decodifica e toca como WAV.
+async function voiceFailed() {
+  const { key, message, audio } = playback;
+  if (!key || !audio.error) return;
+  const unsupported = audio.error.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED || audio.error.code === MediaError.MEDIA_ERR_DECODE;
+  if (!unsupported || playback.converted.has(key)) {
+    stopVoice();
+    return toast("Não deu para tocar esse áudio.", "error");
+  }
+  playback.loading = true;
+  paintVoice();
+  try {
+    const url = await decodeToWav(voiceSource(message));
+    playback.converted.set(key, url);
+    if (playback.key !== key) return;
+    audio.src = url;
+    audio.defaultPlaybackRate = audio.playbackRate = playback.speed;
+    playVoice();
+  } catch {
+    if (playback.key !== key) return;
+    stopVoice();
+    toast("Este aparelho não conseguiu tocar esse áudio. Dá para baixar pelo menu da mensagem.", "error");
+  }
+}
+
+async function decodeToWav(url) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Erro ${response.status}`);
+  const data = await response.arrayBuffer();
+  // Decodifica já em 24 kHz (o contexto converte) e junta os canais num só: a voz fica igual e o WAV, leve.
+  const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  const decoded = await new Promise((resolve, reject) => new Offline(1, 1, 24000).decodeAudioData(data, resolve, reject));
+  const samples = decoded.getChannelData(0).slice();
+  for (let channel = 1; channel < decoded.numberOfChannels; channel++) {
+    decoded.getChannelData(channel).forEach((value, index) => { samples[index] += value; });
+  }
+  if (decoded.numberOfChannels > 1) samples.forEach((value, index) => { samples[index] = value / decoded.numberOfChannels; });
+  return URL.createObjectURL(wavBlob(samples, decoded.sampleRate));
+}
+
+// WAV de 16 bits, mono.
+function wavBlob(samples, rate) {
+  const view = new DataView(new ArrayBuffer(44 + samples.length * 2));
+  const text = (offset, value) => [...value].forEach((char, index) => view.setUint8(offset + index, char.charCodeAt(0)));
+  text(0, "RIFF");
+  view.setUint32(4, 36 + samples.length * 2, true);
+  text(8, "WAVEfmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, rate, true);
+  view.setUint32(28, rate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  text(36, "data");
+  view.setUint32(40, samples.length * 2, true);
+  for (let index = 0; index < samples.length; index++) view.setInt16(44 + index * 2, Math.max(-1, Math.min(1, samples[index])) * 0x7fff, true);
+  return new Blob([view.buffer], { type: "audio/wav" });
+}
+
+function cycleSpeed() {
+  playback.speed = VOICE_SPEEDS[(VOICE_SPEEDS.indexOf(playback.speed) + 1) % VOICE_SPEEDS.length];
+  store.set("localStorage", VOICE_SPEED_KEY, playback.speed);
+  if (playback.audio) playback.audio.defaultPlaybackRate = playback.audio.playbackRate = playback.speed;
+  messagesEl.querySelectorAll(".voice-speed").forEach((button) => { button.textContent = speedLabel(playback.speed); });
+  sound.play("tap");
+}
+
+// Tocar na forma de onda pula para aquele ponto; arrastar na horizontal mostra onde vai parar e pula ao soltar.
+// Arrastar na vertical continua rolando a conversa (touch-action: pan-y no styles.css).
+const waveFraction = (wave, x) => {
+  const box = wave.getBoundingClientRect();
+  return Math.min(1, Math.max(0, (x - box.left) / box.width));
+};
+
+messagesEl.addEventListener("pointerdown", (event) => {
+  const wave = event.target.closest(".voice-wave");
+  const message = wave?.closest(".message")?.msg;
+  if (!message?.file?.voice || event.button !== 0) return;
+  wave.setPointerCapture?.(event.pointerId);
+  playback.drag = { wave, message, id: event.pointerId, x: event.clientX, moved: false };
+});
+
+messagesEl.addEventListener("pointermove", (event) => {
+  const { drag } = playback;
+  if (drag?.id !== event.pointerId || (!drag.moved && Math.abs(event.clientX - drag.x) < 6)) return;
+  drag.moved = true;
+  const state = voiceState(drag.message);
+  paintVoiceNode(drag.wave.closest(".voice"), { ...state, position: waveFraction(drag.wave, event.clientX) * state.total });
+});
+
+function endWaveDrag(event) {
+  const { drag } = playback;
+  if (drag?.id !== event.pointerId) return;
+  playback.drag = null;
+  if (event.type === "pointerup") seekVoice(drag.message, waveFraction(drag.wave, event.clientX));
+  else paintVoice(voiceKey(drag.message));
+}
+
+messagesEl.addEventListener("pointerup", endWaveDrag);
+messagesEl.addEventListener("pointercancel", endWaveDrag);
+
+// Teclado: setas voltam e avançam 5 s.
+messagesEl.addEventListener("keydown", (event) => {
+  const message = event.target.closest?.(".voice-wave")?.closest(".message")?.msg;
+  if (!message?.file?.voice || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
+  event.preventDefault();
+  const { position, total } = voiceState(message);
+  seekVoice(message, Math.min(1, Math.max(0, (position + (event.key === "ArrowRight" ? 5 : -5)) / total)));
+});
 
 // ---------- rolagem, leitura e avisos ----------
 
@@ -2620,25 +3166,9 @@ async function syncWakeLock() {
 const media = "mediaSession" in navigator ? navigator.mediaSession : null;
 let anchor = null;
 
-// WAV de 10 s em silêncio (8 kHz, 8 bits). Mais de 5 s: o Chrome só mostra a notificação para áudio "de verdade".
+// WAV de 10 s em silêncio (8 kHz). Mais de 5 s: o Chrome só mostra a notificação para áudio "de verdade".
 function silence(seconds = 10, rate = 8000) {
-  const size = seconds * rate;
-  const view = new DataView(new ArrayBuffer(44 + size));
-  const text = (offset, value) => [...value].forEach((char, index) => view.setUint8(offset + index, char.charCodeAt(0)));
-  text(0, "RIFF");
-  view.setUint32(4, 36 + size, true);
-  text(8, "WAVEfmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, rate, true);
-  view.setUint32(28, rate, true);
-  view.setUint16(32, 1, true);
-  view.setUint16(34, 8, true);
-  text(36, "data");
-  view.setUint32(40, size, true);
-  new Uint8Array(view.buffer, 44).fill(128);
-  return URL.createObjectURL(new Blob([view.buffer], { type: "audio/wav" }));
+  return URL.createObjectURL(wavBlob(new Float32Array(seconds * rate), rate));
 }
 
 function syncAnchor() {
@@ -3557,7 +4087,7 @@ function peerOnline() {
 function paintPeerStatus() {
   const peer = presenceList.find((user) => user.name === peerName);
   peerStatus.classList.toggle("live", Boolean(peerTyping || peer?.online));
-  if (peerTyping) setTicker(peerStatus, "digitando…");
+  if (peerTyping) setTicker(peerStatus, peerTyping === "audio" ? "gravando áudio…" : "digitando…");
   else if (!peer) setTicker(peerStatus, "Mande o link para a outra pessoa criar a conta dela");
   else if (peer.online) setTicker(peerStatus, peer.active ? "online agora" : "online");
   else setTicker(peerStatus, lastSeenLabel(peer.lastSeen));
@@ -3601,16 +4131,21 @@ if (window.ResizeObserver) {
 }
 document.fonts?.ready.then(remeasureTicker);
 
-function setPeerTyping(active) {
+// audio = gravando um áudio (quem grava repete o aviso a cada 3 s; sem aviso por 5 s, some).
+function setPeerTyping(active, audio = false) {
   clearTimeout(peerTypingTimer);
   if (active) peerTypingTimer = setTimeout(() => setPeerTyping(false), 5000);
-  if (active === peerTyping) return;
-  peerTyping = active;
+  const mode = !active ? "" : audio ? "audio" : "text";
+  if (mode === peerTyping) return;
+  const appearing = !peerTyping;
+  peerTyping = mode;
   // O "digitando" só ocupa espaço enquanto aparece: quem estava no fim da conversa continua vendo a última mensagem.
   const pinned = nearBottom();
-  typingText.textContent = active ? `${peerName || "A outra pessoa"} está digitando` : "";
-  fx.typing(typingEl, active);
-  if (active && pinned) setTimeout(() => scrollToLatest(true), 220);
+  typingText.textContent = mode ? `${peerName || "A outra pessoa"} está ${mode === "audio" ? "gravando um áudio" : "digitando"}` : "";
+  // Sumindo, o ícone fica como estava até o fim da animação.
+  if (mode) typingEl.classList.toggle("audio", mode === "audio");
+  if (appearing || !mode) fx.typing(typingEl, Boolean(mode));
+  if (appearing && mode && pinned) setTimeout(() => scrollToLatest(true), 220);
   paintPeerStatus();
 }
 

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Potato Chat</string>
+    <string name="server_help">Informe o endereço HTTPS onde o seu Potato Chat está publicado.</string>
+    <string name="server_hint">https://chat.seudominio.com</string>
+    <string name="open_chat">Abrir o chat</string>
+    <string name="invalid_server">Digite um endereço http:// ou https:// válido.</string>
+</resources>

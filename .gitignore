@@ -3,5 +3,9 @@ node_modules/
 data/*.json
 data/*.tmp
 npm-debug.log*
+android/.gradle/
+android/local.properties
+android/**/build/
+*.apk
 
 data/.token-secret

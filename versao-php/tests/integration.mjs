@@ -447,7 +447,7 @@ try {
   // Digitando e sinalização de chamada vão só para a outra pessoa, nunca para as próprias conexões.
   const typing = next(second, "typing");
   first.emit("typing", true);
-  assert.deepEqual(await typing, { name: "Pessoa 1", active: true });
+  assert.deepEqual(await typing, { name: "Pessoa 1", active: true, audio: false });
 
   const cursor = (await api("poll", { ...extension, cursor: 0 })).body.cursor;
   const offer = next(second, "webrtc-offer");
@@ -692,6 +692,53 @@ try {
   await withAck(dj1, "music", { op: "play", query: "https://youtu.be/dQw4w9WgXcQ" });
   assert.equal((await withAck(dj1, "stats")).messages, statsBefore);
   await withAck(dj1, "music", { op: "stop" });
+
+  // Mensagem de voz. O áudio gravado no navegador vem em MP4 com marca de vídeo (Chrome, Safari) ou em WebM
+  // (Chrome, Firefox): o servidor vê pelas faixas que é só som. Os arquivos abaixo têm só o que a detecção lê.
+  const box = (type, data) => Buffer.concat([Buffer.from([0, 0, 0, 8 + data.length]), Buffer.from(type), data]);
+  const mp4 = (...handlers) => Buffer.concat([box("ftyp", Buffer.from("isom\0\0\x02\0isomiso2mp41", "latin1")), ...handlers.map((handler) => box("hdlr", Buffer.concat([Buffer.alloc(8), Buffer.from(handler), Buffer.alloc(13)])))]);
+  const webm = (...codecs) => Buffer.concat([Buffer.from("1a45dfa3", "hex"), Buffer.alloc(8), ...codecs.map((codec) => Buffer.concat([Buffer.from([0x86, 0x80 | codec.length]), Buffer.from(codec)])), Buffer.from("1f43b675", "hex"), Buffer.alloc(64)]);
+  for (const [name, data, kind, type] of [
+    ["Áudio.m4a", mp4("soun"), "audio", "audio/mp4"],
+    ["video.mp4", mp4("vide", "soun"), "video", "video/mp4"],
+    ["Áudio.webm", webm("A_OPUS"), "audio", "audio/webm"],
+    ["video.webm", webm("V_VP8", "A_OPUS"), "video", "video/webm"]
+  ]) {
+    const { file } = (await upload(firstLogin.body.token, name, data)).body;
+    assert.deepEqual([file.kind, file.type], [kind, type], name);
+  }
+  // A mensagem leva a duração e a forma de onda (de 0 a 100) para o player; a outra pessoa recebe igual.
+  const voiceUp = await upload(firstLogin.body.token, "Áudio 2026-10-19 14.03.12.m4a", mp4("soun"), "audio/mp4;codecs=mp4a.40.2");
+  const voiceSeen = until(dj2, "message", (message) => message.clientId === "cliente-voz");
+  const voiceSent = await withAck(dj1, "message", { file: voiceUp.body.file.key, voice: { duration: 75.94, peaks: [0, 50.6, 140, -3, "x", 100] }, clientId: "cliente-voz" });
+  assert.deepEqual(voiceSent.message.file.voice, { duration: 75.9, peaks: [0, 50, 100, 0, 0, 100] });
+  assert.equal(voiceSent.message.file.kind, "audio");
+  assert.deepEqual((await voiceSeen).file, voiceSent.message.file);
+  assert.equal((await fetch(`${baseUrl}/${voiceSent.message.file.url}`)).headers.get("content-type"), "audio/mp4");
+  assert.equal((await withAck(dj2, "message", { text: "Que voz linda", clientId: "cliente-voz-resposta", replyTo: voiceSent.message.id })).message.replyTo.text, "Mensagem de voz (1:15)");
+  // Quem abre o chat depois recebe a voz no histórico.
+  const reopened = await connect(secondLogin.body.token);
+  assert.deepEqual(reopened.history.items.find((message) => message.id === voiceSent.message.id).file.voice, voiceSent.message.file.voice);
+  reopened.disconnect();
+  // Forma de onda comprida demais é cortada; voz inválida, ou num arquivo que não toca, vira um anexo comum.
+  const longVoice = await upload(firstLogin.body.token, "longo.webm", webm("A_OPUS"));
+  assert.equal((await withAck(dj1, "message", { file: longVoice.body.file.key, voice: { duration: 3, peaks: Array(200).fill(50) }, clientId: "cliente-voz-longa" })).message.file.voice.peaks.length, 64);
+  for (const [index, [data, voice]] of [
+    [webm("A_OPUS"), { duration: 0, peaks: [] }],
+    [webm("A_OPUS"), { duration: 4000, peaks: [] }],
+    [webm("A_OPUS"), { duration: 5, peaks: "barras" }],
+    [webm("A_OPUS"), "voz"],
+    [Buffer.from("só texto"), { duration: 3, peaks: [10] }]
+  ].entries()) {
+    const up = await upload(firstLogin.body.token, "anexo.bin", data);
+    const sentPlain = await withAck(dj1, "message", { file: up.body.file.key, voice, clientId: `cliente-voz-ruim-${index}` });
+    assert.equal(sentPlain.ok, true);
+    assert.equal("voice" in sentPlain.message.file, false, `voz ruim ${index}`);
+  }
+  // Gravando: a outra pessoa vê "gravando um áudio".
+  const recording = next(dj2, "typing");
+  dj1.emit("typing", "audio");
+  assert.deepEqual(await recording, { name: "Pessoa 1", active: true, audio: true });
   dj1.disconnect();
   dj2.disconnect();
 
@@ -700,7 +747,7 @@ try {
   for (let i = 0; i < 14; i += 1) if ((await login("Pessoa 1", "errada")).status === 429) blocked += 1;
   assert.ok(blocked >= 1);
 
-  console.log("Integração PHP + MySQL aprovada: atualização do banco antigo, página, contas com senha própria, sala de duas pessoas, GIFs, fotos e arquivos (envio, entrega protegida, faixas de bytes, limpeza), foto de perfil (também em GIF), tema, papel de parede, bot de música, extensão, confirmação, deduplicação, respostas, reações, leitura, apagar, digitando, chamadas, long polling, sessões da versão Node, paginação, senha esquecida e persistência.");
+  console.log("Integração PHP + MySQL aprovada: atualização do banco antigo, página, contas com senha própria, sala de duas pessoas, GIFs, fotos e arquivos (envio, entrega protegida, faixas de bytes, limpeza), foto de perfil (também em GIF), tema, papel de parede, bot de música, mensagens de voz (áudio do navegador em MP4 e WebM, duração e forma de onda), extensão, confirmação, deduplicação, respostas, reações, leitura, apagar, digitando (e gravando áudio), chamadas, long polling, sessões da versão Node, paginação, senha esquecida e persistência.");
 } finally {
   servers.forEach((server) => server.kill());
   try {

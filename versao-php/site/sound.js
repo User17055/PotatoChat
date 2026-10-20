@@ -83,6 +83,13 @@ const sounds = {
   tap() {
     tone({ freq: 1200, duration: 0.03, volume: 0.06, type: "square" });
   },
+  // Gravação de áudio: um bipe curto subindo ao começar (toca antes de o microfone abrir) e descendo ao apagar.
+  record() {
+    tone({ freq: 740, to: 1180, duration: 0.07, volume: 0.13, type: "triangle" });
+  },
+  discard() {
+    tone({ freq: 620, to: 260, duration: 0.16, volume: 0.13, type: "triangle" });
+  },
   join() {
     [523.25, 659.25, 783.99].forEach((freq, i) => tone({ freq, duration: 0.25, volume: 0.12, start: i * 0.07 }));
   },

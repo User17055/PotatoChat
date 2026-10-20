@@ -13,7 +13,7 @@ O mesmo site (mesmo HTML, CSS, animações, sons, chamadas e extensão), adaptad
 | Uma senha da sala para os dois | Cada pessoa tem nome e senha próprios, guardados no banco |
 | Avatar com a inicial do nome | Foto de perfil, que cada um escolhe e troca quando quiser |
 | Um visual só | Temas (Escuro, Escuro total, Rosa, Roxo, Azul, Verde e Claro) e papel de parede com foto, salvos na conta de cada um |
-| Só texto e emoji | GIFs (busca do GIPHY), fotos, vídeos, áudios e arquivos, direto no campo de mensagem |
+| Só texto e emoji | GIFs (busca do GIPHY), fotos, vídeos, áudios e arquivos, direto no campo de mensagem, e mensagens de voz gravadas no chat |
 | Sem música | Bot de música: `/play` com nome ou link do YouTube ou do Spotify, tocando junto para os dois |
 
 As sessões têm o mesmo formato da versão Node. Se o chat continuar no mesmo endereço e com a mesma `token_secret`, ninguém precisa entrar de novo.
@@ -79,6 +79,19 @@ O clipe, ao lado do botão GIF, abre duas opções: **Foto ou vídeo** (no celul
 - **Onde ficam:** no próprio banco, na tabela `potato_files` (nada é gravado em pastas do servidor). Apagar a mensagem apaga o arquivo. Arquivo que subiu mas nunca virou mensagem (envio cancelado no meio) é apagado sozinho depois de um dia.
 - **Tamanho máximo:** 10 MB por arquivo, ou menos se a hospedagem limitar. O site confere sozinho o `post_max_size` do PHP e o `max_allowed_packet` do MySQL e usa o menor; quem passar do limite vê o máximo no aviso. Para aceitar arquivos maiores, aumente esses dois valores no painel da hospedagem (até 10 MB).
 - **Segurança:** o servidor descobre o tipo pelo conteúdo do arquivo, não pelo nome. Só imagem, vídeo e áudio de verdade abrem dentro do chat; o resto sempre baixa, para que uma página disfarçada nunca rode dentro do site. O endereço de cada arquivo usa uma chave aleatória e só chega a quem está logado.
+
+## Mensagens de voz
+
+Com o campo de mensagem vazio, o botão de enviar vira um **microfone**:
+
+- **Um toque** começa a gravar sem precisar segurar. A faixa mostra o tempo e a onda da voz; depois, é só tocar em enviar (o mesmo botão) ou na lixeira.
+- **Segurando**, grava enquanto o dedo (ou o mouse) estiver no botão e envia ao soltar. Deslizar para a esquerda cancela.
+- No computador, `Enter` com o microfone em foco começa a gravar e `Esc` cancela.
+- Enquanto alguém grava, a outra pessoa vê **"gravando áudio…"** no lugar do "digitando".
+- No balão: play, a forma de onda (tocar ou arrastar nela pula para aquele ponto), o tempo e a velocidade (1×, 1,5× ou 2×, guardada no aparelho). Áudios seguidos da mesma pessoa tocam em sequência, e a música do bot abaixa enquanto um áudio toca (só para quem está ouvindo).
+- **Formato:** o navegador grava em MP4/AAC quando sabe (Chrome no computador, Safari), que toca em qualquer aparelho; senão, em WebM/Opus. Se um aparelho não conseguir tocar o formato (por exemplo, um iPhone antigo com um áudio WebM), o chat converte o áudio na hora e toca do mesmo jeito.
+- O áudio sobe como os outros arquivos (mesma tabela `potato_files` e o mesmo limite de tamanho); a duração e a forma de onda ficam na mensagem. A gravação para sozinha em 15 minutos, ou antes, se chegar ao tamanho máximo, e é enviada.
+- O microfone precisa de HTTPS e da permissão do navegador. No painel lateral da extensão o Chrome não libera o microfone: para gravar, abra o chat numa aba. Durante uma chamada a gravação fica desligada.
 
 ## Bot de música (/play)
 
