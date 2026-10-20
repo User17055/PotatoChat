@@ -94,6 +94,7 @@ Com o campo de mensagem vazio, o botão de enviar vira um **microfone**:
   1. Crie uma chave grátis em [console.groq.com/keys](https://console.groq.com/keys) (o plano grátis dá para centenas de áudios por dia).
   2. Coloque a chave em `transcribe_key` no `config.php` e envie o `config.php` de novo.
   - Sem a chave, o botão nem aparece. O áudio só vai para o serviço quando alguém toca em **Transcrever**.
+  - Não quer o texto na tela? **Ocultar texto**, na linha do tempo do áudio, esconde a transcrição só para você (fica guardado no aparelho); **Ver texto** mostra de novo.
   - Prefere a OpenAI? Use `transcribe_url` = `https://api.openai.com/v1/audio/transcriptions` e `transcribe_model` = `gpt-4o-mini-transcribe`, com a chave de lá.
 - **Formato:** o navegador grava em MP4/AAC quando sabe (Chrome no computador, Safari), que toca em qualquer aparelho; senão, em WebM/Opus. Se um aparelho não conseguir tocar o formato (por exemplo, um iPhone antigo com um áudio WebM), o chat converte o áudio na hora e toca do mesmo jeito.
 - O áudio sobe como os outros arquivos (mesma tabela `potato_files` e o mesmo limite de tamanho); a duração e a forma de onda ficam na mensagem. A gravação para sozinha em 15 minutos, ou antes, se chegar ao tamanho máximo, e é enviada.

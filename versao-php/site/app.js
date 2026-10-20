@@ -1331,6 +1331,7 @@ messagesEl.addEventListener("click", (event) => {
   const voiceAction = event.target.closest("[data-voice]")?.dataset.voice;
   if (voiceAction && message.file?.voice) {
     if (voiceAction === "speed") return cycleSpeed();
+    if (voiceAction === "text") return toggleTranscript(message);
     return voiceAction === "transcribe" ? transcribeVoice(message) : toggleVoice(message);
   }
   if (event.target.closest("[data-view]")) return openViewer(message.file);
@@ -1845,10 +1846,33 @@ function voiceView(message) {
     ask.append(icon("captions"), busy ? "Transcrevendo…" : "Transcrever");
     meta.append(ask);
   }
+  // Já transcrito: o texto aparece embaixo, com o botão para ocultar (ou ver de novo) na linha do tempo.
+  const hidden = voice.text !== undefined && hiddenTexts.has(message.id);
+  if (voice.text !== undefined && message.id) {
+    const toggle = el("button", "voice-transcribe voice-ctl");
+    toggle.type = "button";
+    toggle.dataset.voice = "text";
+    toggle.setAttribute("aria-expanded", String(!hidden));
+    toggle.append(icon("captions"), hidden ? "Ver texto" : "Ocultar texto");
+    meta.append(toggle);
+  }
   node.append(play, wave, speed, meta);
-  if (voice.text !== undefined) node.append(el("p", `voice-text${voice.text ? "" : " empty"}`, voice.text || "Não deu para entender a fala desse áudio."));
+  if (voice.text !== undefined && !hidden) node.append(el("p", `voice-text${voice.text ? "" : " empty"}`, voice.text || "Não deu para entender a fala desse áudio."));
   paintVoiceNode(node, voiceState(message));
   return node;
+}
+
+// Transcrições que a pessoa ocultou (só neste aparelho; as mais antigas saem da lista depois de 500).
+const HIDDEN_TEXTS_KEY = "potato.hiddenTranscripts";
+const savedHidden = store.get("localStorage", HIDDEN_TEXTS_KEY);
+const hiddenTexts = new Set(Array.isArray(savedHidden) ? savedHidden : []);
+
+function toggleTranscript(message) {
+  if (!hiddenTexts.delete(message.id)) hiddenTexts.add(message.id);
+  store.set("localStorage", HIDDEN_TEXTS_KEY, [...hiddenTexts].slice(-500));
+  const node = messagesEl.querySelector(`[data-id="${CSS.escape(message.id)}"]`);
+  if (node) fill(node, message);
+  sound.play("tap");
 }
 
 // Transcrição (botão "Transcrever"): o servidor manda o áudio para o serviço do config.php e guarda o texto na
