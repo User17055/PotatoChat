@@ -430,9 +430,9 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 /* Segurando: só o tempo e o "deslize para cancelar". Sem segurar: lixeira, tempo e a onda ao vivo. */
 .composer:not(.rec-locked) :is(.rec-cancel, .rec-wave), .rec-locked .rec-slide { display: none; }
 
-/* No balão, tudo numa grade só (para alinhar): play à esquerda, a onda com a velocidade no canto direito e, embaixo,
-   o tempo (com o "Transcrever") na mesma linha da hora. A transcrição vem por último. */
-.bubble.is-voice { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; grid-template-rows: auto 34px auto auto; grid-template-areas: "quote quote quote" "play wave speed" "play time foot" "text text text"; column-gap: 10px; align-items: center; width: 300px; max-width: 100%; padding: 8px 10px 6px 8px; white-space: normal; }
+/* No balão, tudo numa grade só (para alinhar): o play na mesma linha da onda (centro com centro), a velocidade no
+   canto direito e, embaixo da onda, o tempo (com o "Transcrever") na mesma linha da hora. A transcrição vem por último. */
+.bubble.is-voice { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; grid-template-rows: auto 40px auto auto; grid-template-areas: "quote quote quote" "play wave speed" ". time foot" "text text text"; column-gap: 10px; align-items: center; width: 300px; max-width: 100%; padding: 8px 10px 6px 8px; white-space: normal; }
 .bubble.is-voice .reply-quote { grid-area: quote; margin-bottom: 8px; }
 .voice { display: contents; }
 .voice-play { position: relative; grid-area: play; width: 40px; height: 40px; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--accent); color: var(--accent-ink); box-shadow: 0 4px 12px #0003; transition: filter .2s, scale .2s; }

@@ -32,5 +32,5 @@ return [
     // Transcrição das mensagens de voz (botão "Transcrever" no áudio). Chave grátis do Groq: https://console.groq.com/keys
     // Vazio = sem transcrição (o botão nem aparece). O áudio vai para o serviço só quando alguém toca em "Transcrever".
     // Para usar a OpenAI: 'transcribe_url' => 'https://api.openai.com/v1/audio/transcriptions', 'transcribe_model' => 'gpt-4o-mini-transcribe'.
-    'transcribe_key' => '',
+    'transcribe_key' => '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',
 ];
