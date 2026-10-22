@@ -11,7 +11,7 @@ const PAGE_SIZE = 60;
 const REACTIONS = ['❤️', '😂', '😮', '😢', '👍', '🔥'];
 const MAX_BODY = 1000000;
 const EVENT_KEEP_MS = 120000;
-const SCHEMA_VERSION = '6';
+const SCHEMA_VERSION = '7';
 const MIN_PASSWORD = 4;
 const AVATAR_MAX = 400000;
 // GIF animado vai sem recortar (o recorte tiraria a animação): limite maior, que ainda cabe numa requisição.
@@ -251,6 +251,20 @@ function schema(): array
   created_at BIGINT NOT NULL,
   KEY file_message (message_id, created_at),
   KEY file_owner (owner, created_at)
+) $table",
+        // Nosso cantinho: o dia de cada um, a agenda, os sonhos e metas, as cartinhas e as preferências de cada um
+        // (um registro por coisa, com os detalhes em JSON; veja "nosso cantinho" mais abaixo).
+        'CREATE TABLE IF NOT EXISTS ' . t('items') . " (
+  n BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  id CHAR(36) $ascii NOT NULL,
+  kind VARCHAR(16) $ascii NOT NULL,
+  owner VARCHAR(64) $exact NOT NULL,
+  day VARCHAR(10) $ascii NULL,
+  data MEDIUMTEXT NOT NULL,
+  created_at VARCHAR(32) $ascii NOT NULL,
+  updated_at VARCHAR(32) $ascii NOT NULL,
+  UNIQUE KEY item_id (id),
+  KEY item_kind (kind, owner, day)
 ) $table",
     ];
 }
@@ -1444,24 +1458,956 @@ function speech_to_text(string $audio, string $type): string
         : ($status === 0 ? 'O servidor não conseguiu falar com o serviço de transcrição.' : 'O serviço de transcrição não conseguiu transcrever esse áudio.')));
 }
 
+// ---------- nosso cantinho: o dia de cada um, agenda, sonhos e metas, cartinhas ----------
+// Tudo na tabela items, um registro por coisa, com os detalhes em JSON (data):
+//   day    → o dia de uma pessoa (owner) numa data (day): hora em que acordou, refeições (com foto), hábitos feitos,
+//            humor, momentos (fotos com legenda) e como foi o dia. Só a própria pessoa muda o dia dela;
+//   event  → compromisso da agenda (day = a data). Os dois mudam e apagam qualquer um;
+//   goal   → sonho ou meta dos dois, com dinheiro guardado e/ou passos;
+//   letter → cartinha para a outra pessoa (só quem escreveu muda ou apaga);
+//   prefs  → de cada pessoa: os hábitos da rotina, os horários dos lembretes e os lembretes já mostrados.
+// As fotos ficam na tabela files, como as das mensagens, com o id do registro no lugar de message_id.
+
+const MEALS = ['cafe', 'almoco', 'lanche', 'jantar'];
+// Lembretes da rotina e o horário padrão de cada um (null = desligado). "rotina" só aparece para quem tem hábitos.
+const PROMPTS = ['acordar' => '09:30', 'cafe' => '10:30', 'almoco' => '13:30', 'lanche' => null, 'jantar' => '20:30', 'rotina' => '22:00'];
+const PROMPT_TEXT = [
+    'acordar' => ['Bom dia!', 'Que horas você acordou? Responda aqui mesmo (ex.: 7:30).'],
+    'cafe' => ['Café da manhã', 'O que você tomou de café hoje?'],
+    'almoco' => ['Almoço', 'O que você almoçou hoje?'],
+    'lanche' => ['Lanchinho', 'Bateu a fome? O que foi o lanche?'],
+    'jantar' => ['Jantar', 'E o jantar, o que foi?'],
+    'rotina' => ['Rotina do dia', 'Fez suas coisinhas hoje?'],
+];
+// Ícones que dá para escolher (nomes dos ícones do sprite no index.php; mesmas listas do app.js) e os humores do dia.
+const EVENT_ICONS = ['calendar', 'heart', 'film', 'utensils', 'cake', 'plane', 'gift', 'stethoscope', 'graduation', 'briefcase', 'cart', 'dumbbell'];
+const GOAL_ICONS = ['sparkles', 'palmtree', 'plane', 'home', 'dog', 'gem', 'car', 'graduation', 'piggy', 'gamepad', 'chef', 'globe'];
+const MOODS = ['feliz', 'rindo', 'amor', 'energia', 'deboa', 'sono', 'triste', 'raiva', 'doente'];
+const HABITS_MAX = 12;
+const MOMENTS_MAX = 8;
+const STEPS_MAX = 20;
+const LETTER_MAX = 20000;
+const REPEATS = ['none', 'weekly', 'monthly', 'yearly'];
+// Minutos antes do compromisso (0 = na hora; 1440 = um dia antes).
+const REMINDERS = [0, 15, 30, 60, 120, 1440];
+const PAPERS = ['creme', 'rosa', 'azul', 'lilas', 'verde'];
+
+function clean_day($value): ?string
+{
+    $value = str($value);
+    return preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $value, $match) && checkdate((int) $match[2], (int) $match[3], (int) $match[1]) ? $value : null;
+}
+
+function clean_clock($value): ?string
+{
+    return preg_match('/^([01]?\d|2[0-3]):([0-5]\d)$/', str($value), $match) ? sprintf('%02d:%s', $match[1], $match[2]) : null;
+}
+
+// Uma linha só (título, o que comeu, legenda).
+function clean_line($value, int $max): string
+{
+    return text_slice(text_trim(preg_replace('/\s+/u', ' ', str($value)) ?? ''), $max);
+}
+
+// Texto com várias linhas (cartinha, como foi o dia): no máximo duas linhas em branco seguidas.
+function clean_body($value, int $max): string
+{
+    $text = str_replace(["\r\n", "\r"], "\n", str($value));
+    return text_slice(text_trim(preg_replace("/\n{4,}/", "\n\n\n", $text) ?? $text), $max);
+}
+
+// Uma das opções da lista (ícone ou humor); fora dela, o padrão.
+function clean_choice($value, array $allowed, ?string $default): ?string
+{
+    return in_array($value, $allowed, true) ? $value : $default;
+}
+
+function clean_money($value): ?float
+{
+    return is_int($value) || is_float($value) || (is_string($value) && is_numeric($value)) ? round(max(-1e9, min(1e9, (float) $value)), 2) : null;
+}
+
+function find_item(string $kind, string $id): ?array
+{
+    if (!preg_match('/^[0-9a-f-]{36}$/', $id)) return null;
+    $row = query('SELECT * FROM ' . t('items') . ' WHERE id = ? AND kind = ?', [$id, $kind])->fetch();
+    return $row ?: null;
+}
+
+// O registro de uma pessoa que é um só (prefs) ou um por dia (day).
+function own_item(string $kind, string $owner, ?string $day = null): ?array
+{
+    $row = query('SELECT * FROM ' . t('items') . ' WHERE kind = ? AND owner = ? AND day <=> ? ORDER BY n LIMIT 1', [$kind, $owner, $day])->fetch();
+    return $row ?: null;
+}
+
+function item_data(array $row): array
+{
+    $data = json_decode((string) $row['data'], true);
+    return is_array($data) ? $data : [];
+}
+
+// Grava (ou cria, com o id já escolhido) e devolve a linha como ficou.
+function save_item(?array $row, string $id, string $kind, string $owner, ?string $day, array $data): array
+{
+    $now = iso();
+    if ($row) {
+        query('UPDATE ' . t('items') . ' SET day = ?, data = ?, updated_at = ? WHERE n = ?', [$day, encode($data), $now, $row['n']]);
+        return array_merge($row, ['day' => $day, 'data' => encode($data), 'updated_at' => $now]);
+    }
+    query('INSERT INTO ' . t('items') . ' (id, kind, owner, day, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)', [$id, $kind, $owner, $day, encode($data), $now, $now]);
+    return ['id' => $id, 'kind' => $kind, 'owner' => $owner, 'day' => $day, 'data' => encode($data), 'created_at' => $now, 'updated_at' => $now];
+}
+
+function delete_item(array $row): void
+{
+    query('DELETE FROM ' . t('items') . ' WHERE n = ?', [$row['n']]);
+    query('DELETE FROM ' . t('files') . ' WHERE message_id = ?', [$row['id']]);
+}
+
+// O que vai para o navegador: os detalhes, com o id, quem criou e quando.
+function item_public(array $row): array
+{
+    return ['id' => $row['id'], 'owner' => $row['owner'], 'createdAt' => $row['created_at'], 'updatedAt' => $row['updated_at']] + item_data($row);
+}
+
+// Foto de um registro: a chave de uma imagem enviada por api.php?action=upload (ainda solta, de quem está salvando)
+// ou que já é do registro. Devolve o que fica guardado, ou null.
+function item_photo($photo, string $owner, string $itemId): ?array
+{
+    $key = is_array($photo) ? str($photo['key'] ?? '') : str($photo);
+    if (!preg_match('/^[0-9a-f]{32}$/', $key)) return null;
+    $file = query('SELECT width, height FROM ' . t('files') . " WHERE file_key = ? AND kind = 'image' AND (message_id = ? OR (message_id IS NULL AND owner = ?))", [$key, $itemId, $owner])->fetch();
+    return $file ? ['key' => $key, 'url' => file_url($key), 'width' => (int) $file['width'], 'height' => (int) $file['height']] : null;
+}
+
+// Prende as fotos ao registro (não são mais apagadas como envio abandonado) e apaga as que saíram dele.
+function keep_photos(string $itemId, string $owner, array $keys): void
+{
+    $keys = array_values(array_unique($keys));
+    $marks = implode(', ', array_fill(0, count($keys), '?'));
+    query('DELETE FROM ' . t('files') . ' WHERE message_id = ?' . ($keys ? " AND file_key NOT IN ($marks)" : ''), array_merge([$itemId], $keys));
+    if ($keys) query('UPDATE ' . t('files') . " SET message_id = ? WHERE message_id IS NULL AND owner = ? AND file_key IN ($marks)", array_merge([$itemId, $owner], $keys));
+}
+
+function peer_of(string $name): ?string
+{
+    foreach (users() as $user) if ($user !== $name) return $user;
+    return null;
+}
+
+// ---- preferências de cada um: hábitos, lembretes e lembretes já mostrados ----
+
+function prefs_data(string $name): array
+{
+    $row = own_item('prefs', $name);
+    $data = $row ? item_data($row) : [];
+    $prompts = is_array($data['prompts'] ?? null) ? array_intersect_key($data['prompts'], PROMPTS) : [];
+    return [
+        'habits' => is_array($data['habits'] ?? null) ? $data['habits'] : [],
+        'prompts' => array_merge(PROMPTS, $prompts),
+        'fired' => is_array($data['fired'] ?? null) ? $data['fired'] : [],
+    ];
+}
+
+function save_prefs(string $name, array $prefs): void
+{
+    $row = own_item('prefs', $name);
+    save_item($row, $row['id'] ?? uuid(), 'prefs', $name, null, $prefs);
+}
+
+function save_habits(array $me, $list): array
+{
+    $habits = [];
+    foreach (array_slice(is_array($list) ? $list : [], 0, HABITS_MAX) as $habit) {
+        if (!is_array($habit) || ($text = clean_line($habit['text'] ?? '', 60)) === '') continue;
+        $id = preg_match('/^[a-z0-9]{6,16}$/', str($habit['id'] ?? '')) ? $habit['id'] : bin2hex(random_bytes(4));
+        $habits[] = ['id' => $id, 'text' => $text];
+    }
+    $prefs = prefs_data($me['name']);
+    $prefs['habits'] = $habits;
+    save_prefs($me['name'], $prefs);
+    emit('us', ['kind' => 'habits', 'by' => $me['name'], 'owner' => $me['name'], 'habits' => $habits]);
+    return ['ok' => true, 'habits' => $habits];
+}
+
+function save_prompts(array $me, $prompts): array
+{
+    $prefs = prefs_data($me['name']);
+    foreach (array_keys(PROMPTS) as $key) {
+        if (is_array($prompts) && array_key_exists($key, $prompts)) $prefs['prompts'][$key] = clean_clock($prompts[$key]);
+    }
+    save_prefs($me['name'], $prefs);
+    // Os outros aparelhos da pessoa (inclusive o app do Android em segundo plano) refazem a lista de lembretes.
+    emit('us', ['kind' => 'prompts', 'by' => $me['name']], 'self', $me);
+    return ['ok' => true, 'prompts' => $prefs['prompts']];
+}
+
+// ---- o dia de cada um ----
+
+function day_public(?array $row, string $owner, string $day): array
+{
+    $data = array_merge(['wake' => null, 'meals' => [], 'done' => [], 'mood' => null, 'note' => '', 'moments' => []], $row ? item_data($row) : []);
+    $data['meals'] = (object) $data['meals'];
+    return ['owner' => $owner, 'day' => $day, 'updatedAt' => $row['updated_at'] ?? null] + $data;
+}
+
+function us_days(string $day): array
+{
+    $days = [];
+    foreach (users() as $name) $days[$name] = day_public(own_item('day', $name, $day), $name, $day);
+    return $days;
+}
+
+// Muda só o que veio: wake ("07:30" ou null), meal ({name, text, photo}), done (ids dos hábitos feitos), mood, note
+// e moments ([{photo, text}]). Cada pessoa só muda o próprio dia.
+function save_day(array $me, array $body): array
+{
+    $day = clean_day($body['day'] ?? null);
+    if (!$day) return ['ok' => false, 'error' => 'Dia inválido.'];
+    $row = own_item('day', $me['name'], $day);
+    $id = $row['id'] ?? uuid();
+    $data = (array) day_public($row, $me['name'], $day);
+    unset($data['owner'], $data['day'], $data['updatedAt']);
+    $data['meals'] = (array) $data['meals'];
+    $meal = null;
+    if (array_key_exists('wake', $body)) $data['wake'] = clean_clock($body['wake']);
+    if (is_array($body['meal'] ?? null)) {
+        $meal = str($body['meal']['name'] ?? '');
+        if (!in_array($meal, MEALS, true)) return ['ok' => false, 'error' => 'Refeição desconhecida.'];
+        $entry = array_filter(['text' => clean_line($body['meal']['text'] ?? '', 300), 'photo' => item_photo($body['meal']['photo'] ?? null, $me['name'], $id)]);
+        if ($entry) $data['meals'][$meal] = $entry + ['at' => iso()];
+        else unset($data['meals'][$meal]);
+    }
+    if (is_array($body['done'] ?? null)) {
+        $done = array_map('str', $body['done']);
+        $data['done'] = array_values(array_filter(array_column(prefs_data($me['name'])['habits'], 'id'), fn($id) => in_array($id, $done, true)));
+    }
+    if (array_key_exists('mood', $body)) $data['mood'] = clean_choice($body['mood'], MOODS, null);
+    if (array_key_exists('note', $body)) $data['note'] = clean_body($body['note'], 2000);
+    if (is_array($body['moments'] ?? null)) {
+        $moments = [];
+        foreach (array_slice($body['moments'], 0, MOMENTS_MAX) as $moment) {
+            $photo = is_array($moment) ? item_photo($moment['photo'] ?? null, $me['name'], $id) : null;
+            if ($photo) $moments[] = ['photo' => $photo, 'text' => clean_line($moment['text'] ?? '', 200)];
+        }
+        $data['moments'] = $moments;
+    }
+    $photos = array_merge(array_filter(array_map(fn($entry) => $entry['photo']['key'] ?? null, $data['meals'])), array_map(fn($moment) => $moment['photo']['key'], $data['moments']));
+    $saved = save_item($row, $id, 'day', $me['name'], $day, $data);
+    keep_photos($id, $me['name'], $photos);
+    $item = day_public($saved, $me['name'], $day);
+    emit('us', ['kind' => 'day', 'by' => $me['name'], 'item' => $item, 'meal' => $meal]);
+    return ['ok' => true, 'item' => $item];
+}
+
+// "7", "7h", "7:30", "07h30", "7 e meia" → "07:30". Sem número, null.
+function wake_time(string $text): ?string
+{
+    if (!preg_match('/(\d{1,2})(?:\s*[h:.]\s*(\d{2}))?/u', $text, $match)) return null;
+    $minute = isset($match[2]) && $match[2] !== '' ? (int) $match[2] : (preg_match('/meia/iu', $text) ? 30 : 0);
+    return (int) $match[1] < 24 && $minute < 60 ? sprintf('%02d:%02d', $match[1], $minute) : null;
+}
+
+// Resposta a um lembrete da rotina (direto na notificação do Android ou no aviso do site): a hora em que acordou
+// (sem número = a hora do aparelho, clock), o que comeu (a foto que já estava fica) e, na rotina, todos os hábitos feitos.
+function us_reply(array $me, array $body): array
+{
+    $field = str($body['field'] ?? '');
+    $day = clean_day($body['day'] ?? null);
+    $text = clean_line($body['text'] ?? '', 300);
+    if (!$day) return ['ok' => false, 'error' => 'Dia inválido.'];
+    if ($field === 'acordar') {
+        $wake = wake_time($text) ?? clean_clock($body['clock'] ?? null);
+        return $wake ? save_day($me, ['day' => $day, 'wake' => $wake]) : ['ok' => false, 'error' => 'Diga a hora (ex.: 7:30).'];
+    }
+    if (in_array($field, MEALS, true)) {
+        if ($text === '') return ['ok' => false, 'error' => 'Conte o que você comeu.'];
+        $photo = ((array) day_public(own_item('day', $me['name'], $day), $me['name'], $day)['meals'])[$field]['photo'] ?? null;
+        return save_day($me, ['day' => $day, 'meal' => ['name' => $field, 'text' => $text, 'photo' => $photo]]);
+    }
+    if ($field === 'rotina') return save_day($me, ['day' => $day, 'done' => array_column(prefs_data($me['name'])['habits'], 'id')]);
+    return ['ok' => false, 'error' => 'Lembrete desconhecido.'];
+}
+
+// ---- agenda ----
+
+function clean_event(array $body): ?array
+{
+    $title = clean_line($body['title'] ?? '', 120);
+    $date = clean_day($body['date'] ?? null);
+    if ($title === '' || !$date) return null;
+    $who = str($body['who'] ?? '');
+    $remind = $body['remind'] ?? null;
+    $time = clean_clock($body['time'] ?? null);
+    // Até que horas (opcional): só com hora de começar, e depois dela.
+    $end = $time ? clean_clock($body['end'] ?? null) : null;
+    return [
+        'title' => $title,
+        'date' => $date,
+        'time' => $time,
+        'end' => $end !== null && $end > $time ? $end : null,
+        'place' => clean_line($body['place'] ?? '', 120),
+        'note' => clean_body($body['note'] ?? '', 1000),
+        'icon' => clean_choice($body['icon'] ?? null, EVENT_ICONS, 'calendar'),
+        'who' => in_array($who, users(), true) ? $who : 'ambos',
+        'repeat' => in_array($body['repeat'] ?? '', REPEATS, true) ? $body['repeat'] : 'none',
+        'remind' => in_array($remind, REMINDERS, true) ? $remind : null,
+    ];
+}
+
+// O compromisso acontece nessa data? Toda semana, todo mês (dia 31 cai no último dia dos meses mais curtos) ou todo ano.
+function event_on(array $event, string $date): bool
+{
+    if ($date === $event['date']) return true;
+    if (($event['repeat'] ?? 'none') === 'none' || $date < $event['date']) return false;
+    [$year, $month, $day] = array_map('intval', explode('-', $date));
+    [, $startMonth, $startDay] = array_map('intval', explode('-', $event['date']));
+    $last = (int) gmdate('t', gmmktime(0, 0, 0, $month, 1, $year));
+    switch ($event['repeat']) {
+        case 'weekly':
+            return gmdate('w', strtotime("$date UTC")) === gmdate('w', strtotime("{$event['date']} UTC"));
+        case 'monthly':
+            return $day === min($startDay, $last);
+        case 'yearly':
+            return $month === $startMonth && $day === min($startDay, $last);
+    }
+    return false;
+}
+
+// ---- sonhos e metas ----
+
+function clean_goal(array $body, array $old): ?array
+{
+    $title = clean_line($body['title'] ?? '', 120);
+    if ($title === '') return null;
+    $steps = [];
+    foreach (array_slice(is_array($body['steps'] ?? null) ? $body['steps'] : [], 0, STEPS_MAX) as $step) {
+        if (!is_array($step) || ($text = clean_line($step['text'] ?? '', 120)) === '') continue;
+        $id = preg_match('/^[a-z0-9]{6,16}$/', str($step['id'] ?? '')) ? $step['id'] : bin2hex(random_bytes(4));
+        $steps[] = ['id' => $id, 'text' => $text, 'done' => ($step['done'] ?? false) === true];
+    }
+    $target = clean_money($body['target'] ?? null);
+    return [
+        'title' => $title,
+        'icon' => clean_choice($body['icon'] ?? null, GOAL_ICONS, 'sparkles'),
+        'note' => clean_body($body['note'] ?? '', 1000),
+        'target' => $target !== null && $target > 0 ? $target : null,
+        'due' => clean_day($body['due'] ?? null),
+        'steps' => $steps,
+        'saved' => $old['saved'] ?? 0,
+        'deposits' => $old['deposits'] ?? [],
+        'done' => $old['done'] ?? false,
+        'doneAt' => $old['doneAt'] ?? null,
+    ];
+}
+
+// ---- cartinhas ----
+
+// Na lista vai só o começo do texto; a cartinha inteira chega quando alguém abre (letter:open).
+function letter_public(array $row, bool $full = false): array
+{
+    $item = item_public($row);
+    if (!$full) {
+        $item['preview'] = text_slice(preg_replace('/\s+/u', ' ', (string) ($item['body'] ?? '')) ?? '', 140);
+        unset($item['body']);
+    }
+    return $item;
+}
+
+// ---- lembretes ----
+
+// Lembretes das próximas 48 horas de quem pediu: os da rotina e os dos compromissos dela (ou dos dois). tz = minutos
+// do fuso do aparelho em relação ao UTC (Brasília: -180). Se a rotina já foi respondida, quem decide é o us_claim.
+function us_schedule(array $me, array $body): array
+{
+    $tz = max(-840, min(840, (int) ($body['tz'] ?? 0)));
+    $now = now_ms();
+    $at = fn(string $date, string $clock): int => (strtotime("$date $clock:00 UTC") - $tz * 60) * 1000;
+    $today = gmdate('Y-m-d', intdiv($now, 1000) + $tz * 60);
+    $dates = array_map(fn($offset) => gmdate('Y-m-d', strtotime("$today UTC") + $offset * 86400), [-1, 0, 1, 2]);
+    $fits = fn(int $time): bool => $time > $now - 2 * 3600000 && $time < $now + 48 * 3600000;
+    $list = [];
+    foreach (prefs_data($me['name'])['prompts'] as $field => $clock) {
+        foreach ([$dates[1], $dates[2]] as $date) {
+            if (!$clock || !$fits($time = $at($date, $clock))) continue;
+            [$title, $text] = PROMPT_TEXT[$field];
+            $list[] = ['key' => "$date $field", 'at' => $time, 'kind' => 'prompt', 'field' => $field, 'day' => $date, 'title' => $title, 'text' => $text, 'reply' => $field !== 'rotina'];
+        }
+    }
+    foreach (query('SELECT * FROM ' . t('items') . " WHERE kind = 'event'")->fetchAll() as $row) {
+        $event = item_data($row);
+        if (!in_array($event['who'] ?? 'ambos', ['ambos', $me['name']], true) || !isset($event['remind'])) continue;
+        foreach ($dates as $date) {
+            $start = $at($date, $event['time'] ?? '09:00');
+            if (!event_on($event, $date) || !$fits($time = $start - $event['remind'] * 60000)) continue;
+            $when = $event['remind'] === 0 ? 'Agora' : ($event['remind'] >= 1440 ? 'Amanhã' : 'Daqui a ' . ($event['remind'] < 60 ? "{$event['remind']} minutos" : ($event['remind'] === 60 ? '1 hora' : ($event['remind'] / 60) . ' horas')));
+            $hours = $event['time'] ? $event['time'] . (empty($event['end']) ? '' : "–{$event['end']}") : '';
+            $text = $when . ($hours ? ($event['remind'] >= 1440 ? ' às ' : ' · ') . $hours : ' (o dia todo)') . ($event['place'] !== '' ? " · {$event['place']}" : '');
+            $list[] = ['key' => "ev {$row['id']} $date", 'at' => $time, 'kind' => 'event', 'id' => $row['id'], 'day' => $date, 'title' => $event['title'], 'text' => $text, 'reply' => false];
+        }
+    }
+    usort($list, fn($a, $b) => $a['at'] <=> $b['at']);
+    return ['ok' => true, 'items' => $list, 'serverNow' => $now];
+}
+
+// Antes de mostrar um lembrete (no app do Android ou no site aberto): só o primeiro aparelho que pedir mostra, e o da
+// rotina só aparece se ainda não foi respondido. No da rotina dos hábitos, o texto diz o que falta.
+function us_claim(array $me, array $body): array
+{
+    $key = text_slice(str($body['key'] ?? ''), 80);
+    $prefs = prefs_data($me['name']);
+    if ($key === '' || in_array($key, $prefs['fired'], true)) return ['ok' => true, 'fire' => false];
+    $extra = [];
+    if (preg_match('/^(\d{4}-\d{2}-\d{2}) ([a-z]+)$/', $key, $match)) {
+        [, $day, $field] = $match;
+        if (!array_key_exists($field, PROMPTS)) return ['ok' => true, 'fire' => false];
+        $data = day_public(own_item('day', $me['name'], $day), $me['name'], $day);
+        $pending = array_values(array_filter($prefs['habits'], fn($habit) => !in_array($habit['id'], $data['done'], true)));
+        $answered = $field === 'acordar' ? $data['wake'] !== null : ($field === 'rotina' ? !$pending : isset(((array) $data['meals'])[$field]));
+        if ($answered) return ['ok' => true, 'fire' => false];
+        if ($field === 'rotina') $extra['text'] = 'Falta: ' . implode(', ', array_column(array_slice($pending, 0, 6), 'text')) . (count($pending) > 6 ? '…' : '');
+    }
+    $prefs['fired'] = array_slice(array_merge([$key], $prefs['fired']), 0, 300);
+    save_prefs($me['name'], $prefs);
+    return ['ok' => true, 'fire' => true] + $extra;
+}
+
+// ---- tudo junto ----
+
+// Ao abrir: a agenda, os sonhos e metas, as cartinhas (sem o texto inteiro), os hábitos dos dois, os lembretes de
+// quem pediu e o dia pedido (day) dos dois.
+function us_load(array $me, array $body): array
+{
+    $result = ['ok' => true, 'events' => [], 'goals' => [], 'letters' => [], 'habits' => [], 'prompts' => PROMPTS];
+    foreach (users() as $name) $result['habits'][$name] = [];
+    foreach (query('SELECT * FROM ' . t('items') . " WHERE kind IN ('event', 'goal', 'letter', 'prefs') ORDER BY n")->fetchAll() as $row) {
+        if ($row['kind'] === 'prefs') {
+            $prefs = prefs_data($row['owner']);
+            $result['habits'][$row['owner']] = $prefs['habits'];
+            if ($row['owner'] === $me['name']) $result['prompts'] = $prefs['prompts'];
+        } else {
+            $result[$row['kind'] . 's'][] = $row['kind'] === 'letter' ? letter_public($row) : item_public($row);
+        }
+    }
+    $result['habits'] = (object) $result['habits'];
+    $day = clean_day($body['day'] ?? null);
+    if ($day) $result['days'] = us_days($day);
+    return $result;
+}
+
+function us_act(array $me, array $body): array
+{
+    $op = str($body['op'] ?? '');
+    $id = str($body['id'] ?? '');
+    switch ($op) {
+        case 'load':
+            return us_load($me, $body);
+
+        case 'day':
+            $day = clean_day($body['day'] ?? null);
+            return $day ? ['ok' => true, 'days' => us_days($day)] : ['ok' => false, 'error' => 'Dia inválido.'];
+
+        case 'day:save':
+            return save_day($me, $body);
+
+        case 'reply':
+            return us_reply($me, $body);
+
+        case 'habits':
+            return save_habits($me, $body['habits'] ?? null);
+
+        case 'prompts':
+            return save_prompts($me, $body['prompts'] ?? null);
+
+        case 'schedule':
+            return us_schedule($me, $body);
+
+        case 'claim':
+            return us_claim($me, $body);
+
+        case 'event:save':
+            $row = $id !== '' ? find_item('event', $id) : null;
+            if ($id !== '' && !$row) return ['ok' => false, 'error' => 'Esse compromisso foi apagado.'];
+            $event = clean_event($body);
+            if (!$event) return ['ok' => false, 'error' => 'Dê um nome e uma data para o compromisso.'];
+            $item = item_public(save_item($row, $row['id'] ?? uuid(), 'event', $row['owner'] ?? $me['name'], $event['date'], $event));
+            emit('us', ['kind' => 'event', 'by' => $me['name'], 'item' => $item, 'created' => !$row]);
+            return ['ok' => true, 'item' => $item];
+
+        case 'event:delete':
+            $row = find_item('event', $id);
+            if ($row) {
+                delete_item($row);
+                emit('us', ['kind' => 'event', 'by' => $me['name'], 'id' => $id, 'deleted' => true, 'title' => item_data($row)['title'] ?? '']);
+            }
+            return ['ok' => true];
+
+        case 'goal:save':
+            $row = $id !== '' ? find_item('goal', $id) : null;
+            if ($id !== '' && !$row) return ['ok' => false, 'error' => 'Esse sonho foi apagado.'];
+            $goal = clean_goal($body, $row ? item_data($row) : []);
+            if (!$goal) return ['ok' => false, 'error' => 'Dê um nome para o sonho ou a meta.'];
+            $item = item_public(save_item($row, $row['id'] ?? uuid(), 'goal', $row['owner'] ?? $me['name'], null, $goal));
+            emit('us', ['kind' => 'goal', 'by' => $me['name'], 'item' => $item, 'action' => $row ? 'edit' : 'new']);
+            return ['ok' => true, 'item' => $item];
+
+        // Guardar (ou tirar, com valor negativo) dinheiro; marcar um passo; marcar como realizado.
+        case 'goal:deposit':
+        case 'goal:step':
+        case 'goal:done':
+            $row = find_item('goal', $id);
+            if (!$row) return ['ok' => false, 'error' => 'Esse sonho foi apagado.'];
+            $goal = item_data($row);
+            $extra = [];
+            if ($op === 'goal:deposit') {
+                $amount = clean_money($body['amount'] ?? null);
+                if (!$amount) return ['ok' => false, 'error' => 'Diga quanto.'];
+                $amount = max($amount, -($goal['saved'] ?? 0));
+                $goal['saved'] = round(($goal['saved'] ?? 0) + $amount, 2);
+                $goal['deposits'] = array_slice(array_merge([['by' => $me['name'], 'amount' => $amount, 'at' => iso()]], $goal['deposits'] ?? []), 0, 30);
+                $extra['amount'] = $amount;
+            } elseif ($op === 'goal:step') {
+                foreach ($goal['steps'] as &$step) if ($step['id'] === str($body['step'] ?? '')) $step['done'] = ($body['done'] ?? false) === true;
+                unset($step);
+            } else {
+                $goal['done'] = ($body['done'] ?? false) === true;
+                $goal['doneAt'] = $goal['done'] ? iso() : null;
+            }
+            $item = item_public(save_item($row, $row['id'], 'goal', $row['owner'], null, $goal));
+            emit('us', ['kind' => 'goal', 'by' => $me['name'], 'item' => $item, 'action' => substr($op, 5)] + $extra);
+            return ['ok' => true, 'item' => $item];
+
+        case 'goal:delete':
+            $row = find_item('goal', $id);
+            if ($row) {
+                delete_item($row);
+                emit('us', ['kind' => 'goal', 'by' => $me['name'], 'id' => $id, 'deleted' => true]);
+            }
+            return ['ok' => true];
+
+        case 'letter:save':
+            $row = $id !== '' ? find_item('letter', $id) : null;
+            if ($id !== '' && !$row) return ['ok' => false, 'error' => 'Essa cartinha foi apagada.'];
+            if ($row && $row['owner'] !== $me['name']) return ['ok' => false, 'error' => 'Só quem escreveu muda a cartinha.'];
+            $text = clean_body($body['body'] ?? '', LETTER_MAX);
+            if ($text === '') return ['ok' => false, 'error' => 'Escreva alguma coisa na cartinha.'];
+            $old = $row ? item_data($row) : [];
+            $letter = [
+                'title' => clean_line($body['title'] ?? '', 120) ?: 'Cartinha',
+                'body' => $text,
+                'paper' => in_array($body['paper'] ?? '', PAPERS, true) ? $body['paper'] : 'creme',
+                'to' => $old['to'] ?? peer_of($me['name']),
+                'readAt' => $old['readAt'] ?? null,
+                'edited' => (bool) $row,
+            ];
+            $saved = save_item($row, $row['id'] ?? uuid(), 'letter', $me['name'], null, $letter);
+            emit('us', ['kind' => 'letter', 'by' => $me['name'], 'item' => letter_public($saved), 'action' => $row ? 'edit' : 'new']);
+            return ['ok' => true, 'item' => letter_public($saved, true)];
+
+        // Abrir a cartinha inteira. A primeira vez que a outra pessoa abre, ela fica lida (quem escreveu vê).
+        case 'letter:open':
+            $row = find_item('letter', $id);
+            if (!$row) return ['ok' => false, 'error' => 'Essa cartinha foi apagada.'];
+            $letter = item_data($row);
+            if ($row['owner'] !== $me['name'] && empty($letter['readAt'])) {
+                $letter['readAt'] = iso();
+                // Ler não conta como edição: a data de atualização continua a de quem escreveu.
+                query('UPDATE ' . t('items') . ' SET data = ? WHERE n = ?', [encode($letter), $row['n']]);
+                $row['data'] = encode($letter);
+                emit('us', ['kind' => 'letter', 'by' => $me['name'], 'item' => letter_public($row), 'action' => 'read']);
+            }
+            return ['ok' => true, 'item' => letter_public($row, true)];
+
+        case 'letter:delete':
+            $row = find_item('letter', $id);
+            if ($row && $row['owner'] !== $me['name']) return ['ok' => false, 'error' => 'Só quem escreveu apaga a cartinha.'];
+            if ($row) {
+                delete_item($row);
+                emit('us', ['kind' => 'letter', 'by' => $me['name'], 'id' => $id, 'deleted' => true]);
+            }
+            return ['ok' => true];
+    }
+    return ['ok' => false, 'error' => 'Ação desconhecida.'];
+}
+
+// ---------- joguinhos ----------
+// Cada jogo é uma mensagem na conversa (media.game, de quem começou), que muda a cada jogada (message:update).
+// Cartas:
+//   vd       → verdade ou desafio: a outra pessoa (for) escolhe, a carta aparece e ela responde no chat;
+//   quem     → quem é mais provável…: cada um vota num dos dois;
+//   isso     → isso ou aquilo: cada um escolhe uma das duas opções;
+//   pergunta → perguntinha: os dois respondem.
+// Votos e respostas só aparecem quando os dois tiverem votado ou respondido. As cartas vêm de lib/jogos.php e não
+// se repetem até o baralho acabar (os já usados ficam na tabela de configurações, nome "games").
+// Tabuleiro (seats: quem começou é a cadeira 0 e joga primeiro; o servidor confere cada jogada e a vez):
+//   velha    → jogo da velha (X é quem começou);
+//   dama     → dama (as brancas são de quem começou): pedra anda uma casa para a frente e captura para os dois
+//              lados, dama anda e captura de longe, captura é obrigatória e continua enquanto der;
+//   memoria  → jogo da memória: 8 pares de figuras; acertou, joga de novo. As cartas viradas para baixo nunca saem do servidor;
+//   stop     → stop (adedonha): uma letra por rodada; quem preencher tudo pede STOP e a rodada acaba para os dois.
+//              10 pontos por resposta certa, 5 se os dois escreveram a mesma.
+
+const GAME_NAMES = [
+    'vd' => 'Verdade ou desafio', 'quem' => 'Quem é mais provável?', 'isso' => 'Isso ou aquilo', 'pergunta' => 'Perguntinha',
+    'velha' => 'Jogo da velha', 'dama' => 'Dama', 'memoria' => 'Jogo da memória', 'stop' => 'Stop',
+];
+// As figuras das cartas da memória (ícones do sprite no index.php).
+const MEMORY_FACES = ['heart', 'star', 'dog', 'cat', 'pizza', 'flower', 'music', 'moon', 'sun', 'cloud', 'gift', 'coffee', 'fish', 'cherry', 'gem', 'cake'];
+const STOP_CATEGORIES = ['Nome', 'Animal', 'Comida', 'Lugar', 'Objeto', 'Coisa fofa'];
+const STOP_LETTERS = 'ABCDEFGHIJLMNOPRSTUV';
+const TIC_LINES = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]];
+
+// Dama: casas 0 a 63, linha a linha de cima para baixo. As brancas (w) começam embaixo e sobem; as pretas (b), em
+// cima. Maiúscula = dama.
+function dama_board(): array
+{
+    $board = array_fill(0, 64, '');
+    foreach ($board as $index => $piece) {
+        $row = intdiv($index, 8);
+        if (($row + $index % 8) % 2 === 1 && $row !== 3 && $row !== 4) $board[$index] = $row < 3 ? 'b' : 'w';
+    }
+    return $board;
+}
+
+// Jogadas possíveis de uma cor ([from, to, over]: over = a peça capturada). Havendo captura, só valem as capturas;
+// no meio de uma sequência (chain), só as capturas da peça que está capturando.
+function dama_moves(array $board, string $color, ?int $chain = null): array
+{
+    $captures = [];
+    $steps = [];
+    $forward = $color === 'w' ? -1 : 1;
+    $inside = fn(int $row, int $col): bool => $row >= 0 && $row < 8 && $col >= 0 && $col < 8;
+    foreach ($board as $from => $piece) {
+        if ($piece === '' || strtolower($piece) !== $color || ($chain !== null && $from !== $chain)) continue;
+        $king = $piece !== strtolower($piece);
+        foreach ([[-1, -1], [-1, 1], [1, -1], [1, 1]] as [$dr, $dc]) {
+            $row = intdiv($from, 8) + $dr;
+            $col = $from % 8 + $dc;
+            // Casas vazias no caminho: a pedra anda uma (só para a frente), a dama quantas quiser.
+            while ($inside($row, $col) && $board[$row * 8 + $col] === '') {
+                if ($king || $dr === $forward) $steps[] = [$from, $row * 8 + $col, null];
+                if (!$king) break;
+                $row += $dr;
+                $col += $dc;
+            }
+            if (!$inside($row, $col) || $board[$row * 8 + $col] === '' || strtolower($board[$row * 8 + $col]) === $color) continue;
+            $over = $row * 8 + $col;
+            for ($row += $dr, $col += $dc; $inside($row, $col) && $board[$row * 8 + $col] === ''; $row += $dr, $col += $dc) {
+                $captures[] = [$from, $row * 8 + $col, $over];
+                if (!$king) break;
+            }
+        }
+    }
+    return $captures || $chain !== null ? $captures : $steps;
+}
+
+function stop_letter(array $used): string
+{
+    $left = array_values(array_diff(str_split(STOP_LETTERS), $used));
+    $left = $left ?: str_split(STOP_LETTERS);
+    return $left[random_int(0, count($left) - 1)];
+}
+
+// Fim da rodada do stop: as respostas dos dois, os pontos (só vale a palavra que começa com a letra) e o placar.
+function stop_score(array &$game, string $by): void
+{
+    $letter = fold($game['letter']);
+    $answers = [];
+    $points = [];
+    foreach ($game['seats'] as $name) $answers[$name] = $game['fills'][$name] ?? array_fill_keys($game['categories'], '');
+    foreach ($game['categories'] as $category) {
+        $words = [];
+        foreach ($game['seats'] as $name) {
+            $word = fold(text_trim((string) ($answers[$name][$category] ?? '')));
+            $words[$name] = $word !== '' && text_slice($word, 1) === $letter ? $word : null;
+        }
+        foreach ($game['seats'] as $index => $name) {
+            $other = $words[$game['seats'][1 - $index]];
+            $points[$name][$category] = $words[$name] === null ? 0 : ($words[$name] === $other ? 5 : 10);
+        }
+    }
+    foreach ($game['seats'] as $name) $game['totals'][$name] += array_sum($points[$name]);
+    $game['last'] = ['round' => $game['round'], 'letter' => $game['letter'], 'answers' => $answers, 'points' => $points, 'stoppedBy' => $by];
+    $game['phase'] = 'review';
+    $game['fills'] = [];
+}
+
+// Quem tem mais pontos ganha; igual, empate.
+function best_of(array $scores): string
+{
+    arsort($scores);
+    $names = array_keys($scores);
+    return count($scores) > 1 && $scores[$names[0]] === $scores[$names[1]] ? 'empate' : (string) $names[0];
+}
+
+// Uma jogada num jogo de tabuleiro. Muda $game; devolve o erro, ou null.
+function board_play(array &$game, string $me, string $op, array $body): ?string
+{
+    if ($game['winner'] ?? null) return 'Esse jogo já acabou.';
+    if (!in_array($me, $game['seats'], true)) return 'Esse jogo é dos outros dois.';
+    $seat = array_search($me, $game['seats'], true);
+    $other = $game['seats'][1 - $seat];
+    if ($op === 'resign') {
+        $game['winner'] = $other;
+        $game['resigned'] = $me;
+        return null;
+    }
+    if ($game['type'] === 'stop') {
+        if ($op === 'end') {
+            $game['winner'] = best_of($game['totals']);
+            $game['phase'] = 'over';
+            return null;
+        }
+        if ($op === 'next') {
+            if ($game['phase'] !== 'review') return 'A rodada ainda não acabou.';
+            // As letras não se repetem até acabarem.
+            $game['letter'] = stop_letter($game['used']);
+            $game['used'] = count($game['used']) + 1 >= strlen(STOP_LETTERS) ? [$game['letter']] : array_merge($game['used'], [$game['letter']]);
+            $game['round']++;
+            $game['phase'] = 'playing';
+            $game['fills'] = [];
+            return null;
+        }
+        if ($op !== 'fill') return 'Jogada desconhecida.';
+        if ($game['phase'] !== 'playing') return 'Essa rodada já acabou.';
+        $answers = [];
+        foreach ($game['categories'] as $category) $answers[$category] = clean_line($body['answers'][$category] ?? '', 40);
+        $game['fills'][$me] = $answers;
+        if (($body['stop'] ?? false) === true) {
+            if (in_array('', $answers, true)) return 'Preencha tudo antes de pedir STOP!';
+            stop_score($game, $me);
+        }
+        return null;
+    }
+    if ($game['turn'] !== $me) return 'Não é a sua vez.';
+    switch ($game['type'] . ':' . $op) {
+        case 'velha:move':
+            $cell = $body['cell'] ?? null;
+            if (!is_int($cell) || $cell < 0 || $cell > 8 || $game['board'][$cell] !== '') return 'Essa casa já foi.';
+            $game['board'][$cell] = $seat === 0 ? 'X' : 'O';
+            foreach (TIC_LINES as $line) {
+                if ($game['board'][$line[0]] !== '' && $game['board'][$line[0]] === $game['board'][$line[1]] && $game['board'][$line[1]] === $game['board'][$line[2]]) {
+                    $game['winner'] = $me;
+                    $game['line'] = $line;
+                    return null;
+                }
+            }
+            if (!in_array('', $game['board'], true)) $game['winner'] = 'empate';
+            else $game['turn'] = $other;
+            return null;
+
+        case 'dama:move':
+            $from = $body['from'] ?? null;
+            $to = $body['to'] ?? null;
+            $color = $seat === 0 ? 'w' : 'b';
+            $moves = dama_moves($game['board'], $color, $game['chain']);
+            $move = null;
+            foreach ($moves as $option) if ($option[0] === $from && $option[1] === $to) $move = $option;
+            if (!$move) return $moves && $moves[0][2] !== null ? 'Captura obrigatória: tem peça para comer!' : 'Essa jogada não vale.';
+            $board = &$game['board'];
+            $board[$to] = $board[$from];
+            $board[$from] = '';
+            if ($move[2] !== null) $board[$move[2]] = '';
+            $game['last'] = [$from, $to];
+            // Comeu e ainda dá para comer com a mesma peça: continua (sem virar dama no meio do caminho).
+            if ($move[2] !== null && dama_moves($board, $color, $to)) {
+                $game['chain'] = $to;
+                return null;
+            }
+            $game['chain'] = null;
+            if ($board[$to] === 'w' && $to < 8) $board[$to] = 'W';
+            if ($board[$to] === 'b' && $to >= 56) $board[$to] = 'B';
+            if (!dama_moves($board, $seat === 0 ? 'b' : 'w')) $game['winner'] = $me;
+            else $game['turn'] = $other;
+            return null;
+
+        case 'memoria:flip':
+            $index = $body['index'] ?? null;
+            if (!is_int($index) || $index < 0 || $index > 15 || $game['matched'][$index] !== null || in_array($index, $game['open'], true)) return 'Escolha outra carta.';
+            $game['missed'] = null;
+            $game['open'][] = $index;
+            if (count($game['open']) < 2) return null;
+            [$a, $b] = $game['open'];
+            $game['open'] = [];
+            if ($game['faces'][$a] !== $game['faces'][$b]) {
+                // Errou: as duas ficam à mostra até a próxima carta, e a vez passa.
+                $game['missed'] = [$a, $b];
+                $game['turn'] = $other;
+                return null;
+            }
+            $game['matched'][$a] = $game['matched'][$b] = $me;
+            $game['scores'][$me]++;
+            if (!in_array(null, $game['matched'], true)) $game['winner'] = best_of($game['scores']);
+            return null;
+    }
+    return 'Jogada desconhecida.';
+}
+
+function draw_card(string $deck)
+{
+    static $decks = null;
+    $decks = $decks ?? require __DIR__ . '/jogos.php';
+    query('INSERT IGNORE INTO ' . t('settings') . " (name, value) VALUES ('games', '{}')");
+    $used = json_decode((string) query('SELECT value FROM ' . t('settings') . " WHERE name = 'games' FOR UPDATE")->fetchColumn(), true) ?: [];
+    $left = array_values(array_diff(array_keys($decks[$deck]), (array) ($used[$deck] ?? [])));
+    if (!$left) {
+        $used[$deck] = [];
+        $left = array_keys($decks[$deck]);
+    }
+    $index = $left[random_int(0, count($left) - 1)];
+    $used[$deck][] = $index;
+    query('UPDATE ' . t('settings') . " SET value = ? WHERE name = 'games'", [encode($used)]);
+    return $decks[$deck][$index];
+}
+
+// O que vai para o navegador: enquanto falta alguém, os votos e as respostas ficam escondidos (players diz quem já foi).
+// Na memória, só as cartas viradas para cima; no stop, só quantas respostas cada um já preencheu; na dama, as
+// jogadas que valem agora (para o tabuleiro mostrar).
+function game_public(array $game): array
+{
+    foreach (['votes', 'answers'] as $field) {
+        if (!array_key_exists($field, $game)) continue;
+        $game['players'] = array_keys((array) $game[$field]);
+        $game['done'] = count($game['players']) >= 2;
+        $game[$field] = (object) ($game['done'] ? $game[$field] : []);
+    }
+    switch ($game['type']) {
+        case 'dama':
+            $color = $game['seats'][0] === $game['turn'] ? 'w' : 'b';
+            $game['moves'] = $game['winner'] ? [] : array_map(fn($move) => [$move[0], $move[1]], dama_moves($game['board'], $color, $game['chain']));
+            break;
+        case 'memoria':
+            $shown = array_merge($game['open'], $game['missed'] ?? []);
+            $game['cards'] = array_map(fn($face, $index) => $game['matched'][$index] !== null || in_array($index, $shown, true) ? $face : null, $game['faces'], array_keys($game['faces']));
+            $game['scores'] = (object) $game['scores'];
+            unset($game['faces']);
+            break;
+        case 'stop':
+            $game['filled'] = (object) array_map(fn($fill) => count(array_filter($fill, fn($text) => $text !== '')), $game['fills']);
+            $game['totals'] = (object) $game['totals'];
+            unset($game['fills'], $game['used']);
+            break;
+    }
+    return $game;
+}
+
+function game_act(array $me, array $body): array
+{
+    $op = str($body['op'] ?? '');
+    if ($op === 'new') {
+        $type = str($body['type'] ?? '');
+        $peer = peer_of($me['name']);
+        if (!$peer) return ['ok' => false, 'error' => 'Os joguinhos começam quando a outra pessoa criar a conta dela.'];
+        switch ($type) {
+            case 'vd':
+                $game = ['type' => 'vd', 'for' => $peer, 'choice' => null, 'prompt' => null];
+                break;
+            case 'quem':
+            case 'pergunta':
+                $game = ['type' => $type, 'prompt' => draw_card($type), ($type === 'quem' ? 'votes' : 'answers') => []] + ($type === 'quem' ? ['names' => [$me['name'], $peer]] : []);
+                break;
+            case 'isso':
+                $game = ['type' => 'isso', 'options' => draw_card('isso'), 'votes' => []];
+                break;
+            case 'velha':
+                $game = ['type' => 'velha', 'seats' => [$me['name'], $peer], 'turn' => $me['name'], 'board' => array_fill(0, 9, ''), 'winner' => null, 'line' => null];
+                break;
+            case 'dama':
+                $game = ['type' => 'dama', 'seats' => [$me['name'], $peer], 'turn' => $me['name'], 'board' => dama_board(), 'chain' => null, 'last' => null, 'winner' => null];
+                break;
+            case 'memoria':
+                $faces = MEMORY_FACES;
+                shuffle($faces);
+                $faces = array_merge(array_slice($faces, 0, 8), array_slice($faces, 0, 8));
+                shuffle($faces);
+                $game = ['type' => 'memoria', 'seats' => [$me['name'], $peer], 'turn' => $me['name'], 'faces' => $faces, 'matched' => array_fill(0, 16, null),
+                    'open' => [], 'missed' => null, 'scores' => [$me['name'] => 0, $peer => 0], 'winner' => null];
+                break;
+            case 'stop':
+                $letter = stop_letter([]);
+                $game = ['type' => 'stop', 'seats' => [$me['name'], $peer], 'round' => 1, 'letter' => $letter, 'used' => [$letter], 'categories' => STOP_CATEGORIES,
+                    'phase' => 'playing', 'fills' => [], 'last' => null, 'totals' => [$me['name'] => 0, $peer => 0], 'winner' => null];
+                break;
+            default:
+                return ['ok' => false, 'error' => 'Jogo desconhecido.'];
+        }
+        $row = [
+            'id' => uuid(), 'client_id' => null, 'sender' => $me['name'], 'text' => '', 'created_at' => iso(), 'reply_to' => null,
+            'reactions' => '{}', 'deleted' => 0, 'source' => 'game', 'media' => encode(['game' => $game]),
+        ];
+        query('INSERT INTO ' . t('messages') . ' (id, client_id, sender, text, created_at, reply_to, reactions, deleted, source, media) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', array_values($row));
+        set_read($me['name'], $row['id'], $row['created_at']);
+        $message = to_message($row);
+        emit('message', $message);
+        return ['ok' => true, 'message' => $message];
+    }
+
+    $row = find_message(str($body['id'] ?? ''));
+    $media = $row && !$row['deleted'] && $row['media'] ? json_decode((string) $row['media'], true) : null;
+    $game = $media['game'] ?? null;
+    if (!$game) return ['ok' => false, 'error' => 'Esse jogo não existe mais.'];
+    $mine = null;
+    if (isset($game['seats'])) {
+        $error = board_play($game, $me['name'], $op, $body);
+        if ($error) return ['ok' => false, 'error' => $error];
+        $op = 'board';
+    }
+    switch ($op) {
+        case 'board':
+            break;
+        case 'pick':
+            $choice = str($body['choice'] ?? '');
+            if ($game['type'] !== 'vd' || $game['for'] !== $me['name']) return ['ok' => false, 'error' => 'Quem escolhe é ' . $game['for'] . '.'];
+            if ($game['choice']) return ['ok' => true, 'message' => to_message($row)];
+            if (!in_array($choice, ['verdade', 'desafio'], true)) return ['ok' => false, 'error' => 'Escolha verdade ou desafio.'];
+            $game['choice'] = $choice;
+            $game['prompt'] = draw_card($choice);
+            break;
+        case 'vote':
+            $value = $body['value'] ?? null;
+            $valid = $game['type'] === 'quem' ? in_array($value, users(), true) : ($game['type'] === 'isso' && in_array($value, [0, 1], true));
+            if (!$valid) return ['ok' => false, 'error' => 'Voto inválido.'];
+            if (isset($game['votes'][$me['name']])) return ['ok' => false, 'error' => 'Você já votou.'];
+            $game['votes'][$me['name']] = $mine = $value;
+            break;
+        case 'answer':
+            $text = clean_body($body['text'] ?? '', 500);
+            if ($game['type'] !== 'pergunta' || $text === '') return ['ok' => false, 'error' => 'Escreva sua resposta.'];
+            if (isset($game['answers'][$me['name']])) return ['ok' => false, 'error' => 'Você já respondeu.'];
+            $game['answers'][$me['name']] = $mine = $text;
+            break;
+        default:
+            return ['ok' => false, 'error' => 'Jogada desconhecida.'];
+    }
+    $row['media'] = encode(['game' => $game]);
+    query('UPDATE ' . t('messages') . ' SET media = ? WHERE n = ?', [$row['media'], $row['n']]);
+    $message = to_message($row);
+    emit('message:update', $message);
+    return ['ok' => true, 'message' => $message, 'mine' => $mine];
+}
+
 // ---------- mensagens ----------
 
 function to_message(array $row): array
 {
     $deleted = (bool) $row['deleted'];
     $reactions = json_decode((string) $row['reactions'], true);
-    // A coluna media guarda o GIF ({url, width, height, title}) ou o arquivo ({file: {...}}).
+    // A coluna media guarda o GIF ({url, width, height, title}), o arquivo ({file: {...}}), o cartão de música
+    // ({music: {...}}) ou o joguinho ({game: {...}}).
     $media = $deleted || empty($row['media']) ? null : json_decode((string) $row['media'], true);
     $file = is_array($media) && isset($media['file']) ? file_info($media['file']) : null;
     $music = is_array($media) && isset($media['music']) ? $media['music'] : null;
+    $game = is_array($media) && isset($media['game']) ? game_public($media['game']) : null;
     return [
         'id' => $row['id'],
         'clientId' => $row['client_id'] !== null && $row['client_id'] !== '' ? $row['client_id'] : null,
         'sender' => $row['sender'],
         'text' => $deleted ? '' : $row['text'],
-        'gif' => is_array($media) && !$file && !$music ? $media : null,
+        'gif' => is_array($media) && !$file && !$music && !$game ? $media : null,
         'file' => $file,
         'music' => $music,
+        'game' => $game,
         'createdAt' => $row['created_at'],
         'replyTo' => $row['reply_to'] ? json_decode($row['reply_to'], true) : null,
         // Reações sempre como objeto JSON ({}), igual à versão Node.
@@ -1679,6 +2625,13 @@ function act(array $me, string $event, $data)
         case 'watch':
             return watch_act($me, $body);
 
+        // Nosso cantinho: o dia de cada um, agenda, sonhos e metas, cartinhas e lembretes.
+        case 'us':
+            return us_act($me, $body);
+
+        case 'game':
+            return game_act($me, $body);
+
         // Tema escolhido: fica na conta e muda na hora nas outras abas da mesma pessoa.
         case 'theme':
             $theme = str($body['theme'] ?? '');
@@ -1760,7 +2713,7 @@ function act(array $me, string $event, $data)
 // Números da tela de perfil: mensagens enviadas, reações dadas e desde quando a conversa existe.
 function stats(string $name): array
 {
-    $messages = (int) query('SELECT COUNT(*) FROM ' . t('messages') . " WHERE sender = ? AND deleted = 0 AND source <> 'music'", [$name])->fetchColumn();
+    $messages = (int) query('SELECT COUNT(*) FROM ' . t('messages') . " WHERE sender = ? AND deleted = 0 AND source NOT IN ('music', 'game')", [$name])->fetchColumn();
     $since = query('SELECT created_at FROM ' . t('messages') . ' ORDER BY n LIMIT 1')->fetchColumn();
     $reactions = 0;
     $rows = query('SELECT reactions FROM ' . t('messages') . " WHERE deleted = 0 AND reactions <> '{}'")->fetchAll(PDO::FETCH_COLUMN);
@@ -1797,6 +2750,7 @@ function preview_text(array $row): string
     }
     if (isset($media['file'])) return ['image' => 'Foto', 'video' => 'Vídeo', 'audio' => 'Áudio'][$media['file']['kind']] ?? text_slice((string) $media['file']['name'], 160);
     if (isset($media['music'])) return text_slice('Música: ' . $media['music']['title'], 160);
+    if (isset($media['game'])) return GAME_NAMES[$media['game']['type']] ?? 'Joguinho';
     return $media ? 'GIF' : '';
 }
 

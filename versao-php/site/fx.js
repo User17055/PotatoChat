@@ -150,7 +150,7 @@ export const fx = {
   view(element, direction = 1) {
     if (!motion()) return;
     gsap.fromTo(element, { opacity: 0, x: 28 * direction }, { opacity: 1, x: 0, duration: 0.4, ease: "power3.out", clearProps: "transform,opacity" });
-    const items = element.querySelectorAll(".profile-hero > *, .profile-stats > div, .profile-card");
+    const items = element.querySelectorAll(".profile-hero > *, .profile-stats > div, .profile-card, .us-pane:not(.hidden) :is(.day-card, .us-card, .goal-card, .letter-card, .game-tile, .event-row)");
     if (items.length) gsap.fromTo(items, { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: 0.5, stagger: 0.045, delay: 0.05, ease: "power3.out", clearProps: "transform,opacity" });
   },
 

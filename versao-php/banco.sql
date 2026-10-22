@@ -3,7 +3,7 @@
 -- Se mudar o prefixo em config.php, troque "potato_" aqui também.
 -- Já importou a versão anterior deste arquivo? Não precisa fazer nada: no primeiro acesso o site
 -- acrescenta sozinho as colunas novas (senha, foto, tema e papel de parede em potato_users, GIF em potato_messages)
--- e a tabela potato_files (fotos e arquivos das mensagens).
+-- e as tabelas potato_files (fotos e arquivos das mensagens) e potato_items (Nosso cantinho).
 
 CREATE TABLE IF NOT EXISTS `potato_settings` (
   name VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
@@ -83,7 +83,8 @@ CREATE TABLE IF NOT EXISTS `potato_logins` (
   KEY login_ip (ip, at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Fotos e arquivos das mensagens (até 10 MB cada). message_id fica vazio entre o envio do arquivo e o da mensagem.
+-- Fotos e arquivos das mensagens (até 10 MB cada). message_id fica vazio entre o envio do arquivo e o da mensagem
+-- (nas fotos do Nosso cantinho, é o id do registro em potato_items).
 CREATE TABLE IF NOT EXISTS `potato_files` (
   file_key CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
   owner VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
@@ -98,4 +99,19 @@ CREATE TABLE IF NOT EXISTS `potato_files` (
   created_at BIGINT NOT NULL,
   KEY file_message (message_id, created_at),
   KEY file_owner (owner, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Nosso cantinho: o dia de cada um (day), compromissos da agenda (event), sonhos e metas (goal), cartinhas (letter) e
+-- as preferências de cada pessoa (prefs: hábitos e lembretes). Os detalhes ficam em JSON na coluna data.
+CREATE TABLE IF NOT EXISTS `potato_items` (
+  n BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  kind VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  owner VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  day VARCHAR(10) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  data MEDIUMTEXT NOT NULL,
+  created_at VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  updated_at VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  UNIQUE KEY item_id (id),
+  KEY item_kind (kind, owner, day)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

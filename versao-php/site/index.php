@@ -152,6 +152,67 @@ function asset(string $file): string
       <symbol id="i-camera" viewBox="0 0 24 24"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></symbol>
       <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
       <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+      <!-- Nosso cantinho e jogos (Lucide, licença ISC) -->
+      <symbol id="i-sunrise" viewBox="0 0 24 24"><path d="M12 2v8"/><path d="m4.93 10.93 1.41 1.41"/><path d="M2 18h2"/><path d="M20 18h2"/><path d="m19.07 10.93-1.41 1.41"/><path d="M22 22H2"/><path d="m8 6 4-4 4 4"/><path d="M16 18a4 4 0 0 0-8 0"/></symbol>
+      <symbol id="i-coffee" viewBox="0 0 24 24"><path d="M10 2v2"/><path d="M14 2v2"/><path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1"/><path d="M6 2v2"/></symbol>
+      <symbol id="i-utensils" viewBox="0 0 24 24"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></symbol>
+      <symbol id="i-cookie" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5"/><path d="M8.5 8.5v.01"/><path d="M16 15.5v.01"/><path d="M12 12v.01"/><path d="M11 17v.01"/><path d="M7 14v.01"/></symbol>
+      <symbol id="i-soup" viewBox="0 0 24 24"><path d="M12 21a9 9 0 0 0 9-9H3a9 9 0 0 0 9 9Z"/><path d="M7 21h10"/><path d="M19.5 12 22 6"/><path d="M16.25 3c.27.1.8.53.75 1.36-.06.83-.93 1.2-1 2.02-.05.78.34 1.24.73 1.62"/><path d="M11.25 3c.27.1.8.53.74 1.36-.05.83-.93 1.2-.98 2.02-.06.78.33 1.24.72 1.62"/><path d="M6.25 3c.27.1.8.53.75 1.36-.06.83-.93 1.2-1 2.02-.05.78.34 1.24.74 1.62"/></symbol>
+      <symbol id="i-list-checks" viewBox="0 0 24 24"><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></symbol>
+      <symbol id="i-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></symbol>
+      <symbol id="i-book-open" viewBox="0 0 24 24"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></symbol>
+      <symbol id="i-smile" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9h.01"/><path d="M15 9h.01"/></symbol>
+      <symbol id="i-laugh" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M18 13a6 6 0 0 1-6 5 6 6 0 0 1-6-5h12Z"/><path d="M9 9h.01"/><path d="M15 9h.01"/></symbol>
+      <symbol id="i-meh" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 15h8"/><path d="M9 9h.01"/><path d="M15 9h.01"/></symbol>
+      <symbol id="i-frown" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M16 16s-1.5-2-4-2-4 2-4 2"/><path d="M9 9h.01"/><path d="M15 9h.01"/></symbol>
+      <symbol id="i-angry" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M16 16s-1.5-2-4-2-4 2-4 2"/><path d="M7.5 8 10 9"/><path d="m14 9 2.5-1"/><path d="M9 10h.01"/><path d="M15 10h.01"/></symbol>
+      <symbol id="i-thermometer" viewBox="0 0 24 24"><path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/></symbol>
+      <symbol id="i-zap" viewBox="0 0 24 24"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></symbol>
+      <symbol id="i-film" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 7.5h4"/><path d="M3 12h18"/><path d="M3 16.5h4"/><path d="M17 3v18"/><path d="M17 7.5h4"/><path d="M17 16.5h4"/></symbol>
+      <symbol id="i-cake" viewBox="0 0 24 24"><path d="M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8"/><path d="M4 16s.5-1 2-1 2.5 2 4 2 2.5-2 4-2 2.5 2 4 2 2-1 2-1"/><path d="M2 21h20"/><path d="M7 8v3"/><path d="M12 8v3"/><path d="M17 8v3"/><path d="M7 4h.01"/><path d="M12 4h.01"/><path d="M17 4h.01"/></symbol>
+      <symbol id="i-plane" viewBox="0 0 24 24"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></symbol>
+      <symbol id="i-gift" viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5A4.8 8 0 0 1 12 8a4.8 8 0 0 1 4.5-5 2.5 2.5 0 0 1 0 5"/></symbol>
+      <symbol id="i-stethoscope" viewBox="0 0 24 24"><path d="M11 2v2"/><path d="M5 2v2"/><path d="M5 3H4a2 2 0 0 0-2 2v4a6 6 0 0 0 12 0V5a2 2 0 0 0-2-2h-1"/><path d="M8 15a6 6 0 0 0 12 0v-3"/><circle cx="20" cy="10" r="2"/></symbol>
+      <symbol id="i-graduation" viewBox="0 0 24 24"><path d="M21.42 10.922a1 1 0 0 0-.019-1.838L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.832l8.57 3.908a2 2 0 0 0 1.66 0z"/><path d="M22 10v6"/><path d="M6 12.5V16a6 3 0 0 0 12 0v-3.5"/></symbol>
+      <symbol id="i-briefcase" viewBox="0 0 24 24"><path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/><rect width="20" height="14" x="2" y="6" rx="2"/></symbol>
+      <symbol id="i-cart" viewBox="0 0 24 24"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/></symbol>
+      <symbol id="i-dumbbell" viewBox="0 0 24 24"><path d="M14.4 14.4 9.6 9.6"/><path d="M18.657 21.485a2 2 0 1 1-2.829-2.828l-1.767 1.768a2 2 0 1 1-2.829-2.829l6.364-6.364a2 2 0 1 1 2.829 2.829l-1.768 1.767a2 2 0 1 1 2.828 2.829z"/><path d="m21.5 21.5-1.4-1.4"/><path d="M3.9 3.9 2.5 2.5"/><path d="M6.404 12.768a2 2 0 1 1-2.829-2.829l1.768-1.767a2 2 0 1 1-2.828-2.829l2.828-2.828a2 2 0 1 1 2.829 2.828l1.767-1.768a2 2 0 1 1 2.829 2.829z"/></symbol>
+      <symbol id="i-palmtree" viewBox="0 0 24 24"><path d="M13 8c0-2.76-2.46-5-5.5-5S2 5.24 2 8h2l1-1 1 1h4"/><path d="M13 7.14A5.82 5.82 0 0 1 16.5 6c3.04 0 5.5 2.24 5.5 5h-3l-1-1-1 1h-3"/><path d="M5.89 9.71c-2.15 2.15-2.3 5.47-.35 7.43l4.24-4.25.7-.7.71-.71 2.12-2.12c-1.95-1.96-5.27-1.8-7.42.35"/><path d="M11 15.5c.5 2.5-.17 4.5-1 6.5h4c2-5.5-.5-12-1-14"/></symbol>
+      <symbol id="i-home" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+      <symbol id="i-dog" viewBox="0 0 24 24"><path d="M11.25 16.25h1.5L12 17z"/><path d="M16 14v.5"/><path d="M4.42 11.247A13.152 13.152 0 0 0 4 14.556C4 18.728 7.582 21 12 21s8-2.272 8-6.444a11.702 11.702 0 0 0-.493-3.309"/><path d="M8 14v.5"/><path d="M8.5 8.5c-.384 1.05-1.083 2.028-2.344 2.5-1.931.722-3.576-.297-3.656-1-.113-.994 1.177-6.53 4-7 1.923-.321 3.651.845 3.651 2.235A7.497 7.497 0 0 1 14 5.277c0-1.39 1.844-2.598 3.767-2.277 2.823.47 4.113 6.006 4 7-.08.703-1.725 1.722-3.656 1-1.261-.472-1.855-1.45-2.239-2.5"/></symbol>
+      <symbol id="i-cat" viewBox="0 0 24 24"><path d="M12 5c.67 0 1.35.09 2 .26 1.78-2 5.03-2.84 6.42-2.26 1.4.58-.42 7-.42 7 .57 1.07 1 2.24 1 3.44C21 17.9 16.97 21 12 21s-9-3-9-7.56c0-1.25.5-2.4 1-3.44 0 0-1.89-6.42-.5-7 1.39-.58 4.72.23 6.5 2.23A9.04 9.04 0 0 1 12 5Z"/><path d="M8 14v.5"/><path d="M16 14v.5"/><path d="M11.25 16.25h1.5L12 17l-.75-.75Z"/></symbol>
+      <symbol id="i-gem" viewBox="0 0 24 24"><path d="M6 3h12l4 6-10 13L2 9Z"/><path d="M11 3 8 9l4 13 4-13-3-6"/><path d="M2 9h20"/></symbol>
+      <symbol id="i-car" viewBox="0 0 24 24"><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/><circle cx="7" cy="17" r="2"/><path d="M9 17h6"/><circle cx="17" cy="17" r="2"/></symbol>
+      <symbol id="i-gamepad" viewBox="0 0 24 24"><path d="M6 12h4"/><path d="M8 10v4"/><path d="M15 13h.01"/><path d="M18 11h.01"/><rect width="20" height="12" x="2" y="6" rx="2"/></symbol>
+      <symbol id="i-chef" viewBox="0 0 24 24"><path d="M17 21a1 1 0 0 0 1-1v-5.35c0-.457.316-.844.727-1.041a4 4 0 0 0-2.134-7.589 5 5 0 0 0-9.186 0 4 4 0 0 0-2.134 7.588c.411.198.727.585.727 1.041V20a1 1 0 0 0 1 1Z"/><path d="M6 17h12"/></symbol>
+      <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
+      <symbol id="i-hash" viewBox="0 0 24 24"><path d="M4 9h16"/><path d="M4 15h16"/><path d="M10 3 8 21"/><path d="m16 3-2 18"/></symbol>
+      <symbol id="i-crown" viewBox="0 0 24 24"><path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5 21h14"/></symbol>
+      <symbol id="i-brain" viewBox="0 0 24 24"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/><path d="M3.477 10.896a4 4 0 0 1 .585-.396"/><path d="M19.938 10.5a4 4 0 0 1 .585.396"/><path d="M6 18a4 4 0 0 1-1.967-.516"/><path d="M19.967 17.484A4 4 0 0 1 18 18"/></symbol>
+      <symbol id="i-hand" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"/><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></symbol>
+      <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+      <symbol id="i-split" viewBox="0 0 24 24"><path d="M16 3h5v5"/><path d="M8 3H3v5"/><path d="M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3"/><path d="m15 9 6-6"/></symbol>
+      <symbol id="i-question" viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
+      <symbol id="i-flame" viewBox="0 0 24 24"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></symbol>
+      <symbol id="i-star" viewBox="0 0 24 24"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></symbol>
+      <symbol id="i-pizza" viewBox="0 0 24 24"><path d="m12 14-1 1"/><path d="m13.75 18.25-1.25 1.42"/><path d="M17.775 5.654a15.68 15.68 0 0 0-12.121 12.12"/><path d="M18.8 9.3a1 1 0 0 0 2.1 7.7"/><path d="M21.964 20.732a1 1 0 0 1-1.232 1.232l-18-5a1 1 0 0 1-.695-1.232A19.68 19.68 0 0 1 15.732 2.037a1 1 0 0 1 1.232.695z"/></symbol>
+      <symbol id="i-flower" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 16.5A4.5 4.5 0 1 1 7.5 12 4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 1 1 4.5 4.5 4.5 4.5 0 1 1-4.5 4.5"/><path d="M12 7.5V9"/><path d="M7.5 12H9"/><path d="M16.5 12H15"/><path d="M12 16.5V15"/><path d="m8 8 1.88 1.88"/><path d="M14.12 9.88 16 8"/><path d="m8 16 1.88-1.88"/><path d="M14.12 14.12 16 16"/></symbol>
+      <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></symbol>
+      <symbol id="i-fish" viewBox="0 0 24 24"><path d="M6.5 12c.94-3.46 4.94-6 8.5-6 3.56 0 6.06 2.54 7 6-.94 3.47-3.44 6-7 6s-7.56-2.53-8.5-6Z"/><path d="M18 12v.5"/><path d="M16 17.93a9.77 9.77 0 0 1 0-11.86"/><path d="M7 10.67C7 8 5.58 5.97 2.73 5.5c-1.17 1.95-1.17 3.75 0 5.5 0 0 2.54 0 4.27-.33"/><path d="M10.46 7.26C10.2 5.88 9.17 4.24 8 3h5.8a2 2 0 0 1 1.98 1.67l.23 1.4"/><path d="m16.01 17.93-.23 1.4A2 2 0 0 1 13.8 21H9.5a5.96 5.96 0 0 0 1.49-3.98"/></symbol>
+      <symbol id="i-cherry" viewBox="0 0 24 24"><path d="M2 17a5 5 0 0 0 10 0c0-2.76-2.5-5-5-3-2.5-2-5 .24-5 3Z"/><path d="M12 17a5 5 0 0 0 10 0c0-2.76-2.5-5-5-3-2.5-2-5 .24-5 3Z"/><path d="M7 14c3.22-2.91 4.29-8.75 5-12 1.66 2.38 4.94 9 5 12"/><path d="M22 9c-4.29 0-7.14-2.33-10-7 5.71 0 10 4.67 10 7Z"/></symbol>
+      <symbol id="i-send-heart" viewBox="0 0 24 24"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/><path d="M12 5 9.04 7.96a2.17 2.17 0 0 0 0 3.08c.82.82 2.13.85 3 .07l2.07-1.9a2.82 2.82 0 0 1 3.79 0l2.96 2.66"/></symbol>
+      <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></symbol>
+      <symbol id="i-heart" viewBox="0 0 24 24"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></symbol>
+      <symbol id="i-calendar" viewBox="0 0 24 24"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+      <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></symbol>
+      <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+      <symbol id="i-mail" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></symbol>
+      <symbol id="i-dice" viewBox="0 0 24 24"><rect width="12" height="12" x="2" y="10" rx="2" ry="2"/><path d="m17.92 14 3.5-3.5a2.24 2.24 0 0 0 0-3l-5-4.92a2.24 2.24 0 0 0-3 0L10 6"/><path d="M6 18h.01"/><path d="M10 14h.01"/><path d="M15 6h.01"/><path d="M18 9h.01"/></symbol>
+      <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></symbol>
+      <symbol id="i-map-pin" viewBox="0 0 24 24"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></symbol>
+      <symbol id="i-repeat" viewBox="0 0 24 24"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></symbol>
+      <symbol id="i-piggy" viewBox="0 0 24 24"><path d="M11 17h3v2a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-3a3.16 3.16 0 0 0 2-2h1a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1h-1a5 5 0 0 0-2-4V3a4 4 0 0 0-3.2 1.6l-.3.4H11a6 6 0 0 0-6 6v1a5 5 0 0 0 2 4v3a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1z"/><path d="M16 10h.01"/><path d="M2 8v1a2 2 0 0 0 2 2h1"/></symbol>
     </svg>
     <div class="ambient" aria-hidden="true"><span></span><span></span><span></span></div>
     <div class="grain" aria-hidden="true"></div>
@@ -203,11 +264,20 @@ function asset(string $file): string
 
     <!-- ===================== CHAT ===================== -->
     <main id="chat-view" class="app-shell hidden" data-tab="chat">
-      <aside class="sidebar">
+      <!-- Barra lateral: a conversa, as partes do Nosso cantinho e o perfil. No celular, vira uma gaveta (botão de menu). -->
+      <aside id="sidebar" class="sidebar" aria-label="Menu">
         <div>
           <div class="brand-row"><svg class="potato-mini" viewBox="0 0 142 100" aria-hidden="true"><use href="#potato" /></svg><strong>Potato</strong></div>
           <div class="room-label">No nosso chat</div>
           <div id="people" class="people"></div>
+          <div class="room-label">Nosso cantinho</div>
+          <nav class="side-nav" aria-label="Nosso cantinho">
+            <button class="side-link" type="button" data-us-open="hoje"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-sun" /></svg></span><span class="side-text"><strong>Rotina do dia</strong><small>Acordar, refeições e hábitos</small></span></button>
+            <button class="side-link" type="button" data-us-open="agenda"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-calendar" /></svg></span><span class="side-text"><strong>Agenda</strong><small id="side-agenda">Os compromissos dos dois</small></span></button>
+            <button class="side-link" type="button" data-us-open="sonhos"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-sparkles" /></svg></span><span class="side-text"><strong>Sonhos e metas</strong><small>O que vamos realizar juntos</small></span></button>
+            <button class="side-link" type="button" data-us-open="cartinhas"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-mail" /></svg></span><span class="side-text"><strong>Cartinhas</strong><small>O nosso blog de cartas</small></span><b class="us-count letters-new hidden"></b></button>
+            <button class="side-link" type="button" data-us-open="jogos"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-dice" /></svg></span><span class="side-text"><strong>Jogos</strong><small>Velha, dama, memória, stop…</small></span><b class="us-count games-turn hidden"></b></button>
+          </nav>
         </div>
         <!-- Seu perfil: foto, tema, notificações, sons e sair ficam todos na aba Perfil. -->
         <div class="sidebar-bottom">
@@ -223,6 +293,7 @@ function asset(string $file): string
         <!-- Papel de parede da conversa (a foto, a iluminação e a cor do tema vêm do app.js). -->
         <div class="wallpaper" aria-hidden="true"><i class="wall-photo"></i><i class="wall-shade"></i></div>
         <header class="topbar">
+          <button class="menu-button" type="button" data-menu title="Menu" aria-label="Abrir o menu" aria-controls="sidebar" aria-expanded="false"><svg class="icon"><use href="#i-menu" /></svg><i class="menu-dot hidden" aria-hidden="true"></i></button>
           <!-- Tocar no nome ou na foto abre o perfil da outra pessoa. -->
           <div id="peer-open" class="peer" role="button" tabindex="0" aria-haspopup="dialog" aria-controls="peer-profile">
             <div id="peer-avatar" class="avatar" aria-hidden="true">?</div>
@@ -469,6 +540,7 @@ function asset(string $file): string
             <button type="button" role="menuitem" data-pick="#pick-media"><span class="attach-icon media"><svg class="icon"><use href="#i-image" /></svg></span>Foto ou vídeo</button>
             <button type="button" role="menuitem" data-pick="#pick-file"><span class="attach-icon doc"><svg class="icon"><use href="#i-file" /></svg></span>Arquivo</button>
             <button type="button" role="menuitem" data-pick="#watch-button"><span class="attach-icon watch"><svg class="icon"><use href="#i-tv" /></svg></span>Batata Watch Party</button>
+            <button type="button" role="menuitem" data-us-open="jogos"><span class="attach-icon games"><svg class="icon"><use href="#i-dice" /></svg></span>Joguinhos</button>
           </div>
           <input id="pick-media" type="file" accept="image/*,video/*" multiple hidden />
           <input id="pick-file" type="file" multiple hidden />
@@ -568,6 +640,7 @@ function asset(string $file): string
       <!-- ===================== PERFIL ===================== -->
       <section id="profile-view" class="profile-view" aria-labelledby="profile-name">
         <header class="profile-top">
+          <button class="menu-button" type="button" data-menu title="Menu" aria-label="Abrir o menu" aria-controls="sidebar" aria-expanded="false"><svg class="icon"><use href="#i-menu" /></svg><i class="menu-dot hidden" aria-hidden="true"></i></button>
           <h2>Seu perfil</h2>
         </header>
         <div class="profile-scroll">
@@ -647,7 +720,142 @@ function asset(string $file): string
         </div>
       </section>
 
-      <!-- Abas do celular e do painel da extensão (como no Instagram). -->
+      <!-- ===================== NOSSO CANTINHO ===================== -->
+      <!-- O dia de cada um, a agenda, os sonhos e metas, as cartinhas e os joguinhos. O app.js monta o conteúdo de cada parte. -->
+      <section id="us-view" class="us-view" aria-labelledby="us-title">
+        <header class="profile-top us-top">
+          <button class="menu-button" type="button" data-menu title="Menu" aria-label="Abrir o menu" aria-controls="sidebar" aria-expanded="false"><svg class="icon"><use href="#i-menu" /></svg><i class="menu-dot hidden" aria-hidden="true"></i></button>
+          <h2 id="us-title"><span class="us-title-icon" aria-hidden="true"><svg class="icon"><use id="us-title-icon" href="#i-sun" /></svg></span><span id="us-title-text">Rotina do dia</span></h2>
+        </header>
+        <div id="us-scroll" class="us-scroll">
+          <!-- Hoje: o dia de cada um, lado a lado (no celular, um embaixo do outro). Dá para voltar aos dias anteriores. -->
+          <section class="us-pane" data-pane="hoje">
+            <div class="day-nav">
+              <button id="day-prev" class="nav-round" type="button" title="Dia anterior" aria-label="Dia anterior"><svg class="icon"><use href="#i-chevron-left" /></svg></button>
+              <div class="day-title"><strong id="day-label">Hoje</strong><small id="day-date"></small></div>
+              <button id="day-next" class="nav-round" type="button" title="Próximo dia" aria-label="Próximo dia"><svg class="icon"><use href="#i-chevron-right" /></svg></button>
+            </div>
+            <div id="day-cards" class="day-cards" aria-live="polite"></div>
+            <button id="prompts-open" class="us-card setting-row prompts-row" type="button">
+              <svg class="icon"><use href="#i-bell" /></svg>
+              <span class="setting-text"><strong>Lembretes da rotina</strong><small id="prompts-state">Perguntinhas na hora do café, do almoço…</small></span>
+              <svg class="icon"><use href="#i-chevron-right" /></svg>
+            </button>
+          </section>
+
+          <!-- Agenda dos dois: o mês (com os compromissos escritos em cada dia) ou a semana (com os horários), o dia
+               escolhido e os próximos. -->
+          <section class="us-pane" data-pane="agenda">
+            <div class="agenda-bar">
+              <div class="agenda-nav">
+                <button id="cal-prev" class="nav-round" type="button" title="Anterior" aria-label="Anterior"><svg class="icon"><use href="#i-chevron-left" /></svg></button>
+                <button id="cal-next" class="nav-round" type="button" title="Próximo" aria-label="Próximo"><svg class="icon"><use href="#i-chevron-right" /></svg></button>
+                <button id="cal-today" class="pill ghost small" type="button">Hoje</button>
+                <strong id="cal-month"></strong>
+              </div>
+              <div class="agenda-tools">
+                <div class="agenda-views" role="group" aria-label="Ver por">
+                  <button type="button" data-cal-view="month">Mês</button>
+                  <button type="button" data-cal-view="week">Semana</button>
+                </div>
+                <button id="event-add" class="pill gold small" type="button"><svg class="icon"><use href="#i-plus" /></svg>Compromisso</button>
+              </div>
+            </div>
+            <div id="cal-body" class="us-card cal-card"></div>
+            <div class="pane-head">
+              <h3 id="cal-day-title" class="us-subtitle"></h3>
+            </div>
+            <div id="cal-day" class="event-list"></div>
+            <h3 class="us-subtitle">Próximos</h3>
+            <div id="cal-next-list" class="event-list"></div>
+          </section>
+
+          <!-- Sonhos e metas dos dois: dinheiro guardado (com a barra até o objetivo), passos e realizados. -->
+          <section class="us-pane" data-pane="sonhos">
+            <div class="pane-head">
+              <p class="muted">Sonhos e metas para realizar juntinhos. Os dois guardam, marcam os passos e comemoram.</p>
+              <button id="goal-add" class="pill gold small" type="button"><svg class="icon"><use href="#i-plus" /></svg>Novo</button>
+            </div>
+            <div id="goal-list" class="goal-list"></div>
+            <h3 id="goal-done-title" class="us-subtitle hidden">Realizados</h3>
+            <div id="goal-done" class="goal-list done-list"></div>
+          </section>
+
+          <!-- Cartinhas: o nosso blog. Cada um escreve para o outro; a nova aparece com o selo até ser aberta. -->
+          <section class="us-pane" data-pane="cartinhas">
+            <div class="pane-head">
+              <p class="muted">O nosso blog de cartinhas. Escreva quando quiser; quem recebe vê o selo de nova até abrir.</p>
+              <button id="letter-add" class="pill gold small" type="button"><svg class="icon"><use href="#i-pencil" /></svg>Escrever</button>
+            </div>
+            <div id="letter-list" class="letter-list"></div>
+          </section>
+
+          <!-- Joguinhos: escolher um jogo abre a mesinha aqui mesmo; a outra pessoa recebe o convite na conversa. -->
+          <section class="us-pane" data-pane="jogos">
+            <p class="muted games-lead">Escolha um jogo e a mesinha abre aqui. A outra pessoa recebe o convite na conversa, e cada um joga do seu lado, na sua vez.</p>
+            <section id="game-live-wrap" class="hidden" aria-labelledby="game-live-title">
+              <h3 id="game-live-title" class="us-subtitle">Partidas em andamento</h3>
+              <div id="game-live" class="event-list"></div>
+            </section>
+            <h3 class="us-subtitle">De tabuleiro</h3>
+            <div class="games">
+              <article class="game-tile velha">
+                <span class="game-badge" aria-hidden="true"><svg class="icon"><use href="#i-hash" /></svg></span>
+                <h3>Jogo da velha</h3>
+                <p>O clássico: três em linha. Quem começa fica com o X.</p>
+                <button class="pill gold small" type="button" data-game-new="velha"><svg class="icon"><use href="#i-play" /></svg>Jogar</button>
+              </article>
+              <article class="game-tile dama">
+                <span class="game-badge" aria-hidden="true"><svg class="icon"><use href="#i-crown" /></svg></span>
+                <h3>Dama</h3>
+                <p>Captura obrigatória e dama que voa. Quem começa joga com as brancas.</p>
+                <button class="pill gold small" type="button" data-game-new="dama"><svg class="icon"><use href="#i-play" /></svg>Jogar</button>
+              </article>
+              <article class="game-tile memoria">
+                <span class="game-badge" aria-hidden="true"><svg class="icon"><use href="#i-brain" /></svg></span>
+                <h3>Jogo da memória</h3>
+                <p>Oito pares escondidos. Achou um par, joga de novo; quem achar mais ganha.</p>
+                <button class="pill gold small" type="button" data-game-new="memoria"><svg class="icon"><use href="#i-play" /></svg>Jogar</button>
+              </article>
+              <article class="game-tile stop">
+                <span class="game-badge" aria-hidden="true"><svg class="icon"><use href="#i-hand" /></svg></span>
+                <h3>Stop</h3>
+                <p>Uma letra e seis categorias. Preencheu tudo? Grite STOP e a rodada acaba para os dois!</p>
+                <button class="pill gold small" type="button" data-game-new="stop"><svg class="icon"><use href="#i-play" /></svg>Jogar</button>
+              </article>
+            </div>
+            <h3 class="us-subtitle">Do casal</h3>
+            <div class="games">
+              <article class="game-tile quem">
+                <span class="game-badge" aria-hidden="true"><svg class="icon"><use href="#i-users" /></svg></span>
+                <h3>Quem é mais provável?</h3>
+                <p>Cada um vota em quem combina mais. Os votos aparecem quando os dois votarem.</p>
+                <button class="pill gold small" type="button" data-game-new="quem"><svg class="icon"><use href="#i-play" /></svg>Jogar</button>
+              </article>
+              <article class="game-tile vd">
+                <span class="game-badge" aria-hidden="true"><svg class="icon"><use href="#i-dice" /></svg></span>
+                <h3>Verdade ou desafio</h3>
+                <p data-game-hint="vd">A outra pessoa escolhe: verdade ou desafio. Perguntas e desafios fofinhos.</p>
+                <button class="pill gold small" type="button" data-game-new="vd"><svg class="icon"><use href="#i-play" /></svg>Desafiar</button>
+              </article>
+              <article class="game-tile isso">
+                <span class="game-badge" aria-hidden="true"><svg class="icon"><use href="#i-split" /></svg></span>
+                <h3>Isso ou aquilo</h3>
+                <p>Duas opções. Cada um escolhe sem ver a escolha do outro. Será que combinam?</p>
+                <button class="pill gold small" type="button" data-game-new="isso"><svg class="icon"><use href="#i-play" /></svg>Jogar</button>
+              </article>
+              <article class="game-tile pergunta">
+                <span class="game-badge" aria-hidden="true"><svg class="icon"><use href="#i-question" /></svg></span>
+                <h3>Perguntinha</h3>
+                <p>Uma pergunta para os dois. As respostas só aparecem quando os dois responderem.</p>
+                <button class="pill gold small" type="button" data-game-new="pergunta"><svg class="icon"><use href="#i-play" /></svg>Jogar</button>
+              </article>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <!-- Abas do celular e do painel da extensão (como no Instagram). O Nosso cantinho fica no menu. -->
       <nav class="tabbar" aria-label="Navegação">
         <span class="tab-glow" aria-hidden="true"></span>
         <button class="tab" type="button" data-tab-target="chat" aria-label="Conversa" title="Conversa">
@@ -658,6 +866,8 @@ function asset(string $file): string
           <span id="tab-avatar" class="avatar" aria-hidden="true">?</span>
         </button>
       </nav>
+      <!-- Fundo escuro da gaveta do menu (celular): tocar fecha. -->
+      <div id="menu-backdrop" class="menu-backdrop" aria-hidden="true"></div>
     </main>
 
     <!-- ===================== JANELAS ===================== -->
@@ -781,6 +991,68 @@ function asset(string $file): string
           <button id="confirm-cancel" class="pill ghost" type="button">Cancelar</button>
           <button id="confirm-ok" class="pill danger" type="button">Apagar</button>
         </div>
+      </div>
+    </div>
+
+    <!-- Nosso cantinho: o formulário de cada coisa (refeição, compromisso, sonho, cartinha…), montado pelo app.js. -->
+    <div id="us-sheet" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+      <form id="sheet-form" class="modal-card sheet-card" novalidate>
+        <header class="sheet-head">
+          <span id="sheet-icon" class="sheet-icon" aria-hidden="true"><svg class="icon"><use href="#i-sparkles" /></svg></span>
+          <h3 id="sheet-title"></h3>
+          <button class="peer-close" type="button" data-sheet-close title="Fechar" aria-label="Fechar"><svg class="icon"><use href="#i-x" /></svg></button>
+        </header>
+        <div id="sheet-body" class="sheet-body"></div>
+        <div class="sheet-actions">
+          <button id="sheet-delete" class="text-button hidden" type="button">Apagar</button>
+          <button class="pill ghost" type="button" data-sheet-close>Cancelar</button>
+          <button id="sheet-submit" class="pill gold" type="submit">Salvar</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Cartinha aberta, no papel que quem escreveu escolheu. -->
+    <div id="letter-view" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="letter-title">
+      <article id="letter-paper" class="letter-paper">
+        <button id="letter-close" class="peer-close" type="button" title="Fechar" aria-label="Fechar"><svg class="icon"><use href="#i-x" /></svg></button>
+        <p id="letter-to" class="letter-to"></p>
+        <h3 id="letter-title"></h3>
+        <div id="letter-body" class="letter-body"></div>
+        <p id="letter-sign" class="letter-sign"></p>
+        <p id="letter-state" class="letter-state"></p>
+        <div id="letter-tools" class="letter-tools hidden">
+          <button id="letter-edit" class="pill ghost small" type="button"><svg class="icon"><use href="#i-pencil" /></svg>Editar</button>
+          <button id="letter-delete" class="text-button" type="button">Apagar</button>
+        </div>
+      </article>
+    </div>
+
+    <!-- Mesinha de jogo (velha, dama, memória e stop): o tabuleiro de uma partida da conversa, ao vivo para os dois. -->
+    <div id="game-table" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="table-title">
+      <div class="modal-card table-card">
+        <header class="sheet-head">
+          <span id="table-icon" class="sheet-icon" aria-hidden="true"><svg class="icon"><use href="#i-dice" /></svg></span>
+          <div class="table-heading"><h3 id="table-title"></h3><p id="table-status" class="table-status" aria-live="polite"></p></div>
+          <button id="table-close" class="peer-close" type="button" title="Fechar (a partida continua na conversa)" aria-label="Fechar"><svg class="icon"><use href="#i-x" /></svg></button>
+        </header>
+        <div id="table-players" class="table-players"></div>
+        <div id="table-board" class="table-board"></div>
+        <div id="table-actions" class="table-actions"></div>
+      </div>
+    </div>
+
+    <!-- Lembrete com o site na tela ("O que você almoçou?"): responde aqui mesmo. -->
+    <div id="nudge" class="nudge hidden" role="dialog" aria-labelledby="nudge-title" aria-describedby="nudge-text">
+      <button id="nudge-close" class="peer-close" type="button" title="Agora não" aria-label="Agora não"><svg class="icon"><use href="#i-x" /></svg></button>
+      <span class="nudge-head"><span class="sheet-icon" aria-hidden="true"><svg class="icon"><use id="nudge-icon" href="#i-bell" /></svg></span><strong id="nudge-title"></strong></span>
+      <p id="nudge-text"></p>
+      <form id="nudge-form" class="nudge-form">
+        <input id="nudge-input" autocomplete="off" maxlength="300" enterkeyhint="send" aria-label="Sua resposta" />
+        <button class="pill gold small" type="submit">Responder</button>
+      </form>
+      <div id="nudge-actions" class="nudge-actions">
+        <button id="nudge-done" class="pill gold small" type="button"><svg class="icon"><use href="#i-check" /></svg>Fiz tudo</button>
+        <button id="nudge-open" class="pill ghost small" type="button">Abrir</button>
       </div>
     </div>
 

@@ -172,6 +172,7 @@ function isJumbo(text) {
 const FILE_LABEL = { image: "Foto", video: "Vídeo", audio: "Áudio" };
 const previewText = (message) => (message.gif ? "GIF"
   : message.music ? `Música: ${message.music.title}`
+  : message.game ? GAME_NAMES[message.game.type] || "Joguinho"
   : message.file?.voice ? `Mensagem de voz (${clockTime(message.file.voice.duration)})`
   : message.file && !message.text ? FILE_LABEL[message.file.kind] || message.file.name
   : message.text);
@@ -336,6 +337,7 @@ function startSession({ token, name }, { animate }) {
   store.set("localStorage", SESSION_KEY, { token, name });
   tellParent({ type: "potato:session", token, name });
   connect(token, animate);
+  openFromHash();
 }
 
 function logout() {
@@ -432,6 +434,8 @@ function connect(token, animate) {
     renderAll();
     scrollToLatest();
     markSeen();
+    loadUs();
+    if (table.id) paintTable();
   });
 
   socket.on("message", (message) => receive(message, true));
@@ -452,6 +456,8 @@ function connect(token, animate) {
     applyWatch(state);
     watchNotice(action);
   });
+  // Nosso cantinho: o dia de cada um, agenda, sonhos, cartinhas.
+  socket.on("us", applyUs);
 
   socket.on("theme", ({ theme }) => {
     themeSaved = true;
@@ -510,6 +516,8 @@ function receive(message, live) {
     appendNode(message, live);
   }
   refreshStatuses();
+  if (message.game) paintUsBadge();
+  if (message.game && tab === "us" && us.section === "jogos") paintGames();
   if (!live) return;
 
   if (!mine) {
@@ -517,6 +525,7 @@ function receive(message, live) {
     sound.play("receive");
     notify(message);
     if (tab !== "chat") bumpUnread();
+    if (message.game) toast(`${message.sender} te chamou para jogar: ${GAME_NAMES[message.game.type]}`, "info", "dice");
   } else if (!local) {
     sound.play("tap");
   }
@@ -542,6 +551,11 @@ function updateMessage(message) {
   const index = list.indexOf(previous);
   list[index] = message;
   byId.set(message.id, message);
+  // Jogos: avisos (sua vez, quem ganhou) e a mesinha aberta acompanha a jogada (e fecha se a partida for apagada).
+  if (message.game) gameNotice(previous.game, message.game, message);
+  if (table.id === message.id) paintTable();
+  if (message.game || previous.game) paintUsBadge();
+  if ((message.game || previous.game) && tab === "us" && us.section === "jogos") paintGames();
   const node = messagesEl.querySelector(`[data-id="${message.id}"]`);
   if (!node) return;
   const before = Object.fromEntries(Object.entries(previous.reactions || {}).map(([emoji, names]) => [emoji, names.length]));
@@ -562,10 +576,10 @@ function needsDay(previous, message) {
   return !previous || dayKey(previous.createdAt) !== dayKey(message.createdAt);
 }
 
-// Mensagens seguidas da mesma pessoa ficam juntinhas. Os cartões de música (no meio da conversa) não entram:
-// eles têm sempre o mesmo espaço em volta.
+// Mensagens seguidas da mesma pessoa ficam juntinhas. Os cartões de música e de jogo (no meio da conversa) não
+// entram: eles têm sempre o mesmo espaço em volta.
 function isGrouped(previous, message) {
-  return Boolean(previous) && !previous.music && !message.music && previous.sender === message.sender && !needsDay(previous, message)
+  return Boolean(previous) && !previous.music && !message.music && !previous.game && !message.game && previous.sender === message.sender && !needsDay(previous, message)
     && new Date(message.createdAt) - new Date(previous.createdAt) < 5 * 60 * 1000;
 }
 
@@ -639,6 +653,10 @@ function fill(article, message) {
     article.classList.add("music-note");
     bubble.classList.add("music-card");
     bubble.append(musicCard(message));
+  } else if (message.game && !message.deleted) {
+    article.classList.add("game-note");
+    bubble.classList.add("game-card");
+    bubble.append(gameCard(message));
   } else if (message.file?.voice && !message.deleted) {
     bubble.classList.add("attachment", "is-voice");
     bubble.append(voiceView(message));
@@ -1337,6 +1355,8 @@ messagesEl.addEventListener("click", (event) => {
   if (event.target.closest("[data-view]")) return openViewer(message.file);
   const musicAction = event.target.closest("[data-music-action]");
   if (musicAction && message.music) return cardAction(musicAction.dataset.musicAction, message.music);
+  const gameAction = event.target.closest("[data-game]");
+  if (gameAction && message.game) return playGame(message, gameAction.dataset.game, gameAction.dataset.value, article);
   if (event.target.closest("[data-open-music]")) return openMusic();
   if (event.target.closest("[data-download]")) return downloadFile(message.file);
 
@@ -1387,9 +1407,9 @@ function closeTools() {
 }
 
 // Devolve a mensagem que pode receber ações, ou null (links mantêm o menu do navegador;
-// em vídeo e áudio o toque é dos controles, para arrastar a barra sem abrir o menu nem responder).
+// em vídeo e áudio o toque é dos controles, para arrastar a barra sem abrir o menu nem responder; nos jogos, das jogadas).
 function actionableMessage(target) {
-  if (!target.closest(".bubble") || target.closest("a, video, audio, .voice-ctl")) return null;
+  if (!target.closest(".bubble") || target.closest("a, video, audio, .voice-ctl, .game-ctl")) return null;
   const article = target.closest(".message");
   return article?.msg?.id && !article.msg.deleted ? article : null;
 }
@@ -2363,6 +2383,13 @@ function paintTabs() {
     if (active) button.setAttribute("aria-current", "page");
     else button.removeAttribute("aria-current");
   });
+  // As partes do Nosso cantinho, no menu.
+  document.querySelectorAll(".side-link").forEach((link) => {
+    const active = tab === "us" && link.dataset.usOpen === us.section;
+    link.classList.toggle("active", active);
+    if (active) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
 }
 
 function paintUnread() {
@@ -2378,25 +2405,35 @@ function bumpUnread() {
   document.querySelectorAll(".unread-badge").forEach((badge) => fx.pop(badge));
 }
 
+// Ordem das abas (a tela nova entra do lado de onde a aba está).
+const TABS = ["chat", "us", "profile"];
+
 function showTab(name) {
   if (name === tab || !me) return;
   closeTools();
   closeGifs();
   if (tab === "chat") chatScroll = nearBottom() ? null : messagesEl.scrollTop;
+  const direction = TABS.indexOf(name) > TABS.indexOf(tab) ? 1 : -1;
   tab = name;
   chatView.dataset.tab = name;
   paintTabs();
   sound.play("tap");
   if (name === "profile") {
     openProfile();
-    fx.view(profileView, 1);
+    fx.view(profileView, direction);
     return;
   }
+  if (name === "us") {
+    openUs();
+    fx.view(usView, direction);
+    return;
+  }
+  paintUsBadge();
   unreadAway = 0;
   paintUnread();
   messagesEl.scrollTop = chatScroll ?? messagesEl.scrollHeight;
   markSeen();
-  fx.view($(".conversation"), -1);
+  fx.view($(".conversation"), direction);
 }
 
 document.addEventListener("click", (event) => {
@@ -2427,7 +2464,7 @@ document.addEventListener("focusout", () => setTimeout(paintKeyboard));
 
 // No perfil, Esc volta para a conversa (a não ser que uma janela esteja aberta: aí o Esc é dela).
 window.addEventListener("keydown", (event) => {
-  if (event.key !== "Escape" || tab !== "profile" || document.querySelector(".modal:not(.hidden)")) return;
+  if (event.key !== "Escape" || tab !== "profile" || document.querySelector(".modal:not(.hidden), .viewer:not(.hidden)")) return;
   event.stopPropagation();
   showTab("chat");
 }, true);
@@ -5023,6 +5060,2421 @@ $("#end-call").addEventListener("click", () => teardown(true));
 $("#accept-call").addEventListener("click", acceptCall);
 $("#decline-call").addEventListener("click", declineCall);
 window.addEventListener("beforeunload", () => { if (call) socket?.emit("call-ended", { to: call.peerId }); });
+
+// ---------- nosso cantinho ----------
+// Uma aba só nossa: o dia de cada um (hora em que acordou, refeições com foto, hábitos, humor, momentos e como foi o
+// dia), a agenda dos dois, os sonhos e metas, as cartinhas e os joguinhos. Tudo fica no servidor (ação "us"), e as
+// mudanças chegam ao vivo para os dois (aviso "us").
+
+const usView = $("#us-view");
+const usScroll = $("#us-scroll");
+const US_SECTIONS = ["hoje", "agenda", "sonhos", "cartinhas", "jogos"];
+const US_SECTION_KEY = "potato.usSection";
+const MEALS = [["cafe", "coffee", "Café da manhã", "Pão, café, fruta…"], ["almoco", "utensils", "Almoço", "Arroz, feijão, bife…"], ["lanche", "cookie", "Lanche", "Bolo, biscoito, açaí…"], ["jantar", "soup", "Jantar", "Sopa, pizza, lanche…"]];
+const MEAL_INFO = Object.fromEntries(MEALS.map(([key, iconName, label, hint]) => [key, { icon: iconName, label, hint }]));
+// Humor do dia: chave (a mesma lista do MOODS em lib/potato.php), ícone e nome.
+const MOODS = [["feliz", "smile", "Feliz"], ["rindo", "laugh", "Rindo à toa"], ["amor", "heart", "Amando"], ["energia", "zap", "Com energia"], ["deboa", "meh", "De boa"], ["sono", "moon", "Com sono"], ["triste", "frown", "Triste"], ["raiva", "angry", "Com raiva"], ["doente", "thermometer", "Doente"]];
+const MOOD_INFO = Object.fromEntries(MOODS.map(([key, iconName, label]) => [key, { icon: iconName, label }]));
+const PROMPT_LABELS = [["acordar", "sunrise", "Hora de acordar", "Acordar"], ["cafe", "coffee", "Café da manhã", "Café"], ["almoco", "utensils", "Almoço", "Almoço"], ["lanche", "cookie", "Lanche", "Lanche"], ["jantar", "soup", "Jantar", "Jantar"], ["rotina", "list-checks", "Rotina (o que falta)", "Rotina"]];
+const PROMPT_ICON = Object.fromEntries(PROMPT_LABELS.map(([key, iconName]) => [key, iconName]));
+const PROMPT_DEFAULTS = { acordar: "09:30", cafe: "10:30", almoco: "13:30", lanche: "16:30", jantar: "20:30", rotina: "22:00" };
+// Ícones que dá para escolher (as mesmas listas do EVENT_ICONS e do GOAL_ICONS em lib/potato.php).
+const EVENT_ICONS = [["calendar", "Compromisso"], ["heart", "Encontro"], ["film", "Cinema"], ["utensils", "Comida"], ["cake", "Aniversário"], ["plane", "Viagem"], ["gift", "Presente"], ["stethoscope", "Saúde"], ["graduation", "Estudo"], ["briefcase", "Trabalho"], ["cart", "Compras"], ["dumbbell", "Treino"]];
+const GOAL_ICONS = [["sparkles", "Sonho"], ["palmtree", "Praia"], ["plane", "Viagem"], ["home", "Casa"], ["dog", "Bichinho"], ["gem", "Aliança"], ["car", "Carro"], ["graduation", "Estudo"], ["piggy", "Dinheiro"], ["gamepad", "Jogo"], ["chef", "Cozinha"], ["globe", "Mundo"]];
+const REPEAT_LABEL = { none: "Não repete", weekly: "Toda semana", monthly: "Todo mês", yearly: "Todo ano" };
+const REMIND_OPTIONS = [["", "Sem lembrete"], [0, "Na hora"], [15, "15 minutos antes"], [30, "30 minutos antes"], [60, "1 hora antes"], [120, "2 horas antes"], [1440, "1 dia antes"]];
+const PAPERS = [["creme", "Creme"], ["rosa", "Rosa"], ["azul", "Azul"], ["lilas", "Lilás"], ["verde", "Verde"]];
+const LETTER_DRAFT_KEY = "potato.letterDraft";
+const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+// No app do Android, os lembretes e as novidades com o app fechado vêm dele (notificação com responder).
+const inAndroid = /PotatoChatAndroid/.test(navigator.userAgent);
+const savedSection = store.get("localStorage", US_SECTION_KEY);
+// O que vem do servidor (ação "load" e os avisos "us"): os dias já abertos (data → { nome: dia }), a agenda, os sonhos
+// e metas, as cartinhas (sem o texto inteiro), os hábitos dos dois e os lembretes desta pessoa.
+const us = { loaded: false, section: US_SECTIONS.includes(savedSection) ? savedSection : "hoje", day: "", days: new Map(), loadingDay: "", events: [], goals: [], letters: [], habits: {}, prompts: {}, month: "", calDay: "" };
+// Novidades da outra pessoa desde a última vez nesta aba (as cartinhas novas contam à parte, até serem abertas).
+let usUnseen = 0;
+
+const pad2 = (value) => String(value).padStart(2, "0");
+const isoDay = (date) => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+// Hoje no fuso do aparelho, pelo relógio do servidor (o do celular pode estar errado).
+const todayKey = () => isoDay(new Date(Date.now() + musicClock));
+// Meio-dia: contar dias para a frente e para trás nunca erra por causa de horário de verão.
+const dayDate = (day) => new Date(`${day}T12:00:00`);
+const shiftDay = (day, amount) => {
+  const date = dayDate(day);
+  date.setDate(date.getDate() + amount);
+  return isoDay(date);
+};
+const nowClock = () => {
+  const now = new Date(Date.now() + musicClock);
+  return `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+};
+const capitalize = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+const fullDate = (day) => new Intl.DateTimeFormat("pt-BR", { weekday: "long", day: "numeric", month: "long" }).format(dayDate(day));
+const shortDate = (day) => new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "short" }).format(dayDate(day)).replace(".", "");
+const who = (name) => (name === me ? "Você" : name);
+const upsert = (items, item) => {
+  const index = items.findIndex((old) => old.id === item.id);
+  if (index >= 0) items[index] = { ...items[index], ...item };
+  else items.push(item);
+};
+
+// "Hoje", "Ontem", "Amanhã" ou o dia da semana.
+function dayName(day) {
+  const diff = Math.round((dayDate(day) - dayDate(todayKey())) / 864e5);
+  if (diff === 0) return "Hoje";
+  if (diff === -1) return "Ontem";
+  if (diff === 1) return "Amanhã";
+  return capitalize(new Intl.DateTimeFormat("pt-BR", { weekday: "long" }).format(dayDate(day)));
+}
+
+// "1.234,56", "1234.56", "R$ 50" → número (null se não der).
+function parseMoney(text) {
+  let clean = String(text ?? "").replace(/[^\d,.-]/g, "");
+  if (clean.includes(",")) clean = clean.replace(/\./g, "").replace(",", ".");
+  else if (/^\d{1,3}(\.\d{3})+$/.test(clean)) clean = clean.replace(/\./g, "");
+  const value = Number.parseFloat(clean);
+  return Number.isFinite(value) ? Math.round(value * 100) / 100 : null;
+}
+
+// Ícone do sprite num quadradinho colorido (refeições, compromissos, sonhos, cartinhas, jogos…).
+function iconBadge(name, className) {
+  const node = el("span", className);
+  node.append(icon(name));
+  return node;
+}
+
+// Troca o ícone de um <use> do sprite (títulos e janelas).
+const setIcon = (use, name) => use.setAttribute("href", `#i-${name}`);
+
+function emptyNote(text) {
+  const node = el("div", "us-empty");
+  node.append(potatoArt(), el("span", "", text));
+  return node;
+}
+
+// Pedido ao servidor (ação "us"). Dando errado, avisa (quiet = sem aviso, para o que roda sozinho) e devolve null.
+function usCall(data, { quiet = false } = {}) {
+  return new Promise((resolve) => {
+    if (!socket?.connected) {
+      if (!quiet) toast("Sem conexão agora. Tente de novo em instantes.", "error");
+      return resolve(null);
+    }
+    socket.timeout(15000).emit("us", data, (error, result) => {
+      if (!error && result?.ok) return resolve(result);
+      if (!quiet) {
+        toast(result?.error || "Não deu certo. Tente de novo.", "error");
+        sound.play("error");
+      }
+      resolve(null);
+    });
+  });
+}
+
+// Tudo de uma vez, ao conectar (e de novo a cada reconexão, que pode ter perdido avisos).
+async function loadUs() {
+  const day = us.day || todayKey();
+  const result = await usCall({ op: "load", day }, { quiet: true });
+  if (!result) return;
+  Object.assign(us, { loaded: true, events: result.events, goals: result.goals, letters: result.letters, habits: result.habits, prompts: result.prompts });
+  us.days.clear();
+  us.days.set(day, result.days);
+  us.day ||= day;
+  paintUsBadge();
+  if (tab === "us") paintUs();
+  loadSchedule();
+}
+
+async function loadDay(day) {
+  if (us.loadingDay === day) return;
+  us.loadingDay = day;
+  const result = await usCall({ op: "day", day }, { quiet: true });
+  us.loadingDay = "";
+  if (!result) return;
+  us.days.set(day, result.days);
+  if (tab === "us" && us.section === "hoje" && us.day === day) paintToday();
+}
+
+// Mudança feita aqui, no outro aparelho ou pela outra pessoa.
+function applyUs(change) {
+  const theirs = change.by !== me;
+  switch (change.kind) {
+    case "day": {
+      const days = us.days.get(change.item.day);
+      if (days) days[change.item.owner] = change.item;
+      const meal = change.meal && change.item.meals[change.meal];
+      if (theirs && meal && change.item.day === todayKey()) {
+        const label = MEAL_INFO[change.meal].label.toLowerCase();
+        usNotice(meal.text ? `${change.by} contou o que comeu no ${label}: ${meal.text}` : `${change.by} mandou a foto do ${label}`, MEAL_INFO[change.meal].icon);
+      }
+      break;
+    }
+    case "habits":
+      us.habits[change.owner] = change.habits;
+      break;
+    case "prompts":
+      loadSchedule();
+      return;
+    case "event":
+      if (change.deleted) us.events = us.events.filter((event) => event.id !== change.id);
+      else upsert(us.events, change.item);
+      if (theirs && change.created) usNotice(`${change.by} marcou na agenda: ${change.item.title} · ${shortDate(change.item.date)}${change.item.time ? ` às ${change.item.time}` : ""}`, "calendar", { push: true });
+      else if (theirs && change.deleted) usNotice(`${change.by} tirou da agenda: ${change.title}`, "calendar");
+      loadSchedule();
+      break;
+    case "goal":
+      if (change.deleted) us.goals = us.goals.filter((goal) => goal.id !== change.id);
+      else upsert(us.goals, change.item);
+      if (!theirs || change.deleted) break;
+      if (change.action === "new") usNotice(`${change.by} sonhou alto: ${change.item.title}`, "sparkles");
+      else if (change.action === "deposit" && change.amount > 0) usNotice(`${change.by} guardou ${money.format(change.amount)} para “${change.item.title}”`, "piggy");
+      else if (change.action === "done" && change.item.done) {
+        usNotice(`${change.by} marcou “${change.item.title}” como realizado!`, "sparkles", { push: true });
+        fx.confetti();
+      }
+      break;
+    case "letter":
+      if (change.deleted) us.letters = us.letters.filter((letter) => letter.id !== change.id);
+      else upsert(us.letters, change.item);
+      if (theirs && change.action === "new") {
+        usNotice(`${change.by} te escreveu uma cartinha!`, "mail", { push: true, count: false });
+        fx.confetti(50);
+      } else if (theirs && change.action === "read") {
+        usNotice(`${change.by} leu a sua cartinha “${change.item.title}”`, "mail", { count: false });
+      }
+      break;
+  }
+  paintUsBadge();
+  if (tab === "us") paintUs();
+}
+
+// Novidade da outra pessoa: aviso na tela, o número na aba (fora dela) e, com o site escondido no computador, a
+// notificação (no app do Android, quem avisa é o próprio app).
+function usNotice(text, iconName, { push = false, count = true } = {}) {
+  toast(text, "info", iconName);
+  sound.play("receive");
+  if (count && tab !== "us") {
+    usUnseen += 1;
+    paintUsBadge();
+    document.querySelectorAll(".menu-dot:not(.hidden)").forEach((dot) => fx.pop(dot));
+  }
+  if (!push || !document.hidden || inAndroid || !notificationsOn()) return;
+  try {
+    const notification = new Notification("Nosso cantinho", { body: text, icon: avatars.get(peerName), tag: "potato-us" });
+    notification.onclick = () => {
+      window.focus();
+      goUs();
+      notification.close();
+    };
+  } catch {}
+}
+
+const unreadLetters = () => us.letters.filter((letter) => letter.owner !== me && !letter.readAt).length;
+const US_TITLES = { hoje: ["sun", "Rotina do dia"], agenda: ["calendar", "Agenda"], sonhos: ["sparkles", "Sonhos e metas"], cartinhas: ["mail", "Cartinhas"], jogos: ["dice", "Jogos"] };
+
+// Os números do menu: cartinhas novas e partidas esperando a sua jogada. No celular, o botão do menu ganha um
+// pontinho quando tem novidade lá dentro (também as da outra pessoa no dia, na agenda e nos sonhos).
+function paintUsBadge() {
+  const letters = unreadLetters();
+  const turns = list.filter((message) => message.game && !message.deleted && gameOpen(message.game) && gameWaiting(message.game).startsWith("Sua vez")).length;
+  for (const [selector, count] of [[".letters-new", letters], [".games-turn", turns]]) {
+    document.querySelectorAll(selector).forEach((badge) => {
+      badge.textContent = count > 99 ? "99+" : String(count);
+      badge.classList.toggle("hidden", !count);
+    });
+  }
+  const news = letters + turns + (tab === "us" ? 0 : usUnseen);
+  document.querySelectorAll(".menu-dot").forEach((dot) => dot.classList.toggle("hidden", !news));
+  paintSideAgenda();
+}
+
+// No menu, embaixo de "Agenda": o próximo compromisso.
+function paintSideAgenda() {
+  let next = null;
+  for (let offset = 0; offset < 60 && !next; offset += 1) {
+    const day = shiftDay(todayKey(), offset);
+    const event = eventsOn(day).find((item) => offset > 0 || !item.time || (item.end || item.time) >= nowClock());
+    if (event) next = [event, day];
+  }
+  const when = next && (next[1] === todayKey() ? "Hoje" : next[1] === shiftDay(todayKey(), 1) ? "Amanhã" : shortDate(next[1]));
+  $("#side-agenda").textContent = next ? `${when}${next[0].time ? ` ${next[0].time}` : ""} · ${next[0].title}` : "Os compromissos dos dois";
+}
+
+// ---- menu: a barra lateral (no celular, uma gaveta que abre pelo botão de menu) ----
+
+function setMenu(open) {
+  chatView.classList.toggle("menu-open", open);
+  document.querySelectorAll("[data-menu]").forEach((button) => button.setAttribute("aria-expanded", String(open)));
+  if (open) sound.play("tap");
+}
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest("[data-menu]")) return setMenu(!chatView.classList.contains("menu-open"));
+  if (event.target.closest("#menu-backdrop") || event.target.closest(".sidebar [data-tab-target], .sidebar [data-us-open]")) setMenu(false);
+});
+
+window.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !chatView.classList.contains("menu-open")) return;
+  event.stopImmediatePropagation();
+  setMenu(false);
+}, true);
+
+function openUs() {
+  usUnseen = 0;
+  paintUsBadge();
+  if (!us.loaded) loadUs();
+  paintUs();
+}
+
+function setUsSection(section) {
+  us.section = section;
+  store.set("localStorage", US_SECTION_KEY, section);
+}
+
+// Abre o Nosso cantinho numa parte (de um aviso, do menu de anexar, de um comando ou do endereço #agenda…).
+function goUs(section, { day, calDay } = {}) {
+  if (US_SECTIONS.includes(section)) setUsSection(section);
+  if (day) us.day = day;
+  if (calDay) {
+    us.calDay = calDay;
+    us.month = calDay.slice(0, 7);
+  }
+  if (tab === "us") paintUs();
+  else showTab("us");
+}
+
+function paintUs() {
+  const [iconName, title] = US_TITLES[us.section];
+  setIcon($("#us-title-icon"), iconName);
+  $("#us-title-text").textContent = title;
+  usView.querySelectorAll("[data-pane]").forEach((pane) => pane.classList.toggle("hidden", pane.dataset.pane !== us.section));
+  paintTabs();
+  ({ hoje: paintToday, agenda: paintAgenda, sonhos: paintGoals, cartinhas: paintLetters, jogos: paintGames })[us.section]();
+}
+
+// Um item do menu (ou o "Joguinhos" do clipe de anexar): abre aquela parte.
+document.addEventListener("click", (event) => {
+  const open = event.target.closest("[data-us-open]");
+  if (!open) return;
+  closeAttach();
+  const changed = tab === "us" && open.dataset.usOpen !== us.section;
+  goUs(open.dataset.usOpen);
+  if (!changed) return;
+  usScroll.scrollTop = 0;
+  fx.view(usView.querySelector(`[data-pane="${us.section}"]`), 1);
+  sound.play("tap");
+});
+
+// No Nosso cantinho, Esc volta para a conversa (a não ser que uma janela esteja aberta: aí o Esc é dela).
+window.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || tab !== "us" || document.querySelector(".modal:not(.hidden), .viewer:not(.hidden)")) return;
+  event.stopPropagation();
+  showTab("chat");
+}, true);
+
+// ---- hoje: o dia de cada um ----
+
+const myDay = () => us.days.get(us.day)?.[me] || null;
+
+function paintToday() {
+  us.day ||= todayKey();
+  $("#day-label").textContent = dayName(us.day);
+  $("#day-date").textContent = fullDate(us.day);
+  $("#day-next").disabled = us.day >= todayKey();
+  const days = us.days.get(us.day);
+  if (days) {
+    const names = Object.keys(days).sort((a, b) => (a === me ? -1 : b === me ? 1 : 0));
+    $("#day-cards").replaceChildren(...names.map((name) => dayCard(days[name])));
+  } else {
+    $("#day-cards").replaceChildren(emptyNote(socket?.connected ? "Carregando…" : "Sem conexão agora."));
+    loadDay(us.day);
+  }
+  paintPromptsState();
+}
+
+// O cartão de uma pessoa. No seu, cada linha abre o formulário dela; no da outra pessoa, só dá para ver (e ampliar as fotos).
+function dayCard(data) {
+  const mine = data.owner === me;
+  const card = el("article", `day-card${mine ? " mine" : ""}`);
+  const head = el("header", "day-head");
+  const face = el("span", "avatar");
+  paintAvatar(face, data.owner);
+  const name = el("div", "day-who");
+  const since = data.updatedAt ? `atualizado ${dayName(isoDay(new Date(data.updatedAt))).toLowerCase() === "hoje" ? "" : `${shortDate(isoDay(new Date(data.updatedAt)))} `}às ${time(data.updatedAt)}` : mine ? "Conte como está sendo o seu dia" : "Ainda não contou nada";
+  name.append(el("strong", "", mine ? "Você" : data.owner), el("small", "", since));
+  const feeling = MOOD_INFO[data.mood];
+  const mood = el(mine ? "button" : "span", `mood${feeling ? "" : " is-empty"}`);
+  mood.append(icon(feeling?.icon || "smile"));
+  if (feeling) mood.dataset.mood = data.mood;
+  mood.title = feeling ? feeling.label : "Como você está?";
+  if (mine) {
+    mood.type = "button";
+    mood.dataset.dayEdit = "mood";
+    mood.setAttribute("aria-label", feeling ? `Humor: ${feeling.label}. Trocar` : "Contar como você está");
+  } else if (!feeling) mood.classList.add("hidden");
+  head.append(face, name, mood);
+  card.append(head);
+
+  const rows = el("div", "day-rows");
+  rows.append(dayRow({ edit: "wake", iconName: "sunrise", tone: "acordar", label: "Acordou", value: data.wake ? `às ${data.wake}` : "", empty: mine ? "Que horas você acordou?" : "—", mine }));
+  for (const [key, iconName, label] of MEALS) {
+    const meal = data.meals?.[key];
+    rows.append(dayRow({ edit: "meal", meal: key, iconName, tone: key, label, value: meal?.text || (meal?.photo ? "Foto" : ""), empty: mine ? "Contar…" : "—", mine, photo: meal?.photo, at: meal?.at }));
+  }
+  card.append(rows, habitsBox(data, mine), momentsBox(data, mine));
+
+  const note = el(mine ? "button" : "div", `day-note${data.note ? "" : " is-empty"}`);
+  if (mine) {
+    note.type = "button";
+    note.dataset.dayEdit = "note";
+  }
+  const noteLabel = el("small");
+  noteLabel.append(icon("book-open"), "Como foi o dia");
+  note.append(noteLabel, el("p", "", data.note || (mine ? "Escrever…" : "—")));
+  card.append(note);
+  return card;
+}
+
+function dayRow({ edit, meal, iconName, tone, label, value, empty, mine, photo, at }) {
+  const row = el(mine ? "button" : "div", `day-row${value ? "" : " is-empty"}`);
+  if (mine) {
+    row.type = "button";
+    row.dataset.dayEdit = edit;
+    if (meal) row.dataset.meal = meal;
+  }
+  const text = el("span", "row-text");
+  text.append(el("small", "", at ? `${label} · ${time(at)}` : label), el("span", "row-value", value || empty));
+  row.append(iconBadge(iconName, `row-icon tone-${tone}`), text);
+  if (photo) {
+    const image = el("img", "row-photo");
+    image.src = photo.url;
+    image.alt = `Foto: ${label}`;
+    image.loading = "lazy";
+    image.dataset.photo = photo.url;
+    row.append(image);
+  } else if (mine) {
+    row.append(icon(value ? "pencil" : "plus", "icon row-go"));
+  }
+  return row;
+}
+
+function habitsBox(data, mine) {
+  const habits = us.habits[data.owner] || [];
+  const box = el("div", "day-box habits");
+  const head = el("div", "box-head");
+  head.append(iconBadge("list-checks", "row-icon tone-rotina"), el("strong", "", "Rotina"));
+  if (habits.length) {
+    const done = habits.filter((habit) => data.done.includes(habit.id)).length;
+    const count = el("span", `habits-count${done === habits.length ? " full" : ""}`, `${done}/${habits.length}`);
+    count.style.setProperty("--p", done / habits.length);
+    head.append(count);
+  }
+  if (mine) {
+    const edit = el("button", "text-button box-edit", habits.length ? "Editar" : "Montar");
+    edit.type = "button";
+    edit.dataset.dayEdit = "habits";
+    head.append(edit);
+  }
+  box.append(head);
+  if (!habits.length) {
+    box.append(el("p", "box-empty", mine ? "Monte a sua rotina: beber água, academia, estudar, tomar o remédio…" : `${data.owner} ainda não montou a rotina.`));
+    return box;
+  }
+  const list = el("div", "habit-list");
+  for (const habit of habits) {
+    const on = data.done.includes(habit.id);
+    const chip = el(mine ? "button" : "span", `habit${on ? " done" : ""}`);
+    if (mine) {
+      chip.type = "button";
+      chip.dataset.habit = habit.id;
+      chip.setAttribute("aria-pressed", String(on));
+    }
+    chip.append(icon(on ? "check-circle" : "circle", "icon habit-check"), el("span", "", habit.text));
+    list.append(chip);
+  }
+  box.append(list);
+  return box;
+}
+
+function momentsBox(data, mine) {
+  const box = el("div", "day-box moments");
+  const head = el("div", "box-head");
+  head.append(iconBadge("camera", "row-icon tone-momentos"), el("strong", "", "Momentos do dia"));
+  box.append(head);
+  if (!data.moments.length && !mine) {
+    box.append(el("p", "box-empty", "Sem fotos ainda."));
+    return box;
+  }
+  const strip = el("div", "moment-strip");
+  data.moments.forEach((moment, index) => {
+    const figure = el("figure", "moment");
+    const image = el("img");
+    image.src = moment.photo.url;
+    image.alt = moment.text || "Momento do dia";
+    image.loading = "lazy";
+    image.dataset.photo = moment.photo.url;
+    figure.append(image);
+    if (moment.text) figure.append(el("figcaption", "", moment.text));
+    if (mine) {
+      const remove = el("button", "moment-remove");
+      remove.type = "button";
+      remove.dataset.momentRemove = String(index);
+      remove.title = "Tirar a foto";
+      remove.setAttribute("aria-label", "Tirar a foto");
+      remove.append(icon("x"));
+      figure.append(remove);
+    }
+    strip.append(figure);
+  });
+  if (mine && data.moments.length < 8) {
+    const add = el("button", "moment add");
+    add.type = "button";
+    add.dataset.dayEdit = "moment";
+    add.append(icon("camera"), el("span", "", "Foto"));
+    strip.append(add);
+  }
+  box.append(strip);
+  return box;
+}
+
+$("#day-cards").addEventListener("click", (event) => {
+  const photo = event.target.closest("[data-photo]");
+  if (photo) return openViewer({ url: photo.dataset.photo, name: "foto.jpg" });
+  if (!event.target.closest(".day-card.mine")) return;
+  const habit = event.target.closest("[data-habit]");
+  if (habit) return toggleHabit(habit.dataset.habit);
+  const remove = event.target.closest("[data-moment-remove]");
+  if (remove) return removeMoment(Number(remove.dataset.momentRemove));
+  const edit = event.target.closest("[data-day-edit]");
+  if (!edit) return;
+  sound.play("tap");
+  ({ wake: editWake, meal: () => editMeal(edit.dataset.meal), mood: editMood, note: editNote, habits: editHabits, moment: addMoment })[edit.dataset.dayEdit]?.();
+});
+
+$("#day-prev").addEventListener("click", () => {
+  us.day = shiftDay(us.day, -1);
+  paintToday();
+  sound.play("tap");
+});
+
+$("#day-next").addEventListener("click", () => {
+  if (us.day >= todayKey()) return;
+  us.day = shiftDay(us.day, 1);
+  paintToday();
+  sound.play("tap");
+});
+
+// Muda só o que veio (wake, meal, done, mood, note ou moments) no dia aberto; a outra pessoa vê na hora.
+async function saveDay(patch) {
+  const day = us.day;
+  const result = await usCall({ op: "day:save", day, ...patch });
+  if (!result) {
+    loadDay(day);
+    return null;
+  }
+  const days = us.days.get(day);
+  if (days) days[me] = result.item;
+  if (tab === "us" && us.section === "hoje") paintToday();
+  return result.item;
+}
+
+// Foto do Nosso cantinho: reduzida como as do chat e enviada pelo mesmo caminho (api.php?action=upload).
+async function uploadPhoto(file) {
+  if (!socket) throw new Error("Sem conexão agora.");
+  const { blob } = await preparePhoto(file);
+  if (fileMax && blob.size > fileMax) throw new Error(`Foto grande demais (máximo de ${formatSize(fileMax)}).`);
+  const response = await fetch(apiUrl("upload"), {
+    method: "POST",
+    headers: { "Content-Type": blob.type || "application/octet-stream", "X-Potato-Token": socket.auth.token, "X-Potato-Name": encodeURIComponent(blob.name || "foto.jpg") },
+    body: blob
+  }).catch(() => null);
+  const result = await response?.json().catch(() => null);
+  if (!response?.ok || !result?.ok) throw new Error(result?.error || "A foto não subiu. Tente de novo.");
+  if (result.file.kind !== "image") throw new Error("Escolha uma foto (JPG, PNG, WEBP ou GIF).");
+  return result.file;
+}
+
+async function toggleHabit(id) {
+  const day = myDay();
+  if (!day) return;
+  const done = day.done.includes(id) ? day.done.filter((item) => item !== id) : [...day.done, id];
+  const habits = us.habits[me] || [];
+  // Marca na hora, sem esperar o servidor.
+  us.days.get(us.day)[me] = { ...day, done };
+  paintToday();
+  sound.play(done.length > day.done.length ? "react" : "tap");
+  const saved = await saveDay({ done });
+  if (saved && done.length > day.done.length && habits.every((habit) => saved.done.includes(habit.id))) {
+    toast("Rotina completinha!", "ok", "list-checks");
+    fx.confetti(60);
+  }
+}
+
+function editWake() {
+  const day = myDay();
+  openSheet({
+    title: "Que horas você acordou?",
+    icon: "sunrise",
+    fields: [{ name: "wake", type: "time", label: "Acordei às", value: day?.wake || (us.day === todayKey() ? nowClock() : "07:00") }],
+    onSubmit: async ({ wake }) => Boolean(await saveDay({ wake })),
+    onDelete: day?.wake ? async () => Boolean(await saveDay({ wake: null })) : null,
+    deleteLabel: "Limpar"
+  });
+}
+
+function editMeal(key) {
+  const info = MEAL_INFO[key];
+  const meal = myDay()?.meals?.[key];
+  openSheet({
+    title: info.label,
+    icon: info.icon,
+    fields: [
+      { name: "text", type: "text", label: "O que foi?", value: meal?.text, placeholder: info.hint, max: 300 },
+      { name: "photo", type: "photo", label: "Foto do prato", value: meal?.photo }
+    ],
+    onSubmit: async ({ text, photo }) => {
+      if (!text && !photo) throw new Error("Conte o que foi ou ponha uma foto.");
+      const ref = photo?.file ? await uploadPhoto(photo.file) : photo;
+      const saved = await saveDay({ meal: { name: key, text, photo: ref ? { key: ref.key } : null } });
+      if (saved) sound.play("sparkle");
+      return Boolean(saved);
+    },
+    onDelete: meal ? async () => Boolean(await saveDay({ meal: { name: key } })) : null
+  });
+}
+
+function editMood() {
+  const day = myDay();
+  openSheet({
+    title: "Como você está?",
+    icon: MOOD_INFO[day?.mood]?.icon || "smile",
+    submit: null,
+    fields: [{ name: "mood", type: "chips", instant: true, value: day?.mood || null, options: MOODS.map(([key, iconName, label]) => [key, label, `mood-${key}`, iconName]) }],
+    onSubmit: async ({ mood }) => Boolean(await saveDay({ mood })),
+    onDelete: day?.mood ? async () => Boolean(await saveDay({ mood: null })) : null,
+    deleteLabel: "Limpar"
+  });
+}
+
+function editNote() {
+  openSheet({
+    title: "Como foi o dia?",
+    icon: "book-open",
+    fields: [{ name: "note", type: "textarea", value: myDay()?.note, placeholder: "Conta um pouquinho…", max: 2000, rows: 5 }],
+    onSubmit: async ({ note }) => Boolean(await saveDay({ note }))
+  });
+}
+
+function editHabits() {
+  openSheet({
+    title: "Sua rotina",
+    icon: "list-checks",
+    fields: [
+      { name: "about", type: "info", text: "As coisinhas que você quer fazer todo dia. Toque em cada uma quando fizer: a outra pessoa vê o seu progresso." },
+      { name: "habits", type: "list", value: us.habits[me] || [], placeholder: "Beber água, academia, estudar…", limit: 12, max: 60, add: "Adicionar" }
+    ],
+    onSubmit: async ({ habits }) => {
+      const result = await usCall({ op: "habits", habits });
+      if (!result) return false;
+      us.habits[me] = result.habits;
+      paintToday();
+      return true;
+    }
+  });
+}
+
+function addMoment() {
+  openSheet({
+    title: "Momento do dia",
+    icon: "camera",
+    fields: [
+      { name: "photo", type: "photo", label: "Foto", value: null, pickNow: true },
+      { name: "text", type: "text", label: "Legenda", placeholder: "O que estava rolando?", max: 200 }
+    ],
+    onSubmit: async ({ photo, text }) => {
+      if (!photo?.file) throw new Error("Escolha uma foto.");
+      const ref = await uploadPhoto(photo.file);
+      const moments = (myDay()?.moments || []).map((moment) => ({ photo: { key: moment.photo.key }, text: moment.text }));
+      return Boolean(await saveDay({ moments: [...moments, { photo: { key: ref.key }, text }] }));
+    }
+  });
+}
+
+async function removeMoment(index) {
+  if (!await confirmDialog({ title: "Tirar essa foto?", text: "Ela sai do seu dia para os dois.", confirm: "Tirar" })) return;
+  const moments = (myDay()?.moments || []).filter((moment, position) => position !== index).map((moment) => ({ photo: { key: moment.photo.key }, text: moment.text }));
+  saveDay({ moments });
+}
+
+function paintPromptsState() {
+  const on = PROMPT_LABELS.filter(([key]) => us.prompts[key]).map(([key, , , short]) => `${short} ${us.prompts[key]}`);
+  $("#prompts-state").textContent = on.length ? on.join(" · ") : "Desligados";
+}
+
+$("#prompts-open").addEventListener("click", () => openSheet({
+  title: "Lembretes da rotina",
+  icon: "bell",
+  fields: [
+    { name: "about", type: "info", text: inAndroid ? "Na hora marcada chega uma notificação perguntando, e dá para responder nela mesma, sem abrir o app. Só pergunta o que você ainda não contou." : "Na hora marcada, o site pergunta aqui mesmo (no app do celular, chega uma notificação que dá para responder sem abrir o app). Só pergunta o que você ainda não contou." },
+    { name: "prompts", type: "prompt", value: us.prompts }
+  ],
+  onSubmit: async ({ prompts }) => {
+    const result = await usCall({ op: "prompts", prompts });
+    if (!result) return false;
+    us.prompts = result.prompts;
+    paintPromptsState();
+    loadSchedule();
+    toast("Lembretes salvos", "ok", "bell");
+    return true;
+  }
+}));
+
+// ---- agenda dos dois ----
+
+// O compromisso acontece nesse dia? Toda semana, todo mês (dia 31 cai no último dia dos meses curtos) ou todo ano.
+// (Mesma regra do event_on em lib/potato.php.)
+function occursOn(event, day) {
+  if (day === event.date) return true;
+  if (!event.repeat || event.repeat === "none" || day < event.date) return false;
+  const date = dayDate(day);
+  const start = dayDate(event.date);
+  const last = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  if (event.repeat === "weekly") return date.getDay() === start.getDay();
+  if (event.repeat === "monthly") return date.getDate() === Math.min(start.getDate(), last);
+  return event.repeat === "yearly" && date.getMonth() === start.getMonth() && date.getDate() === Math.min(start.getDate(), last);
+}
+
+// No mesmo dia: primeiro o que é o dia todo, depois pela hora.
+const eventsOn = (day) => us.events.filter((event) => occursOn(event, day)).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+const whoClass = (name) => (name === "ambos" ? "both" : name === me ? "mine" : "theirs");
+const eventHours = (event) => (event.time ? `${event.time}${event.end ? `–${event.end}` : ""}` : "O dia todo");
+const clockMinutes = (clock) => Number(clock.slice(0, 2)) * 60 + Number(clock.slice(3, 5));
+// A semana começa no domingo, como no calendário da parede.
+const weekStart = (day) => shiftDay(day, -dayDate(day).getDay());
+const CAL_VIEW_KEY = "potato.calView";
+const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+// Semana: a grade vai das 6h à meia-noite (o que for antes das 6h aparece no topo), HOUR_HEIGHT px por hora.
+const FIRST_HOUR = 6;
+const HOUR_HEIGHT = 44;
+let calView = store.get("localStorage", CAL_VIEW_KEY) === "week" ? "week" : "month";
+
+function paintAgenda() {
+  us.calDay ||= todayKey();
+  us.month ||= us.calDay.slice(0, 7);
+  usView.querySelectorAll("[data-cal-view]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.calView === calView)));
+  if (calView === "week") paintWeek();
+  else paintMonth();
+  $("#cal-day-title").textContent = `${dayName(us.calDay)} · ${shortDate(us.calDay)}`;
+  const chosen = eventsOn(us.calDay);
+  $("#cal-day").replaceChildren(...(chosen.length ? chosen.map((event) => eventRow(event, us.calDay)) : [emptyNote("Nada marcado nesse dia. Que tal um encontro?")]));
+  const upcoming = [];
+  for (let offset = 0; offset < 120 && upcoming.length < 8; offset += 1) {
+    const day = shiftDay(todayKey(), offset);
+    for (const event of eventsOn(day)) if (upcoming.length < 8) upcoming.push([event, day]);
+  }
+  $("#cal-next-list").replaceChildren(...(upcoming.length ? upcoming.map(([event, day]) => eventRow(event, day, true)) : [emptyNote("Nenhum compromisso nos próximos meses.")]));
+  paintSideAgenda();
+}
+
+// Mês: cada dia com os compromissos escritos (no celular, tracinhos na cor de quem é), como num calendário de verdade.
+function paintMonth() {
+  const [year, month] = us.month.split("-").map(Number);
+  const first = new Date(year, month - 1, 1, 12);
+  $("#cal-month").textContent = capitalize(new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(first));
+  const start = shiftDay(isoDay(first), -first.getDay());
+  const weeks = Math.ceil((first.getDay() + new Date(year, month, 0).getDate()) / 7);
+  const grid = el("div", "month-grid");
+  grid.append(...WEEKDAYS.map((name) => el("span", "month-weekday", name)));
+  for (let index = 0; index < weeks * 7; index += 1) {
+    const day = shiftDay(start, index);
+    const events = eventsOn(day);
+    const cell = el("div", "month-cell");
+    cell.dataset.day = day;
+    cell.classList.toggle("other", day.slice(0, 7) !== us.month);
+    cell.classList.toggle("today", day === todayKey());
+    cell.classList.toggle("selected", day === us.calDay);
+    const number = el("button", "month-number", String(dayDate(day).getDate()));
+    number.type = "button";
+    number.dataset.day = day;
+    number.setAttribute("aria-label", `${fullDate(day)}${events.length ? `, ${events.length} ${events.length === 1 ? "compromisso" : "compromissos"}` : ""}`);
+    if (day === us.calDay) number.setAttribute("aria-current", "date");
+    const chips = el("div", "month-events");
+    for (const event of events.slice(0, 3)) {
+      const chip = el("button", `month-chip ${whoClass(event.who)}`);
+      chip.type = "button";
+      chip.dataset.event = event.id;
+      chip.dataset.day = day;
+      chip.title = `${eventHours(event)} · ${event.title}`;
+      if (event.time) chip.append(el("span", "chip-time", event.time));
+      chip.append(el("span", "chip-title", event.title));
+      chips.append(chip);
+    }
+    if (events.length > 3) chips.append(el("span", "month-more", `+${events.length - 3}`));
+    cell.append(number, chips);
+    grid.append(cell);
+  }
+  $("#cal-body").replaceChildren(grid);
+}
+
+// Semana: os sete dias lado a lado, com a grade de horários; cada compromisso é um bloco do tamanho que dura (sem
+// hora de acabar, uma hora). Os que acontecem ao mesmo tempo dividem a coluna. Hoje tem a linha da hora atual.
+function paintWeek() {
+  const days = Array.from({ length: 7 }, (_, index) => shiftDay(weekStart(us.calDay), index));
+  $("#cal-month").textContent = `${shortDate(days[0])} – ${shortDate(days[6])}`;
+  const week = el("div", "week");
+  week.append(el("span", "week-corner"));
+  for (const day of days) {
+    const head = el("button", `week-day${day === todayKey() ? " today" : ""}${day === us.calDay ? " selected" : ""}`);
+    head.type = "button";
+    head.dataset.day = day;
+    head.setAttribute("aria-label", fullDate(day));
+    head.append(el("small", "", WEEKDAYS[dayDate(day).getDay()]), el("strong", "", String(dayDate(day).getDate())));
+    week.append(head);
+  }
+  week.append(el("span", "week-label", "dia todo"));
+  for (const day of days) {
+    const cell = el("div", "week-allday");
+    cell.dataset.day = day;
+    for (const event of eventsOn(day).filter((item) => !item.time)) cell.append(weekEvent(event, day, "week-chip"));
+    week.append(cell);
+  }
+  const hours = el("div", "week-hours");
+  for (let hour = FIRST_HOUR; hour < 24; hour += 1) hours.append(el("span", "", `${pad2(hour)}h`));
+  week.append(hours);
+  for (const day of days) {
+    const column = el("div", `week-column${day === todayKey() ? " today" : ""}${day === us.calDay ? " selected" : ""}`);
+    column.dataset.day = day;
+    column.style.height = `${(24 - FIRST_HOUR) * HOUR_HEIGHT}px`;
+    for (const { event, start, end, lane, lanes } of layoutDay(eventsOn(day).filter((item) => item.time))) {
+      const top = Math.max(0, start - FIRST_HOUR * 60);
+      const block = weekEvent(event, day, "week-event");
+      block.style.top = `${top / 60 * HOUR_HEIGHT}px`;
+      block.style.height = `${Math.max(22, (end - FIRST_HOUR * 60 - top) / 60 * HOUR_HEIGHT - 2)}px`;
+      block.style.left = `calc(${lane * 100 / lanes}% + 2px)`;
+      block.style.width = `calc(${100 / lanes}% - 4px)`;
+      column.append(block);
+    }
+    if (day === todayKey()) {
+      const now = clockMinutes(nowClock()) - FIRST_HOUR * 60;
+      if (now > 0) {
+        const line = el("i", "week-now");
+        line.style.top = `${now / 60 * HOUR_HEIGHT}px`;
+        column.append(line);
+      }
+    }
+    week.append(column);
+  }
+  const scroll = el("div", "week-scroll");
+  scroll.append(week);
+  $("#cal-body").replaceChildren(scroll);
+  // Começa perto da hora atual (ou das 8h).
+  const focus = days.includes(todayKey()) ? clockMinutes(nowClock()) / 60 - 1.5 : 8;
+  scroll.scrollTop = Math.max(0, (focus - FIRST_HOUR) * HOUR_HEIGHT);
+  // No celular não cabem os sete dias: a semana rola para o lado até o dia escolhido.
+  const chosen = week.querySelector(".week-day.selected");
+  if (chosen && scroll.scrollWidth > scroll.clientWidth) {
+    const left = chosen.getBoundingClientRect().left - scroll.getBoundingClientRect().left + scroll.scrollLeft;
+    scroll.scrollLeft = Math.max(0, left - 46 - (scroll.clientWidth - 46 - chosen.offsetWidth) / 2);
+  }
+}
+
+// Compromissos com hora no mesmo dia: os que se cruzam ficam em faixas lado a lado (lane de lanes).
+function layoutDay(events) {
+  const items = events.map((event) => {
+    const start = clockMinutes(event.time);
+    return { event, start, end: Math.max(start + 30, event.end ? clockMinutes(event.end) : start + 60) };
+  }).sort((a, b) => a.start - b.start);
+  const placed = [];
+  let group = [];
+  let groupEnd = -1;
+  const close = () => {
+    const lanes = [];
+    for (const item of group) {
+      let lane = lanes.findIndex((end) => end <= item.start);
+      if (lane < 0) lane = lanes.length;
+      lanes[lane] = item.end;
+      item.lane = lane;
+    }
+    for (const item of group) item.lanes = lanes.length;
+    placed.push(...group);
+    group = [];
+  };
+  for (const item of items) {
+    if (item.start >= groupEnd) close();
+    group.push(item);
+    groupEnd = Math.max(groupEnd, item.end);
+  }
+  close();
+  return placed;
+}
+
+function weekEvent(event, day, className) {
+  const block = el("button", `${className} ${whoClass(event.who)}`);
+  block.type = "button";
+  block.dataset.event = event.id;
+  block.dataset.day = day;
+  block.title = `${eventHours(event)} · ${event.title}${event.place ? ` · ${event.place}` : ""}`;
+  block.append(el("strong", "", event.title));
+  if (event.time) block.append(el("small", "", eventHours(event)));
+  return block;
+}
+
+function eventRow(event, day, withDate = false) {
+  const row = el("button", `event-row ${whoClass(event.who)}`);
+  row.type = "button";
+  row.dataset.event = event.id;
+  row.dataset.day = day;
+  const text = el("span", "event-text");
+  const meta = [eventHours(event), event.place, event.who === "ambos" ? "Os dois" : who(event.who)].filter(Boolean);
+  if (event.repeat !== "none") meta.push(REPEAT_LABEL[event.repeat].toLowerCase());
+  const details = el("small", "", meta.join(" · "));
+  if (event.remind !== null) details.append(icon("bell", "icon meta-icon"));
+  text.append(el("strong", "", event.title), details);
+  row.append(iconBadge(event.icon || "calendar", `event-emoji ${whoClass(event.who)}`), text);
+  if (withDate) {
+    const label = day === todayKey() ? "Hoje" : day === shiftDay(todayKey(), 1) ? "Amanhã" : new Intl.DateTimeFormat("pt-BR", { weekday: "short", day: "numeric", month: "short" }).format(dayDate(day)).replace(/\./g, "");
+    row.append(el("span", "event-date", label));
+  }
+  return row;
+}
+
+function editEvent(event = null, day = us.calDay || todayKey(), time = "19:00") {
+  const people = presenceList.map((user) => user.name);
+  openSheet({
+    title: event ? "Compromisso" : "Novo compromisso",
+    icon: event?.icon || "calendar",
+    fields: [
+      { name: "icon", type: "chips", iconOnly: true, value: event?.icon || "calendar", options: EVENT_ICONS.map(([name, label]) => [name, label, "", name]) },
+      { name: "title", type: "text", label: "O que é?", value: event?.title, placeholder: "Cinema, jantar, consulta…", max: 120 },
+      { name: "date", type: "date", label: "Dia", value: event?.date || day },
+      { name: "time", type: "time", label: "Começa", value: event ? event.time : time, optional: "O dia todo", fallback: "19:00" },
+      { name: "end", type: "time", label: "Termina", value: event?.end, optional: "Sem hora", fallback: "21:00" },
+      { name: "place", type: "text", label: "Onde", value: event?.place, placeholder: "Opcional", max: 120 },
+      { name: "who", type: "select", label: "De quem", value: event?.who || "ambos", options: [["ambos", "Dos dois"], ...people.map((name) => [name, name === me ? "Só meu" : `Só de ${name}`])] },
+      { name: "repeat", type: "select", label: "Repetir", value: event?.repeat || "none", options: Object.entries(REPEAT_LABEL) },
+      { name: "remind", type: "select", label: "Lembrete", numeric: true, value: event ? event.remind ?? "" : 60, options: REMIND_OPTIONS },
+      { name: "note", type: "textarea", label: "Anotação", value: event?.note, placeholder: "Opcional", max: 1000, rows: 2 }
+    ],
+    onSubmit: async (values) => {
+      if (!values.title) throw new Error("Dê um nome para o compromisso.");
+      if (!values.date) throw new Error("Escolha o dia.");
+      if (values.time && values.end && values.end <= values.time) throw new Error("A hora de terminar tem que ser depois da de começar.");
+      const result = await usCall({ op: "event:save", id: event?.id, ...values });
+      if (!result) return false;
+      upsert(us.events, result.item);
+      us.calDay = result.item.date;
+      us.month = result.item.date.slice(0, 7);
+      paintAgenda();
+      loadSchedule();
+      if (!event) {
+        toast("Marcado na agenda dos dois", "ok", "calendar");
+        sound.play("sparkle");
+      }
+      return true;
+    },
+    onDelete: event ? async () => {
+      if (!await confirmDialog({ title: "Apagar o compromisso?", text: "Ele some da agenda dos dois.", confirm: "Apagar" })) return false;
+      if (!await usCall({ op: "event:delete", id: event.id })) return false;
+      us.events = us.events.filter((item) => item.id !== event.id);
+      paintAgenda();
+      loadSchedule();
+      return true;
+    } : null
+  });
+}
+
+// Tocar num compromisso abre ele; num dia, escolhe o dia; dois toques num dia (ou num horário da semana) marca ali.
+$("#cal-body").addEventListener("click", (event) => {
+  const chip = event.target.closest("[data-event]");
+  const item = chip && us.events.find((entry) => entry.id === chip.dataset.event);
+  if (item) return editEvent(item, chip.dataset.day);
+  const day = event.target.closest("[data-day]")?.dataset.day;
+  if (!day || day === us.calDay) return;
+  us.calDay = day;
+  if (calView === "month" && day.slice(0, 7) !== us.month) us.month = day.slice(0, 7);
+  paintAgenda();
+  sound.play("tap");
+});
+
+$("#cal-body").addEventListener("dblclick", (event) => {
+  if (event.target.closest("[data-event]")) return;
+  const target = event.target.closest("[data-day]");
+  if (!target) return;
+  let time = "19:00";
+  if (target.matches(".week-column")) {
+    const hour = Math.min(23, FIRST_HOUR + Math.floor((event.clientY - target.getBoundingClientRect().top) / HOUR_HEIGHT));
+    time = `${pad2(hour)}:00`;
+  }
+  editEvent(null, target.dataset.day, time);
+});
+
+for (const [id, step] of [["#cal-prev", -1], ["#cal-next", 1]]) {
+  $(id).addEventListener("click", () => {
+    if (calView === "week") {
+      us.calDay = shiftDay(us.calDay, step * 7);
+      us.month = us.calDay.slice(0, 7);
+    } else {
+      const [year, month] = us.month.split("-").map(Number);
+      const date = new Date(year, month - 1 + step, 1, 12);
+      us.month = `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`;
+    }
+    paintAgenda();
+    sound.play("tap");
+  });
+}
+
+$("#cal-today").addEventListener("click", () => {
+  us.calDay = todayKey();
+  us.month = us.calDay.slice(0, 7);
+  paintAgenda();
+  sound.play("tap");
+});
+
+usView.querySelector(".agenda-views").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-cal-view]");
+  if (!button || button.dataset.calView === calView) return;
+  calView = button.dataset.calView;
+  store.set("localStorage", CAL_VIEW_KEY, calView);
+  // Na semana, o dia escolhido precisa estar no mês que estava aberto.
+  if (calView === "week" && us.calDay.slice(0, 7) !== us.month) us.calDay = `${us.month}-01`;
+  paintAgenda();
+  fx.press(button);
+  sound.play("tap");
+});
+
+$("#event-add").addEventListener("click", () => editEvent(null, us.calDay));
+
+for (const events of [$("#cal-day"), $("#cal-next-list")]) {
+  events.addEventListener("click", (event) => {
+    const row = event.target.closest("[data-event]");
+    const item = row && us.events.find((entry) => entry.id === row.dataset.event);
+    if (item) editEvent(item, row.dataset.day);
+  });
+}
+
+// ---- sonhos e metas ----
+
+function paintGoals() {
+  const open = us.goals.filter((goal) => !goal.done).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const done = us.goals.filter((goal) => goal.done).sort((a, b) => String(b.doneAt).localeCompare(String(a.doneAt)));
+  $("#goal-list").replaceChildren(...(open.length ? open.map(goalCard) : [emptyNote("Nenhum sonho ainda. Qual vai ser o primeiro?")]));
+  $("#goal-done").replaceChildren(...done.map(goalCard));
+  $("#goal-done-title").classList.toggle("hidden", !done.length);
+}
+
+function goalCard(goal) {
+  const card = el("article", `goal-card${goal.done ? " done" : ""}`);
+  card.dataset.goal = goal.id;
+  const head = el("header", "goal-head");
+  const title = el("div", "goal-title");
+  const subtitle = goal.done ? `Realizado em ${longDate(goal.doneAt)}` : goal.due ? `Até ${longDate(`${goal.due}T12:00:00`)}` : `Desde ${longDate(goal.createdAt)}`;
+  title.append(el("strong", "", goal.title), el("small", "", subtitle));
+  const edit = el("button", "nav-round small");
+  edit.type = "button";
+  edit.dataset.goalAction = "edit";
+  edit.title = "Editar";
+  edit.setAttribute("aria-label", `Editar ${goal.title}`);
+  edit.append(icon("pencil"));
+  head.append(iconBadge(goal.icon || "sparkles", "goal-emoji"), title, edit);
+  card.append(head);
+  if (goal.note) card.append(el("p", "goal-note", goal.note));
+  if (goal.target || goal.saved) {
+    const box = el("div", "goal-money");
+    const ratio = goal.target ? Math.min(1, goal.saved / goal.target) : 0;
+    const line = el("div", "goal-money-line");
+    line.append(el("strong", "", money.format(goal.saved)), el("span", "", goal.target ? `de ${money.format(goal.target)}` : "guardados"));
+    if (goal.target) line.append(el("b", "", `${Math.floor(ratio * 100)}%`));
+    box.append(line);
+    if (goal.target) {
+      const bar = el("span", "goal-bar");
+      bar.style.setProperty("--p", ratio);
+      bar.append(el("i"));
+      box.append(bar);
+    }
+    const last = goal.deposits?.[0];
+    if (last) box.append(el("small", "goal-last", `${who(last.by)} ${last.amount < 0 ? "tirou" : "guardou"} ${money.format(Math.abs(last.amount))} · ${shortDate(isoDay(new Date(last.at)))}`));
+    card.append(box);
+  }
+  if (goal.steps?.length) {
+    const steps = el("div", "goal-steps");
+    steps.append(el("small", "goal-steps-count", `Passos · ${goal.steps.filter((step) => step.done).length}/${goal.steps.length}`));
+    for (const step of goal.steps) {
+      const item = el("button", `goal-step${step.done ? " done" : ""}`);
+      item.type = "button";
+      item.dataset.step = step.id;
+      item.setAttribute("aria-pressed", String(step.done));
+      item.disabled = goal.done;
+      item.append(el("span", "step-box"), el("span", "", step.text));
+      steps.append(item);
+    }
+    card.append(steps);
+  }
+  const actions = el("div", "goal-actions");
+  const action = (label, name, className, iconName) => {
+    const button = el("button", className);
+    button.type = "button";
+    button.dataset.goalAction = name;
+    if (iconName) button.append(icon(iconName));
+    button.append(label);
+    return button;
+  };
+  if (goal.done) actions.append(action("Ainda não realizamos", "undo", "text-button"));
+  else actions.append(action("Guardar", "deposit", "pill ghost small", "piggy"), action("Realizamos!", "done", "pill gold small", "check"));
+  card.append(actions);
+  return card;
+}
+
+function editGoal(goal = null) {
+  openSheet({
+    title: goal ? "Sonho ou meta" : "Novo sonho ou meta",
+    icon: goal?.icon || "sparkles",
+    fields: [
+      { name: "icon", type: "chips", iconOnly: true, value: goal?.icon || "sparkles", options: GOAL_ICONS.map(([name, label]) => [name, label, "", name]) },
+      { name: "title", type: "text", label: "O que é?", value: goal?.title, placeholder: "Viagem para a praia, nossa casinha…", max: 120 },
+      { name: "target", type: "money", label: "Quanto juntar", value: goal?.target, placeholder: "Opcional (ex.: 1.500,00)" },
+      { name: "due", type: "date", label: "Até quando", value: goal?.due, hint: "Opcional" },
+      { name: "steps", type: "list", label: "Passos", value: goal?.steps || [], placeholder: "Escolher o lugar, reservar…", limit: 20, max: 120, add: "Adicionar passo" },
+      { name: "note", type: "textarea", label: "Anotação", value: goal?.note, placeholder: "Opcional", max: 1000, rows: 2 }
+    ],
+    onSubmit: async (values) => {
+      if (!values.title) throw new Error("Dê um nome para o sonho.");
+      const result = await usCall({ op: "goal:save", id: goal?.id, ...values, due: values.due || null });
+      if (!result) return false;
+      upsert(us.goals, result.item);
+      paintGoals();
+      if (!goal) {
+        toast("Sonho anotado!", "ok", "sparkles");
+        sound.play("sparkle");
+      }
+      return true;
+    },
+    onDelete: goal ? async () => {
+      if (!await confirmDialog({ title: "Apagar esse sonho?", text: "Ele some para os dois, com o que foi guardado nele.", confirm: "Apagar" })) return false;
+      if (!await usCall({ op: "goal:delete", id: goal.id })) return false;
+      us.goals = us.goals.filter((item) => item.id !== goal.id);
+      paintGoals();
+      return true;
+    } : null
+  });
+}
+
+function depositGoal(goal) {
+  openSheet({
+    title: goal.title,
+    icon: "piggy",
+    fields: [
+      { name: "way", type: "chips", value: "in", options: [["in", "Guardar", "", "piggy"], ["out", "Tirar", "", "arrow-left"]] },
+      { name: "amount", type: "money", label: "Quanto", placeholder: "R$ 0,00", focus: true }
+    ],
+    onSubmit: async ({ way, amount }) => {
+      if (!amount || amount <= 0) throw new Error("Diga quanto.");
+      const result = await usCall({ op: "goal:deposit", id: goal.id, amount: way === "out" ? -amount : amount });
+      if (!result) return false;
+      const before = goal.saved;
+      upsert(us.goals, result.item);
+      paintGoals();
+      if (way === "in" && result.item.target && before < result.item.target && result.item.saved >= result.item.target) {
+        toast("Objetivo alcançado!", "ok", "sparkles");
+        fx.confetti();
+      } else if (way === "in") {
+        toast(`${money.format(amount)} guardados`, "ok", "piggy");
+        sound.play("sparkle");
+      }
+      return true;
+    }
+  });
+}
+
+async function finishGoal(goal, done) {
+  const result = await usCall({ op: "goal:done", id: goal.id, done });
+  if (!result) return;
+  upsert(us.goals, result.item);
+  paintGoals();
+  if (!done) return;
+  toast(`Realizado: ${goal.title}!`, "ok", "sparkles");
+  sound.play("sparkle");
+  fx.confetti();
+}
+
+async function toggleStep(goal, id) {
+  const step = goal.steps.find((item) => item.id === id);
+  if (!step) return;
+  step.done = !step.done;
+  paintGoals();
+  sound.play(step.done ? "react" : "tap");
+  const result = await usCall({ op: "goal:step", id: goal.id, step: id, done: step.done });
+  if (result) upsert(us.goals, result.item);
+  paintGoals();
+}
+
+usView.querySelector('[data-pane="sonhos"]').addEventListener("click", (event) => {
+  if (event.target.closest("#goal-add")) return editGoal();
+  const card = event.target.closest("[data-goal]");
+  const goal = card && us.goals.find((item) => item.id === card.dataset.goal);
+  if (!goal) return;
+  const step = event.target.closest("[data-step]");
+  if (step) return toggleStep(goal, step.dataset.step);
+  const action = event.target.closest("[data-goal-action]")?.dataset.goalAction;
+  if (action === "edit") editGoal(goal);
+  else if (action === "deposit") depositGoal(goal);
+  else if (action === "done" || action === "undo") finishGoal(goal, action === "done");
+});
+
+// ---- cartinhas ----
+
+const letterView = $("#letter-view");
+// Cartinha aberta agora (com o texto inteiro, depois que ele chega).
+let letterOpen = null;
+
+function paintLetters() {
+  const letters = [...us.letters].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  $("#letter-list").replaceChildren(...(letters.length ? letters.map(letterCard) : [emptyNote("Nenhuma cartinha ainda. Que tal escrever a primeira?")]));
+}
+
+function letterCard(letter) {
+  const mine = letter.owner === me;
+  const fresh = !mine && !letter.readAt;
+  const card = el("button", `letter-card paper-${letter.paper}${fresh ? " fresh" : ""}`);
+  card.type = "button";
+  card.dataset.letter = letter.id;
+  const text = el("span", "letter-text");
+  text.append(el("small", "", `${mine ? `Para ${letter.to || "o seu amor"}` : `De ${letter.owner}`} · ${shortDate(isoDay(new Date(letter.createdAt)))}`), el("strong", "", letter.title), el("span", "letter-preview", letter.preview));
+  card.append(iconBadge(fresh ? "mail" : mine ? "send" : "heart", "letter-seal"), text);
+  const flag = fresh ? "Nova!" : mine ? (letter.readAt ? "Lida" : "Ainda não lida") : "";
+  if (flag) card.append(el("span", `letter-flag${fresh ? " new" : ""}`, flag));
+  return card;
+}
+
+function onLetterKey(event) {
+  if (event.key !== "Escape") return;
+  event.stopPropagation();
+  closeLetter();
+}
+
+async function openLetter(id) {
+  const meta = us.letters.find((letter) => letter.id === id);
+  if (!meta) return;
+  const fresh = meta.owner !== me && !meta.readAt;
+  paintLetter({ ...meta, body: null });
+  letterView.classList.remove("hidden");
+  fx.incoming($("#letter-paper"));
+  document.addEventListener("keydown", onLetterKey, true);
+  sound.play("whoosh");
+  const result = await usCall({ op: "letter:open", id });
+  if (!result || letterOpen?.id !== id) return;
+  upsert(us.letters, { id, readAt: result.item.readAt });
+  paintLetter(result.item);
+  if (!fresh) return;
+  sound.play("sparkle");
+  paintUsBadge();
+  paintLetters();
+}
+
+function paintLetter(letter) {
+  letterOpen = letter;
+  const mine = letter.owner === me;
+  $("#letter-paper").className = `letter-paper paper-${letter.paper}`;
+  $("#letter-to").textContent = letter.to === me ? "Para você" : `Para ${letter.to || "o seu amor"}`;
+  $("#letter-title").textContent = letter.title;
+  $("#letter-body").textContent = letter.body ?? "Abrindo a cartinha…";
+  $("#letter-body").classList.toggle("loading", letter.body == null);
+  $("#letter-sign").textContent = `Com amor, ${letter.owner}`;
+  const read = mine ? (letter.readAt ? ` · lida em ${longDate(letter.readAt)} às ${time(letter.readAt)}` : " · ainda não lida") : "";
+  $("#letter-state").textContent = `${longDate(letter.createdAt)}${letter.edited ? " · editada" : ""}${read}`;
+  $("#letter-tools").classList.toggle("hidden", !mine || letter.body == null);
+}
+
+function closeLetter() {
+  letterOpen = null;
+  letterView.classList.add("hidden");
+  document.removeEventListener("keydown", onLetterKey, true);
+}
+
+function writeLetter(letter = null) {
+  const draft = letter ? null : store.get("localStorage", LETTER_DRAFT_KEY);
+  openSheet({
+    title: letter ? "Editar cartinha" : `Cartinha para ${peerName || "o seu amor"}`,
+    icon: "mail",
+    wide: true,
+    submit: letter ? "Salvar" : "Enviar",
+    fields: [
+      { name: "title", type: "text", label: "Título", value: letter?.title ?? draft?.title, placeholder: "Para o meu amor", max: 120 },
+      { name: "paper", type: "chips", label: "Papel", value: letter?.paper || draft?.paper || "creme", options: PAPERS.map(([value, label]) => [value, label, `paper-${value}`]) },
+      { name: "body", type: "textarea", value: letter?.body ?? draft?.body, placeholder: "Escreva com o coração…", max: 20000, rows: 12, className: "letter-input" }
+    ],
+    // O rascunho fica guardado neste aparelho até a cartinha ser enviada.
+    onChange: letter ? null : (values) => store.set("localStorage", LETTER_DRAFT_KEY, values),
+    onSubmit: async (values) => {
+      if (!values.body) throw new Error("Escreva alguma coisa na cartinha.");
+      const result = await usCall({ op: "letter:save", id: letter?.id, ...values });
+      if (!result) return false;
+      if (!letter) store.remove("localStorage", LETTER_DRAFT_KEY);
+      const { body, ...meta } = result.item;
+      upsert(us.letters, { ...meta, preview: body.replace(/\s+/g, " ").slice(0, 140) });
+      paintLetters();
+      if (!letter) {
+        toast(`Cartinha enviada para ${peerName || "o seu amor"}`, "ok", "mail");
+        fx.confetti(40);
+        sound.play("sparkle");
+      }
+      return true;
+    }
+  });
+}
+
+usView.querySelector('[data-pane="cartinhas"]').addEventListener("click", (event) => {
+  if (event.target.closest("#letter-add")) return writeLetter();
+  const card = event.target.closest("[data-letter]");
+  if (card) openLetter(card.dataset.letter);
+});
+
+letterView.addEventListener("click", async (event) => {
+  if (event.target === letterView || event.target.closest("#letter-close")) return closeLetter();
+  const letter = letterOpen;
+  if (!letter) return;
+  if (event.target.closest("#letter-edit")) {
+    closeLetter();
+    writeLetter(letter);
+  } else if (event.target.closest("#letter-delete")) {
+    if (!await confirmDialog({ title: "Apagar a cartinha?", text: "Ela some para os dois. Não dá para desfazer.", confirm: "Apagar" })) return;
+    if (!await usCall({ op: "letter:delete", id: letter.id })) return;
+    us.letters = us.letters.filter((item) => item.id !== letter.id);
+    closeLetter();
+    paintLetters();
+    toast("Cartinha apagada", "ok");
+  }
+});
+
+// ---- formulário (uma janela para tudo) ----
+// Cada campo: { name, type, label, value, … }. Tipos: text, money, date, time (optional = o rótulo do "sem hora"),
+// textarea, select (options [valor, rótulo]; numeric = valores numéricos), chips (options [valor, rótulo, classe,
+// ícone]; iconOnly = só o ícone; instant = escolher já salva), photo, list (itens com texto, e emoji com withEmoji), prompt
+// (horário de cada lembrete, com liga/desliga) e info (um texto). onSubmit recebe os valores e fecha a janela, a
+// não ser que devolva false; um erro vira aviso. onDelete aparece como o botão Apagar.
+const sheet = $("#us-sheet");
+const sheetForm = $("#sheet-form");
+let sheetState = null;
+let sheetTimer = 0;
+
+function openSheet({ title, icon: iconName = "sparkles", fields, submit = "Salvar", onSubmit, onDelete = null, deleteLabel = "Apagar", wide = false, onChange = null }) {
+  sheetState = { fields, onSubmit, onDelete, onChange, busy: false };
+  $("#sheet-title").textContent = title;
+  setIcon($("#sheet-icon use"), iconName);
+  $("#sheet-submit").textContent = submit || "";
+  $("#sheet-submit").classList.toggle("hidden", !submit);
+  $("#sheet-delete").textContent = deleteLabel;
+  $("#sheet-delete").classList.toggle("hidden", !onDelete);
+  sheetForm.classList.toggle("wide", wide);
+  sheetForm.classList.remove("busy");
+  $("#sheet-body").replaceChildren(...fields.map(fieldNode));
+  sheet.classList.remove("hidden");
+  $("#sheet-body").scrollTop = 0;
+  fx.incoming(sheetForm);
+  document.addEventListener("keydown", onSheetKey, true);
+  const focus = sheetForm.querySelector("[data-autofocus]") || (matchMedia("(pointer: fine)").matches && sheetForm.querySelector(".field-input:not([type=date]):not([type=time]):not(select)"));
+  focus?.focus();
+}
+
+function closeSheet() {
+  if (!sheetState) return;
+  clearTimeout(sheetTimer);
+  sheetState = null;
+  sheet.classList.add("hidden");
+  document.removeEventListener("keydown", onSheetKey, true);
+}
+
+function onSheetKey(event) {
+  if (event.key === "Escape") {
+    event.stopPropagation();
+    closeSheet();
+  } else if (event.key === "Enter" && event.target.matches(".list-text")) {
+    // Enter num item da lista cria o próximo (em vez de salvar).
+    event.preventDefault();
+    sheetForm.querySelector(`[data-list-add="${event.target.closest("[data-field]").dataset.field}"]`)?.click();
+  }
+}
+
+function fieldNode(field) {
+  const wrap = el("div", `field-row type-${field.type}`);
+  wrap.dataset.field = field.name;
+  if (field.label) wrap.append(el("span", "field-label", field.label));
+  const input = (tag, type) => {
+    const node = el(tag, `field-input${field.className ? ` ${field.className}` : ""}`);
+    if (type) node.type = type;
+    node.name = field.name;
+    if (field.placeholder) node.placeholder = field.placeholder;
+    if (field.max) node.maxLength = field.max;
+    if (field.focus) node.dataset.autofocus = "";
+    if (field.label) node.setAttribute("aria-label", field.label);
+    return node;
+  };
+  switch (field.type) {
+    case "info":
+      wrap.append(el("p", "field-info", field.text));
+      break;
+    case "text":
+    case "date": {
+      const node = input("input", field.type);
+      node.value = field.value || "";
+      if (field.type === "text") node.autocomplete = "off";
+      wrap.append(node);
+      break;
+    }
+    case "money": {
+      const node = input("input", "text");
+      node.inputMode = "decimal";
+      node.autocomplete = "off";
+      node.value = field.value ? String(field.value).replace(".", ",") : "";
+      wrap.append(node);
+      break;
+    }
+    case "time": {
+      const node = input("input", "time");
+      node.value = field.value || "";
+      wrap.append(node);
+      if (field.optional) {
+        // Sem hora (o dia todo): o campo fica desligado.
+        const toggle = el("button", `field-toggle${field.value ? "" : " on"}`, field.optional);
+        toggle.type = "button";
+        toggle.dataset.toggle = "";
+        toggle.setAttribute("aria-pressed", String(!field.value));
+        node.disabled = !field.value;
+        wrap.append(toggle);
+      }
+      break;
+    }
+    case "textarea": {
+      const node = input("textarea");
+      node.rows = field.rows || 4;
+      node.value = field.value || "";
+      wrap.append(node);
+      break;
+    }
+    case "select": {
+      const node = input("select");
+      for (const [value, label] of field.options) {
+        const option = el("option", "", label);
+        option.value = String(value);
+        option.selected = String(field.value ?? "") === String(value);
+        node.append(option);
+      }
+      wrap.append(node);
+      break;
+    }
+    case "chips": {
+      const row = el("div", `chips${field.iconOnly ? " icon-only" : ""}`);
+      wrap.dataset.value = JSON.stringify(field.value ?? null);
+      for (const [value, label, className, iconName] of field.options) {
+        const chip = el("button", `chip-option${className ? ` ${className}` : ""}`);
+        if (iconName) chip.append(icon(iconName));
+        if (!field.iconOnly) chip.append(label);
+        chip.title = label;
+        chip.setAttribute("aria-label", label);
+        chip.type = "button";
+        chip.dataset.chip = JSON.stringify(value);
+        chip.setAttribute("aria-pressed", String(value === field.value));
+        row.append(chip);
+      }
+      wrap.append(row);
+      break;
+    }
+    case "photo": {
+      wrap.photo = field.value || null;
+      const file = el("input");
+      file.type = "file";
+      file.accept = "image/*";
+      file.hidden = true;
+      file.addEventListener("change", () => {
+        const [chosen] = file.files;
+        file.value = "";
+        if (!chosen) return;
+        if (!chosen.type.startsWith("image/")) return toast("Escolha uma foto.", "error");
+        wrap.photo = { file: chosen, url: URL.createObjectURL(chosen) };
+        paintPhotoField(wrap);
+      });
+      wrap.append(el("div", "photo-field"), file);
+      paintPhotoField(wrap);
+      // Abre a escolha da foto direto (o toque que abriu a janela ainda vale como gesto da pessoa).
+      if (field.pickNow) queueMicrotask(() => file.click());
+      break;
+    }
+    case "list": {
+      const list = el("div", "list-edit");
+      const items = field.value?.length ? field.value : [{}];
+      for (const item of items) list.append(listRow(field, item));
+      const add = el("button", "text-button list-add");
+      add.type = "button";
+      add.dataset.listAdd = field.name;
+      add.append(icon("plus"), field.add || "Adicionar");
+      wrap.append(list, add);
+      break;
+    }
+    case "prompt": {
+      const list = el("div", "prompt-list");
+      for (const [key, iconName, label] of PROMPT_LABELS) {
+        const value = field.value?.[key];
+        const row = el("div", `prompt-row${value ? "" : " is-off"}`);
+        row.dataset.key = key;
+        const clock = el("input", "field-input");
+        clock.type = "time";
+        clock.value = value || PROMPT_DEFAULTS[key];
+        clock.setAttribute("aria-label", `Horário: ${label}`);
+        const toggle = el("button", "prompt-switch");
+        toggle.type = "button";
+        toggle.dataset.promptSwitch = "";
+        toggle.setAttribute("role", "switch");
+        toggle.setAttribute("aria-checked", String(Boolean(value)));
+        toggle.setAttribute("aria-label", label);
+        toggle.append(el("span", "switch"));
+        row.append(iconBadge(iconName, `row-icon tone-${key}`), el("span", "prompt-label", label), clock, toggle);
+        list.append(row);
+      }
+      wrap.append(list);
+      break;
+    }
+  }
+  if (field.hint) wrap.append(el("small", "field-hint", field.hint));
+  return wrap;
+}
+
+function listRow(field, item = {}) {
+  const row = el("div", "list-row");
+  row.item = { id: item.id, done: item.done };
+  if (field.withEmoji) {
+    const emoji = el("input", "list-emoji");
+    emoji.value = item.emoji || field.defaultEmoji;
+    emoji.maxLength = 8;
+    emoji.setAttribute("aria-label", "Emoji");
+    row.append(emoji);
+  }
+  const text = el("input", "list-text");
+  text.value = item.text || "";
+  text.placeholder = field.placeholder || "";
+  text.maxLength = field.max || 60;
+  text.enterKeyHint = "next";
+  text.setAttribute("aria-label", field.label || "Item");
+  const remove = el("button", "list-remove");
+  remove.type = "button";
+  remove.dataset.listRemove = "";
+  remove.title = "Tirar";
+  remove.setAttribute("aria-label", "Tirar");
+  remove.append(icon("x"));
+  row.append(text, remove);
+  return row;
+}
+
+function paintPhotoField(wrap) {
+  const box = wrap.querySelector(".photo-field");
+  const photo = wrap.photo;
+  box.replaceChildren();
+  if (photo) {
+    const image = el("img");
+    image.src = photo.url;
+    image.alt = "";
+    box.append(image);
+  }
+  const actions = el("div", "photo-field-actions");
+  const pick = el("button", "pill ghost small");
+  pick.type = "button";
+  pick.dataset.photoPick = "";
+  pick.append(icon("camera"), photo ? "Trocar foto" : "Pôr uma foto");
+  actions.append(pick);
+  if (photo) {
+    const clear = el("button", "text-button", "Tirar");
+    clear.type = "button";
+    clear.dataset.photoClear = "";
+    actions.append(clear);
+  }
+  box.append(actions);
+}
+
+function readSheet() {
+  const values = {};
+  for (const field of sheetState.fields) {
+    const wrap = sheetForm.querySelector(`[data-field="${field.name}"]`);
+    switch (field.type) {
+      case "text":
+      case "date":
+      case "textarea":
+        values[field.name] = wrap.querySelector(".field-input").value.trim();
+        break;
+      case "money":
+        values[field.name] = parseMoney(wrap.querySelector(".field-input").value);
+        break;
+      case "time": {
+        const node = wrap.querySelector(".field-input");
+        values[field.name] = node.disabled ? null : node.value || null;
+        break;
+      }
+      case "select": {
+        const raw = wrap.querySelector(".field-input").value;
+        values[field.name] = field.numeric ? (raw === "" ? null : Number(raw)) : raw;
+        break;
+      }
+      case "chips":
+        values[field.name] = JSON.parse(wrap.dataset.value || "null");
+        break;
+      case "photo":
+        values[field.name] = wrap.photo || null;
+        break;
+      case "list":
+        values[field.name] = [...wrap.querySelectorAll(".list-row")].map((row) => ({
+          ...row.item,
+          text: row.querySelector(".list-text").value.trim(),
+          ...(field.withEmoji ? { emoji: row.querySelector(".list-emoji").value.trim() || field.defaultEmoji } : {})
+        })).filter((item) => item.text);
+        break;
+      case "prompt":
+        values[field.name] = Object.fromEntries([...wrap.querySelectorAll(".prompt-row")].map((row) => [row.dataset.key, row.classList.contains("is-off") ? null : row.querySelector("input").value || null]));
+        break;
+    }
+  }
+  return values;
+}
+
+sheetForm.addEventListener("click", (event) => {
+  if (event.target.closest("[data-sheet-close]")) return closeSheet();
+  const wrap = event.target.closest("[data-field]");
+  const chip = event.target.closest("[data-chip]");
+  if (chip) {
+    wrap.dataset.value = chip.dataset.chip;
+    wrap.querySelectorAll("[data-chip]").forEach((node) => node.setAttribute("aria-pressed", String(node === chip)));
+    fx.press(chip);
+    sound.play("tap");
+    if (sheetState.fields.find((field) => field.name === wrap.dataset.field)?.instant) sheetForm.requestSubmit();
+    else sheetChanged();
+    return;
+  }
+  if (event.target.closest("[data-toggle]")) {
+    const toggle = event.target.closest("[data-toggle]");
+    const node = wrap.querySelector(".field-input");
+    const allDay = !toggle.classList.contains("on");
+    toggle.classList.toggle("on", allDay);
+    toggle.setAttribute("aria-pressed", String(allDay));
+    node.disabled = allDay;
+    if (!allDay) {
+      node.value ||= sheetState.fields.find((field) => field.name === wrap.dataset.field)?.fallback || "19:00";
+      node.focus();
+    }
+    return;
+  }
+  const add = event.target.closest("[data-list-add]");
+  if (add) {
+    const field = sheetState.fields.find((item) => item.name === add.dataset.listAdd);
+    const list = wrap.querySelector(".list-edit");
+    if (list.children.length >= field.limit) return toast(`No máximo ${field.limit}.`);
+    const row = listRow(field);
+    list.append(row);
+    row.querySelector(".list-text").focus();
+    return;
+  }
+  if (event.target.closest("[data-list-remove]")) return event.target.closest(".list-row").remove();
+  if (event.target.closest("[data-photo-pick]")) return wrap.querySelector("input[type=file]").click();
+  if (event.target.closest("[data-photo-clear]")) {
+    wrap.photo = null;
+    return paintPhotoField(wrap);
+  }
+  const promptSwitch = event.target.closest("[data-prompt-switch]");
+  if (promptSwitch) {
+    const row = promptSwitch.closest(".prompt-row");
+    const off = !row.classList.contains("is-off");
+    row.classList.toggle("is-off", off);
+    promptSwitch.setAttribute("aria-checked", String(!off));
+    sound.play("tap");
+    return;
+  }
+  if (event.target.closest("#sheet-delete") && sheetState?.onDelete) runSheet(sheetState.onDelete);
+});
+
+sheet.addEventListener("click", (event) => {
+  if (event.target === sheet) closeSheet();
+});
+
+function sheetChanged() {
+  if (!sheetState?.onChange) return;
+  clearTimeout(sheetTimer);
+  sheetTimer = setTimeout(() => sheetState?.onChange?.(readSheet()), 400);
+}
+
+sheetForm.addEventListener("input", sheetChanged);
+
+// Salvar (ou apagar): a janela fica ocupada até o servidor responder; erro vira aviso e ela continua aberta.
+async function runSheet(action) {
+  if (!sheetState || sheetState.busy) return;
+  const state = sheetState;
+  state.busy = true;
+  sheetForm.classList.add("busy");
+  try {
+    const close = await action(readSheet());
+    if (close !== false && sheetState === state) closeSheet();
+  } catch (error) {
+    toast(error.message || "Não deu certo.", "error");
+    sound.play("error");
+  } finally {
+    state.busy = false;
+    sheetForm.classList.remove("busy");
+  }
+}
+
+sheetForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (sheetState) runSheet(sheetState.onSubmit);
+});
+
+// ---- lembretes ----
+// A lista das próximas 48 horas vem do servidor (us_schedule): a rotina (acordar, refeições, hábitos) e os
+// compromissos. Com o site na tela e alguém mexendo nele, o lembrete aparece aqui, com o campo para responder; com
+// o app do Android em segundo plano, quem avisa é o app (com o responder na própria notificação). Só o primeiro
+// aparelho que pedir (claim) mostra cada lembrete, e o da rotina não aparece se já foi respondido.
+const nudge = $("#nudge");
+let schedule = [];
+let scheduleTimer = 0;
+let nudgeItem = null;
+let lastInput = Date.now();
+const claimed = new Set();
+
+for (const type of ["pointerdown", "keydown"]) addEventListener(type, () => { lastInput = Date.now(); }, { capture: true, passive: true });
+
+async function loadSchedule() {
+  clearTimeout(scheduleTimer);
+  scheduleTimer = setTimeout(loadSchedule, 30 * 60000);
+  const result = await usCall({ op: "schedule", tz: -new Date().getTimezoneOffset() }, { quiet: true });
+  if (result) schedule = result.items;
+}
+
+async function checkReminders() {
+  // Ninguém mexendo há 5 minutos: deixa para o celular avisar.
+  if (!socket?.connected || document.hidden || nudgeItem || Date.now() - lastInput > 5 * 60000) return;
+  const now = Date.now() + musicClock;
+  const due = schedule.find((item) => item.at <= now && now - item.at < 2 * 3600000 && !claimed.has(item.key));
+  if (!due) return;
+  claimed.add(due.key);
+  const result = await usCall({ op: "claim", key: due.key }, { quiet: true });
+  if (result?.fire) showNudge({ ...due, text: result.text || due.text });
+}
+
+setInterval(checkReminders, 20000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) setTimeout(checkReminders, 1500); });
+
+function showNudge(item) {
+  nudgeItem = item;
+  setIcon($("#nudge-icon"), item.kind === "event" ? "calendar" : PROMPT_ICON[item.field] || "bell");
+  $("#nudge-title").textContent = item.title;
+  $("#nudge-text").textContent = item.text;
+  $("#nudge-form").classList.toggle("hidden", !item.reply);
+  $("#nudge-done").classList.toggle("hidden", item.field !== "rotina");
+  $("#nudge-open").textContent = item.kind === "event" ? "Ver na agenda" : "Abrir";
+  const input = $("#nudge-input");
+  input.value = "";
+  input.placeholder = item.field === "acordar" ? "Ex.: 7:30 (vazio = agora)" : "Conta aqui…";
+  fx.show(nudge, { y: -16, scale: 0.96 });
+  sound.play("receive");
+  if (item.reply && matchMedia("(pointer: fine)").matches) input.focus();
+}
+
+function closeNudge() {
+  if (!nudgeItem) return;
+  nudgeItem = null;
+  fx.hide(nudge, { y: -16 });
+}
+
+async function answerNudge(text) {
+  const item = nudgeItem;
+  if (!item) return;
+  const result = await usCall({ op: "reply", day: item.day, field: item.field, text, clock: nowClock() });
+  if (!result) return;
+  const days = us.days.get(item.day);
+  if (days) days[me] = result.item;
+  if (tab === "us" && us.section === "hoje") paintToday();
+  closeNudge();
+  toast("Anotado!", "ok");
+  sound.play("sparkle");
+}
+
+$("#nudge-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const text = $("#nudge-input").value.trim();
+  if (!text && nudgeItem?.field !== "acordar") return $("#nudge-input").focus();
+  answerNudge(text);
+});
+$("#nudge-done").addEventListener("click", () => answerNudge(""));
+$("#nudge-close").addEventListener("click", closeNudge);
+$("#nudge-open").addEventListener("click", () => {
+  const item = nudgeItem;
+  closeNudge();
+  if (item?.kind === "event") goUs("agenda", { calDay: item.day });
+  else if (item) goUs("hoje", { day: item.day });
+});
+
+// Endereço com #hoje, #agenda, #sonhos, #cartinhas ou #jogos (ou #cantinho): abre direto lá. O app do Android usa
+// ao tocar numa notificação do Nosso cantinho (com o app já aberto, chama window.potatoOpen).
+function openFromHash() {
+  const section = location.hash.slice(1);
+  if (section !== "cantinho" && !US_SECTIONS.includes(section)) return;
+  history.replaceState(null, "", location.pathname + location.search);
+  goUs(section);
+}
+
+window.potatoOpen = (section) => {
+  if (me) goUs(section);
+};
+
+// ---------- joguinhos ----------
+// Cada partida é uma mensagem com game (veja "joguinhos" em lib/potato.php). Cartas (verdade ou desafio, quem é mais
+// provável, isso ou aquilo, perguntinha) se jogam no próprio cartão da conversa; os de tabuleiro (velha, dama,
+// memória e stop) na mesinha, que abre por cima e acompanha as jogadas ao vivo.
+
+const GAME_NAMES = { vd: "Verdade ou desafio", quem: "Quem é mais provável?", isso: "Isso ou aquilo", pergunta: "Perguntinha", velha: "Jogo da velha", dama: "Dama", memoria: "Jogo da memória", stop: "Stop" };
+const GAME_ICONS = { vd: "dice", quem: "users", isso: "split", pergunta: "question", velha: "hash", dama: "crown", memoria: "brain", stop: "hand" };
+const BOARD_GAMES = ["velha", "dama", "memoria", "stop"];
+const GAME_PICKS_KEY = "potato.gamePicks";
+const STOP_DRAFT_KEY = "potato.stopDraft";
+// O que você escolheu em cada jogo de votar ou responder (o servidor só mostra quando os dois tiverem ido).
+const gamePicks = new Map(Object.entries(store.get("localStorage", GAME_PICKS_KEY) || {}));
+// Resposta da perguntinha sendo escrita (o cartão é refeito a cada novidade e não pode perder o texto).
+const gameDrafts = new Map();
+const otherPlayer = () => presenceList.find((user) => user.name !== me)?.name || "a outra pessoa";
+
+function rememberPick(id, value) {
+  gamePicks.set(id, value);
+  store.set("localStorage", GAME_PICKS_KEY, Object.fromEntries([...gamePicks].slice(-100)));
+}
+
+// A partida ainda está valendo? (Tabuleiro sem vencedor; carta sem escolha, votos ou respostas de todos.)
+const gameOpen = (game) => (BOARD_GAMES.includes(game.type) ? !game.winner : game.type === "vd" ? !game.choice : !game.done);
+
+function gameWaiting(game) {
+  if (BOARD_GAMES.includes(game.type)) return boardStatus(game);
+  if (game.type === "vd") return game.for === me ? "Sua vez de escolher!" : `Esperando ${game.for} escolher…`;
+  return game.players.includes(me) ? `Esperando ${otherPlayer()}…` : "Sua vez!";
+}
+
+// A seção de jogos: as partidas que ainda estão valendo (das mensagens já carregadas) e os jogos para começar.
+function paintGames() {
+  $('[data-game-hint="vd"]').textContent = `${peerName || "A outra pessoa"} escolhe: verdade ou desafio. Perguntas e desafios fofinhos.`;
+  const live = list.filter((message) => message.game && !message.deleted && gameOpen(message.game)).slice(-6).reverse();
+  $("#game-live-wrap").classList.toggle("hidden", !live.length);
+  $("#game-live").replaceChildren(...live.map((message) => {
+    const row = el("button", "event-row game-row");
+    row.type = "button";
+    row.dataset.openGame = message.id;
+    const text = el("span", "event-text");
+    text.append(el("strong", "", GAME_NAMES[message.game.type]), el("small", "", `${gameWaiting(message.game)} · ${message.sender === me ? "você começou" : `${message.sender} começou`}`));
+    row.append(iconBadge(GAME_ICONS[message.game.type], `event-emoji game-${message.game.type}`), text, el("span", "event-date", "Continuar"));
+    return row;
+  }));
+}
+
+usView.querySelector('[data-pane="jogos"]').addEventListener("click", (event) => {
+  const start = event.target.closest("[data-game-new]");
+  if (start) return startGame(start.dataset.gameNew);
+  const open = event.target.closest("[data-open-game]");
+  if (open) openTable(open.dataset.openGame);
+});
+
+// Nova partida: a mesinha abre aqui mesmo, e o convite vai para a conversa (é lá que a outra pessoa fica sabendo).
+function startGame(type) {
+  if (!socket?.connected) return toast("Sem conexão agora. Tente de novo em instantes.", "error");
+  sound.play("tap");
+  socket.timeout(15000).emit("game", { op: "new", type }, (error, result) => {
+    if (error || !result?.ok) {
+      toast(result?.error || "O joguinho não começou. Tente de novo.", "error");
+      sound.play("error");
+      return;
+    }
+    receive(result.message, true);
+    openTable(result.message.id);
+    if (tab === "us" && us.section === "jogos") paintGames();
+  });
+}
+
+// Uma jogada (op do game_act em lib/potato.php). A mensagem atualizada volta na resposta e também chega pelo aviso.
+function gameMove(message, op, extra = {}, done) {
+  if (!socket?.connected) return toast("Sem conexão agora. Tente de novo em instantes.", "error");
+  socket.timeout(10000).emit("game", { op, id: message.id, ...extra }, (error, result) => {
+    table.busy = false;
+    if (error || !result?.ok) {
+      toast(result?.error || "Não deu certo. Tente de novo.", "error");
+      sound.play("error");
+      if (table.id === message.id) paintTable();
+      return;
+    }
+    if (result.mine !== undefined && result.mine !== null) rememberPick(message.id, result.mine);
+    updateMessage(result.message);
+    done?.(result.message);
+  });
+}
+
+function gameButton(label, action, value, className = "game-ctl", iconName = "") {
+  const node = el("button", className);
+  if (iconName) node.append(icon(iconName));
+  node.append(label);
+  node.type = "button";
+  node.dataset.game = action;
+  if (value !== undefined) node.dataset.value = JSON.stringify(value);
+  return node;
+}
+
+// O cartão da partida na conversa.
+function gameCard(message) {
+  const game = message.game;
+  const box = el("div", "game");
+  box.dataset.type = game.type;
+  const head = el("div", "game-head");
+  const name = el("span", "game-name");
+  name.append(iconBadge(GAME_ICONS[game.type] || "dice", `game-mark game-${game.type}`), GAME_NAMES[game.type] || "Joguinho");
+  head.append(name, el("small", "", message.sender === me ? "você começou" : `${message.sender} começou`));
+  box.append(head);
+  if (BOARD_GAMES.includes(game.type)) boardSummary(message, box);
+  else if (game.type === "vd") truthOrDare(message, box);
+  else if (game.type === "pergunta") questionCard(message, box);
+  else voteCard(message, box);
+  return box;
+}
+
+function truthOrDare(message, box) {
+  const game = message.game;
+  const row = el("div", "game-options");
+  if (!game.choice) {
+    box.append(el("p", "game-prompt", game.for === me ? "Verdade ou desafio?" : `Verdade ou desafio, ${game.for}?`));
+    if (game.for === me) row.append(gameButton("Verdade", "pick", "verdade", "game-ctl game-option", "question"), gameButton("Desafio", "pick", "desafio", "game-ctl game-option", "flame"));
+    else box.append(el("p", "game-wait", `Esperando ${game.for} escolher…`));
+  } else {
+    const chip = el("span", `game-chip ${game.choice}`);
+    chip.append(icon(game.choice === "verdade" ? "question" : "flame"), game.choice === "verdade" ? "Verdade" : "Desafio");
+    box.append(chip, el("p", "game-prompt big", game.prompt));
+    if (game.for === me) row.append(gameButton("Responder", "reply", undefined, "game-ctl game-option", "reply"), gameButton("Sua vez", "again", undefined, "game-ctl game-option", "dice"));
+    else box.append(el("p", "game-wait", `Agora é com ${game.for}`));
+  }
+  if (row.children.length) box.append(row);
+}
+
+// Quem é mais provável (um dos dois) e isso ou aquilo (uma das duas opções).
+function voteCard(message, box) {
+  const game = message.game;
+  if (game.prompt) box.append(el("p", "game-prompt", game.prompt));
+  const values = game.type === "quem" ? game.names : [0, 1];
+  const voted = game.players.includes(me);
+  const mine = game.done ? game.votes[me] : gamePicks.get(message.id);
+  const row = el("div", "game-options");
+  for (const value of values) {
+    const option = gameButton(game.type === "quem" ? who(value) : game.options[value], "vote", value, "game-ctl game-option");
+    if (game.type === "quem") {
+      const face = el("span", "avatar");
+      paintAvatar(face, value);
+      option.prepend(face);
+    }
+    option.disabled = voted || game.done;
+    option.classList.toggle("picked", mine === value);
+    const picks = game.done ? Object.entries(game.votes).filter(([, vote]) => vote === value).map(([name]) => who(name)) : [];
+    if (picks.length) option.append(el("small", "game-votes", picks.join(" e ")));
+    row.append(option);
+  }
+  box.append(row);
+  if (game.done) {
+    const same = new Set(Object.values(game.votes).map(String)).size === 1;
+    box.append(el("p", `game-result${same ? " match" : ""}`, same ? (game.type === "quem" ? "Vocês concordaram!" : "Combinaram!") : game.type === "quem" ? "Discordaram…" : "Gostos diferentes"));
+  } else if (voted) {
+    box.append(el("p", "game-wait", `Você já votou · esperando ${otherPlayer()}…`));
+  } else if (game.players.length) {
+    box.append(el("p", "game-wait", `${otherPlayer()} já votou. Sua vez!`));
+  }
+}
+
+function questionCard(message, box) {
+  const game = message.game;
+  box.append(el("p", "game-prompt", game.prompt));
+  if (game.done) {
+    const answers = el("div", "game-answers");
+    for (const [name, text] of Object.entries(game.answers).sort(([a]) => (a === me ? -1 : 1))) {
+      const item = el("div", `game-answer${name === me ? " mine" : ""}`);
+      item.append(el("small", "", who(name)), el("p", "", text));
+      answers.append(item);
+    }
+    box.append(answers);
+  } else if (game.players.includes(me)) {
+    box.append(el("p", "game-wait", `Sua resposta está guardada · esperando ${otherPlayer()}…`));
+  } else {
+    if (game.players.length) box.append(el("p", "game-wait", `${otherPlayer()} já respondeu. Sua vez!`));
+    const form = el("div", "game-form");
+    const input = el("textarea", "game-ctl game-input");
+    input.rows = 2;
+    input.maxLength = 500;
+    input.placeholder = "Sua resposta…";
+    input.value = gameDrafts.get(message.id) || "";
+    input.dataset.gameInput = message.id;
+    form.append(input, gameButton("Responder", "answer", undefined, "game-ctl game-send"));
+    box.append(form);
+  }
+}
+
+// Jogo de tabuleiro na conversa: de quem é a vez (ou quem ganhou), o placar e o botão para abrir a mesinha.
+function boardSummary(message, box) {
+  const game = message.game;
+  const yourTurn = !game.winner && game.type !== "stop" && game.turn === me;
+  box.append(el("p", `game-status${yourTurn ? " your-turn" : ""}`, boardStatus(game)));
+  if (game.type === "memoria" || game.type === "stop") {
+    const scores = game.type === "memoria" ? game.scores : game.totals;
+    box.append(el("p", "game-score", game.seats.map((name) => `${who(name)} ${scores[name] ?? 0}`).join("  ×  ")));
+  }
+  if (game.type === "velha") {
+    const mini = el("div", "mini-velha");
+    game.board.forEach((mark, cell) => {
+      const square = el("span", game.line?.includes(cell) ? "win" : "");
+      if (mark) square.append(icon(mark === "X" ? "x" : "circle", `icon mark ${mark === "X" ? "x" : "o"}`));
+      mini.append(square);
+    });
+    box.append(mini);
+  }
+  const row = el("div", "game-options");
+  const playing = game.seats.includes(me);
+  row.append(gameButton(game.winner || !playing ? "Ver" : yourTurn || game.type === "stop" ? "Jogar" : "Abrir", "open", undefined, "game-ctl game-option primary"));
+  if (game.winner && playing) row.append(gameButton("Revanche", "again", undefined, "game-ctl game-option", "rotate-ccw"));
+  box.append(row);
+}
+
+const stopper = (name) => (name === me ? "você pediu" : `${name} pediu`);
+
+function boardStatus(game) {
+  if (game.winner) {
+    const result = game.winner === "empate" ? "Deu empate!" : game.winner === me ? "Você venceu!" : `${game.winner} venceu!`;
+    return game.resigned ? `${result} (${who(game.resigned)} desistiu)` : result;
+  }
+  if (game.type === "stop") return game.phase === "review" ? `Rodada ${game.round} · ${stopper(game.last.stoppedBy)} STOP!` : `Rodada ${game.round} · letra ${game.letter}`;
+  if (game.type === "dama" && game.chain !== null) return game.turn === me ? "Continue comendo!" : `${game.turn} está comendo…`;
+  return game.turn === me ? "Sua vez!" : `Vez de ${game.turn}…`;
+}
+
+function playGame(message, action, raw, article) {
+  const value = raw === undefined ? undefined : JSON.parse(raw);
+  if (action === "open") return openTable(message.id);
+  if (action === "reply") return startReply(message);
+  if (action === "again") return startGame(message.game.type);
+  if (action === "pick") return gameMove(message, "pick", { choice: value });
+  if (action === "vote") return gameMove(message, "vote", { value });
+  if (action === "answer") {
+    const input = article.querySelector("[data-game-input]");
+    const text = input.value.trim();
+    if (!text) return input.focus();
+    gameMove(message, "answer", { text }, () => gameDrafts.delete(message.id));
+  }
+}
+
+// O que mudou numa partida que chegou atualizada: fim, vez de quem, stop pedido.
+function gameNotice(before, after, message) {
+  if (!before || !after) return;
+  if (BOARD_GAMES.includes(after.type)) {
+    if (!before.winner && after.winner) {
+      toast(`${GAME_NAMES[after.type]}: ${boardStatus(after)}`, after.winner === me ? "ok" : "info", "dice");
+      if (after.winner === me) fx.confetti();
+      sound.play(after.winner === me ? "sparkle" : "tap");
+    } else if (after.type === "stop" && before.phase === "playing" && after.phase === "review" && after.last.stoppedBy !== me) {
+      toast(`STOP! ${after.last.stoppedBy} parou a rodada`, "info", "hand");
+      sound.play("sparkle");
+    } else if (after.type !== "stop" && before.turn !== me && after.turn === me && table.id !== message.id) {
+      toast(`Sua vez: ${GAME_NAMES[after.type]}`, "info", "dice");
+      sound.play("receive");
+    }
+    return;
+  }
+  if (!before.done && after.done) {
+    const same = after.votes ? new Set(Object.values(after.votes).map(String)).size === 1 : false;
+    toast(after.type === "pergunta" ? "As respostas da perguntinha chegaram!" : same ? "Resultado: combinaram!" : "O resultado do joguinho chegou", "info", GAME_ICONS[after.type]);
+    if (same) fx.confetti(40);
+  } else if (after.type === "vd" && !before.choice && after.choice && after.for !== me) {
+    toast(`${after.for} escolheu ${after.choice}!`, "info", after.choice === "verdade" ? "question" : "flame");
+  }
+}
+
+// Resposta da perguntinha (no cartão da conversa ou na mesinha): o texto é guardado a cada letra; Enter (sem Shift) envia.
+function onGameInput(event) {
+  if (event.target.matches("[data-game-input]")) gameDrafts.set(event.target.dataset.gameInput, event.target.value);
+}
+function onGameEnter(event) {
+  if (!event.target.matches("[data-game-input]") || event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+  event.preventDefault();
+  event.target.closest(".game-form").querySelector("[data-game]").click();
+}
+messagesEl.addEventListener("input", onGameInput);
+messagesEl.addEventListener("keydown", onGameEnter);
+
+// ---- mesinha de jogo ----
+// Abre por cima de tudo, pela seção de jogos ou pelo convite na conversa. Os de tabuleiro (velha, dama, memória e
+// stop) têm o tabuleiro e os dois jogadores; os de carta, a mesma carta da conversa.
+
+const tableEl = $("#game-table");
+// Partida aberta (id da mensagem), a peça escolhida na dama, a rodada do stop já montada (os campos não são refeitos
+// a cada novidade) e as cartas da memória que estavam viradas (para animar só as que viraram agora).
+const table = { id: "", selected: null, built: "", shown: [], busy: false };
+let stopTimer = 0;
+
+function onTableKey(event) {
+  if (event.key !== "Escape" || !document.querySelector("#confirm.hidden")) return;
+  event.stopPropagation();
+  closeTable();
+}
+
+function openTable(id) {
+  if (!byId.get(id)?.game) return;
+  Object.assign(table, { id, selected: null, built: "", shown: [], busy: false });
+  paintTable();
+  tableEl.classList.remove("hidden");
+  fx.incoming(tableEl.querySelector(".table-card"));
+  document.addEventListener("keydown", onTableKey, true);
+}
+
+function closeTable() {
+  if (!table.id) return;
+  const message = byId.get(table.id);
+  // Stop: o que já foi escrito vai junto ao fechar.
+  if (message?.game?.type === "stop" && message.game.phase === "playing") saveStop(message);
+  table.id = "";
+  tableEl.classList.add("hidden");
+  document.removeEventListener("keydown", onTableKey, true);
+}
+
+function paintTable() {
+  const message = byId.get(table.id);
+  if (!message?.game || message.deleted) return closeTable();
+  const game = message.game;
+  const board = BOARD_GAMES.includes(game.type);
+  setIcon($("#table-icon use"), GAME_ICONS[game.type]);
+  $("#table-title").textContent = GAME_NAMES[game.type];
+  const status = $("#table-status");
+  status.textContent = board ? boardStatus(game) : cardStatus(game);
+  status.classList.toggle("your-turn", gameOpen(game) && (board ? game.type !== "stop" && game.turn === me : gameWaiting(game).startsWith("Sua vez")));
+  tableEl.querySelector(".table-card").dataset.type = game.type;
+  if (board) {
+    paintPlayers(game);
+    ({ velha: paintVelha, dama: paintDama, memoria: paintMemory, stop: paintStop })[game.type](message);
+  } else {
+    // Carta: a mesma da conversa, sem o cabeçalho (o título já está em cima).
+    $("#table-players").replaceChildren();
+    const box = el("div", "game in-table");
+    box.dataset.type = game.type;
+    if (game.type === "vd") truthOrDare(message, box);
+    else if (game.type === "pergunta") questionCard(message, box);
+    else voteCard(message, box);
+    $("#table-board").replaceChildren(box);
+  }
+  paintTableActions(game);
+}
+
+function cardStatus(game) {
+  if (gameOpen(game)) return gameWaiting(game);
+  if (game.type === "vd") return game.for === me ? `Você escolheu ${game.choice}!` : `${game.for} escolheu ${game.choice}!`;
+  if (game.type === "pergunta") return "As respostas chegaram!";
+  return new Set(Object.values(game.votes).map(String)).size === 1 ? "Combinaram!" : "Deu resultado";
+}
+
+function paintPlayers(game) {
+  $("#table-players").replaceChildren(...game.seats.map((name, seat) => {
+    const chip = el("div", `player${!game.winner && game.type !== "stop" && game.turn === name ? " turn" : ""}${name === me ? " me" : ""}`);
+    const face = el("span", "avatar");
+    paintAvatar(face, name);
+    const detail = game.type === "velha" ? (seat === 0 ? "joga com X" : "joga com O")
+      : game.type === "dama" ? (seat === 0 ? "brancas" : "pretas")
+      : game.type === "memoria" ? `${game.scores[name] ?? 0} ${game.scores[name] === 1 ? "par" : "pares"}`
+      : `${game.totals[name] ?? 0} pontos`;
+    const text = el("span", "player-text");
+    text.append(el("strong", "", who(name)), el("small", "", detail));
+    chip.append(face, text);
+    if (game.type === "dama") chip.append(el("span", `stone mini ${seat === 0 ? "w" : "b"}`));
+    if (game.type === "stop" && game.phase === "playing") chip.append(el("b", "player-fill", `${game.filled[name] ?? 0}/${game.categories.length}`));
+    return chip;
+  }));
+}
+
+function paintVelha(message) {
+  const game = message.game;
+  const canPlay = !game.winner && game.turn === me && !table.busy;
+  const grid = el("div", "velha-board");
+  game.board.forEach((mark, cell) => {
+    const square = el("button", `velha-cell${game.line?.includes(cell) ? " win" : ""}`);
+    if (mark) square.append(icon(mark === "X" ? "x" : "circle", `icon mark ${mark === "X" ? "x" : "o"}`));
+    square.type = "button";
+    square.dataset.cell = String(cell);
+    square.disabled = !canPlay || Boolean(mark);
+    square.setAttribute("aria-label", `Casa ${cell + 1}${mark ? `: ${mark}` : ", vazia"}`);
+    grid.append(square);
+  });
+  $("#table-board").replaceChildren(grid);
+}
+
+// Dama: quem joga com as pretas vê o tabuleiro do lado dele. As jogadas que valem vêm do servidor (moves).
+function paintDama(message) {
+  const game = message.game;
+  const flip = game.seats.indexOf(me) === 1;
+  const moves = game.turn === me && !game.winner && !table.busy ? game.moves : [];
+  const movable = new Set(moves.map(([from]) => from));
+  if (game.chain !== null && game.turn === me) table.selected = game.chain;
+  if (!movable.has(table.selected)) table.selected = movable.size === 1 ? [...movable][0] : null;
+  const targets = new Set(moves.filter(([from]) => from === table.selected).map(([, to]) => to));
+  const grid = el("div", "dama-board");
+  for (let position = 0; position < 64; position += 1) {
+    const index = flip ? 63 - position : position;
+    const dark = (Math.floor(index / 8) + (index % 8)) % 2 === 1;
+    if (!dark) {
+      grid.append(el("span", "sq light"));
+      continue;
+    }
+    const square = el("button", "sq dark");
+    square.type = "button";
+    square.dataset.square = String(index);
+    const piece = game.board[index];
+    if (piece) {
+      const stone = el("span", `stone ${piece.toLowerCase()}${piece !== piece.toLowerCase() ? " king" : ""}`);
+      if (piece !== piece.toLowerCase()) stone.append(icon("crown"));
+      square.append(stone);
+    }
+    square.classList.toggle("can", movable.has(index));
+    square.classList.toggle("selected", table.selected === index);
+    square.classList.toggle("target", targets.has(index));
+    square.classList.toggle("last", Boolean(game.last?.includes(index)));
+    square.disabled = !movable.has(index) && !targets.has(index);
+    square.setAttribute("aria-label", piece ? `${piece.toLowerCase() === "w" ? "Branca" : "Preta"}${piece !== piece.toLowerCase() ? " (dama)" : ""}` : targets.has(index) ? "Mover para cá" : "Casa vazia");
+    grid.append(square);
+  }
+  $("#table-board").replaceChildren(grid);
+}
+
+function pickSquare(message, index) {
+  const game = message.game;
+  if (game.turn !== me || game.winner || table.busy) return;
+  const move = game.moves.find(([from, to]) => from === table.selected && to === index);
+  if (move) {
+    table.busy = true;
+    sound.play("tap");
+    return gameMove(message, "move", { from: move[0], to: move[1] });
+  }
+  if (game.moves.some(([from]) => from === index) && game.chain === null) {
+    table.selected = index;
+    sound.play("tap");
+    paintTable();
+  }
+}
+
+function paintMemory(message) {
+  const game = message.game;
+  const canPlay = !game.winner && game.turn === me && !table.busy;
+  const grid = el("div", "memory-board");
+  game.cards.forEach((face, index) => {
+    const owner = game.matched[index];
+    const missed = game.missed?.includes(index);
+    const card = el("button", `memory-card${face ? " up" : ""}${face && !table.shown[index] ? " flip-in" : ""}${owner ? ` matched ${owner === me ? "mine" : "theirs"}` : ""}${missed ? " missed" : ""}`);
+    card.type = "button";
+    card.dataset.card = String(index);
+    card.disabled = !canPlay || Boolean(face && !missed);
+    card.setAttribute("aria-label", face && !missed ? `Carta ${index + 1}: ${face}` : `Carta ${index + 1}, virada para baixo`);
+    const inner = el("span", "memory-inner");
+    const back = el("span", "memory-back");
+    back.append(potatoArt());
+    const front = el("span", `memory-face${face ? ` face-${face}` : ""}`);
+    if (face) front.append(icon(face));
+    inner.append(back, front);
+    card.append(inner);
+    grid.append(card);
+  });
+  table.shown = game.cards.map(Boolean);
+  $("#table-board").replaceChildren(grid);
+}
+
+// Stop: os campos são montados uma vez por rodada (as novidades do outro só mudam o placar em cima).
+function stopDraft(message) {
+  const key = `${message.id}:${message.game.round}`;
+  const saved = store.get("localStorage", STOP_DRAFT_KEY);
+  return saved?.key === key ? saved.answers : {};
+}
+
+function paintStop(message) {
+  const game = message.game;
+  const key = `${message.id}:${game.round}:${game.phase}`;
+  if (table.built === key) return paintStopButton(message);
+  table.built = key;
+  const board = $("#table-board");
+  if (game.phase === "playing" && game.seats.includes(me)) {
+    const draft = stopDraft(message);
+    const wrap = el("div", "stop");
+    const letter = el("div", "stop-letter");
+    letter.append(el("small", "", `Rodada ${game.round}`), el("strong", "", game.letter));
+    const form = el("form", "stop-form");
+    form.noValidate = true;
+    for (const category of game.categories) {
+      const label = el("label", "stop-field");
+      const input = el("input");
+      input.name = category;
+      input.value = draft[category] || "";
+      input.maxLength = 40;
+      input.autocomplete = "off";
+      input.autocapitalize = "words";
+      input.placeholder = `${game.letter}…`;
+      input.enterKeyHint = "next";
+      label.append(el("span", "", category), input);
+      form.append(label);
+    }
+    const stop = el("button", "stop-button");
+    stop.append(icon("hand"), "STOP!");
+    stop.type = "submit";
+    form.append(stop);
+    wrap.append(letter, form);
+    board.replaceChildren(wrap);
+    paintStopButton(message);
+    return;
+  }
+  const last = game.last;
+  if (!last) return board.replaceChildren(emptyNote(game.winner ? "Jogo encerrado." : "Esperando a rodada…"));
+  const order = [...game.seats].sort((a) => (a === me ? -1 : 1));
+  const review = el("div", "stop-review");
+  review.append(el("p", "stop-round", `Rodada ${last.round} · letra ${last.letter} · ${stopper(last.stoppedBy)} STOP`));
+  const grid = el("div", "stop-grid");
+  grid.append(el("span", "stop-head"), ...order.map((name) => el("span", "stop-head", who(name))));
+  for (const category of game.categories) {
+    grid.append(el("span", "stop-category", category));
+    for (const name of order) {
+      const points = last.points[name][category];
+      const cell = el("span", `stop-answer p${points}`);
+      cell.append(el("span", "", last.answers[name][category] || "—"), el("b", "", `+${points}`));
+      grid.append(cell);
+    }
+  }
+  grid.append(el("span", "stop-category", "Rodada"), ...order.map((name) => el("strong", "stop-total", `+${Object.values(last.points[name]).reduce((sum, value) => sum + value, 0)}`)));
+  review.append(grid, el("p", "field-hint", "10 pontos por palavra com a letra certa, 5 se os dois escreveram a mesma."));
+  board.replaceChildren(review);
+  store.remove("localStorage", STOP_DRAFT_KEY);
+}
+
+function stopAnswers() {
+  return Object.fromEntries([...tableEl.querySelectorAll(".stop-form input")].map((input) => [input.name, input.value.trim()]));
+}
+
+function paintStopButton(message) {
+  const button = tableEl.querySelector(".stop-button");
+  if (!button) return;
+  const full = Object.values(stopAnswers()).every(Boolean);
+  button.disabled = !full || table.busy;
+  button.title = full ? "Acabar a rodada para os dois" : "Preencha tudo para pedir STOP";
+  if (!message.game.seats.includes(me)) button.disabled = true;
+}
+
+// O que foi escrito vai para o servidor aos poucos (a outra pessoa vê só quantos campos já foram); stop = acabou!
+function saveStop(message, stop = false) {
+  clearTimeout(stopTimer);
+  const answers = stopAnswers();
+  if (!Object.keys(answers).length || !socket?.connected) return;
+  if (stop) table.busy = true;
+  socket.timeout(10000).emit("game", { op: "fill", id: message.id, answers, stop }, (error, result) => {
+    table.busy = false;
+    if (result?.ok) return updateMessage(result.message);
+    if (stop) {
+      toast(result?.error || "Não deu certo. Tente de novo.", "error");
+      sound.play("error");
+      paintStopButton(message);
+    }
+  });
+}
+
+tableEl.addEventListener("input", (event) => {
+  const message = byId.get(table.id);
+  if (!message || !event.target.closest(".stop-form")) return;
+  store.set("localStorage", STOP_DRAFT_KEY, { key: `${message.id}:${message.game.round}`, answers: stopAnswers() });
+  paintStopButton(message);
+  clearTimeout(stopTimer);
+  stopTimer = setTimeout(() => saveStop(message), 900);
+});
+
+tableEl.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || !event.target.matches(".stop-form input")) return;
+  event.preventDefault();
+  const inputs = [...tableEl.querySelectorAll(".stop-form input")];
+  const next = inputs[inputs.indexOf(event.target) + 1];
+  if (next) next.focus();
+  else tableEl.querySelector(".stop-form").requestSubmit();
+});
+
+tableEl.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const message = byId.get(table.id);
+  const button = tableEl.querySelector(".stop-button");
+  if (!message || !button || button.disabled) return;
+  fx.press(button);
+  saveStop(message, true);
+});
+
+tableEl.addEventListener("input", onGameInput);
+tableEl.addEventListener("keydown", onGameEnter);
+
+function paintTableActions(game) {
+  const actions = [];
+  const button = (label, action, className) => {
+    const node = el("button", className, label);
+    node.type = "button";
+    node.dataset.tableAction = action;
+    return node;
+  };
+  if (!BOARD_GAMES.includes(game.type)) {
+    if (!gameOpen(game)) actions.push(button("Outra carta", "again", "pill gold small"));
+    actions.push(button("Ver na conversa", "chat", "pill ghost small"));
+    return $("#table-actions").replaceChildren(...actions);
+  }
+  const playing = game.seats.includes(me);
+  if (game.winner && playing) actions.push(button("Revanche", "again", "pill gold small"));
+  else if (game.type === "stop" && playing) {
+    if (game.phase === "review") actions.push(button("Próxima rodada ▶", "next", "pill gold small"));
+    actions.push(button("Encerrar o jogo", "end", "text-button"));
+  } else if (playing && !game.winner) actions.push(button("Desistir", "resign", "text-button"));
+  actions.push(button("Ver na conversa", "chat", "pill ghost small"));
+  $("#table-actions").replaceChildren(...actions);
+}
+
+tableEl.addEventListener("click", async (event) => {
+  if (event.target === tableEl || event.target.closest("#table-close")) return closeTable();
+  const message = byId.get(table.id);
+  if (!message?.game) return;
+  const game = message.game;
+  // Carta (verdade ou desafio, votos, perguntinha): as mesmas jogadas do cartão da conversa. Responder a um
+  // verdade ou desafio é na conversa.
+  const play = event.target.closest("[data-game]");
+  if (play) {
+    if (play.dataset.game === "reply") {
+      closeTable();
+      showTab("chat");
+    } else if (play.dataset.game === "again") {
+      closeTable();
+    }
+    return playGame(message, play.dataset.game, play.dataset.value, tableEl);
+  }
+  const cell = event.target.closest("[data-cell]");
+  if (cell && !table.busy) {
+    table.busy = true;
+    sound.play("tap");
+    paintTable();
+    return gameMove(message, "move", { cell: Number(cell.dataset.cell) });
+  }
+  const square = event.target.closest("[data-square]");
+  if (square) return pickSquare(message, Number(square.dataset.square));
+  const card = event.target.closest("[data-card]");
+  if (card && !table.busy) {
+    table.busy = true;
+    sound.play("tap");
+    return gameMove(message, "flip", { index: Number(card.dataset.card) });
+  }
+  const action = event.target.closest("[data-table-action]")?.dataset.tableAction;
+  if (action === "again") {
+    closeTable();
+    startGame(game.type);
+  } else if (action === "chat") {
+    closeTable();
+    showTab("chat");
+    focusMessage(message.id);
+  } else if (action === "next") {
+    gameMove(message, "next");
+  } else if (action === "end") {
+    if (await confirmDialog({ title: "Encerrar o stop?", text: "Quem tiver mais pontos agora ganha.", confirm: "Encerrar" })) gameMove(message, "end");
+  } else if (action === "resign") {
+    if (await confirmDialog({ title: "Desistir da partida?", text: `${otherPlayer()} ganha essa.`, confirm: "Desistir" })) gameMove(message, "resign");
+  }
+});
 
 // ---------- ponte com a extensão ----------
 

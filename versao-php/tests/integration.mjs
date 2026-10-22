@@ -59,6 +59,12 @@ function sql(statement) {
   return JSON.parse(execFileSync("php", [...phpArgs, "-r", code], { env: { ...process.env, POTATO_CONFIG: configFile } }).toString() || "[]");
 }
 
+// Resultado de uma expressão PHP com o lib/potato.php carregado (para testar uma função direto).
+function php(expression) {
+  const code = `require ${phpValue(path.join(site, "lib", "potato.php").replaceAll("\\", "/"))}; echo json_encode(${expression}, JSON_UNESCAPED_UNICODE);`;
+  return JSON.parse(execFileSync("php", [...phpArgs, "-r", code], { env: { ...process.env, POTATO_CONFIG: configFile } }).toString());
+}
+
 // Consulta sem passar pelo site (que atualizaria as tabelas antes): para montar um banco da versão 1.
 function rawSql(statement) {
   const code = `$c = (require getenv('POTATO_CONFIG'))['db']; $pdo = new PDO("mysql:host={$c['host']};port={$c['port']};dbname={$c['name']};charset=utf8mb4", $c['user'], $c['pass']); $pdo->exec(str_replace('{p}', ${phpValue(prefix)}, ${phpValue(statement)}));`;
@@ -196,7 +202,8 @@ try {
   const columns = sql("SHOW COLUMNS FROM {p}users").map((row) => row.Field);
   for (const column of ["pass_hash", "avatar", "avatar_type", "avatar_key", "theme", "wallpaper", "wallpaper_type", "wallpaper_key", "wallpaper_style"]) assert.ok(columns.includes(column), column);
   assert.ok(sql("SHOW COLUMNS FROM {p}messages").some((row) => row.Field === "media"), "media");
-  assert.equal(sql("SELECT value FROM {p}settings WHERE name = 'schema'")[0].value, "6");
+  assert.equal(sql("SELECT value FROM {p}settings WHERE name = 'schema'")[0].value, "7");
+  assert.ok(sql("SHOW COLUMNS FROM {p}items").some((row) => row.Field === "data"), "tabela do nosso cantinho");
   assert.ok(sql("SHOW COLUMNS FROM {p}files").some((row) => row.Field === "data"), "tabela de arquivos");
   assert.deepEqual(await welcome(), { open: 2 });
 
@@ -788,12 +795,304 @@ try {
   dj1.disconnect();
   dj2.disconnect();
 
+  // Nosso cantinho e joguinhos (num bloco próprio: os nomes não se misturam com os de cima).
+  {
+    // ---------- Nosso cantinho ----------
+    const us1 = await connect(firstLogin.body.token);
+    const us2 = await connect(secondLogin.body.token);
+    const us = (socket, data) => withAck(socket, "us", data);
+    const day = "2026-10-22";
+    assert.equal(sql("SELECT value FROM {p}settings WHERE name = 'schema'")[0].value, "7");
+    const loaded = await us(us1, { op: "load", day });
+    assert.equal(loaded.ok, true);
+    assert.deepEqual([loaded.events, loaded.goals, loaded.letters], [[], [], []]);
+    assert.deepEqual(loaded.habits, { "Pessoa 1": [], "Pessoa 2": [] });
+    assert.equal(loaded.prompts.almoco, "13:30");
+    assert.equal(loaded.prompts.lanche, null);
+    assert.deepEqual(loaded.days["Pessoa 2"], { owner: "Pessoa 2", day, updatedAt: null, wake: null, meals: {}, done: [], mood: null, note: "", moments: [] });
+    assert.equal((await us(us1, { op: "day", day: "2026-02-30" })).error, "Dia inválido.");
+
+    // Hábitos da rotina: a outra pessoa vê a lista (para o cartão do dia).
+    const habitsSeen = until(us2, "us", (change) => change.kind === "habits");
+    const habits = (await us(us1, { op: "habits", habits: [{ text: "  Beber água  " }, { text: "Estudar", id: "<script>" }, { text: "   " }] })).habits;
+    assert.deepEqual(habits.map((habit) => habit.text), ["Beber água", "Estudar"]);
+    assert.ok(habits.every((habit) => /^[a-z0-9]{6,16}$/.test(habit.id)), "id inválido vira um novo");
+    assert.deepEqual((await habitsSeen).habits, habits);
+
+    // O dia: hora em que acordou, refeição com foto (só a foto de quem salva), hábitos feitos e humor.
+    const mealPhoto = await upload(firstLogin.body.token, "almoco.png", makePng(32, 24));
+    const peerPhoto = await upload(secondLogin.body.token, "dela.png", makePng(16, 16));
+    const daySeen = until(us2, "us", (change) => change.kind === "day" && change.meal === "almoco");
+    const lunch = await us(us1, { op: "day:save", day, wake: "7:05", meal: { name: "almoco", text: " Lasanha  da vó ", photo: { key: mealPhoto.body.file.key } }, done: [habits[0].id, "inventado"], mood: "amor" });
+    assert.equal(lunch.ok, true);
+    assert.equal(lunch.item.wake, "07:05");
+    assert.equal(lunch.item.meals.almoco.text, "Lasanha da vó");
+    assert.deepEqual(lunch.item.meals.almoco.photo, { key: mealPhoto.body.file.key, url: `api.php?action=file&k=${mealPhoto.body.file.key}`, width: 32, height: 24 });
+    assert.deepEqual(lunch.item.done, [habits[0].id]);
+    assert.equal(lunch.item.mood, "amor");
+    assert.equal((await us(us1, { op: "day:save", day, mood: "😀" })).item.mood, null, "humor fora da lista não vale");
+    await us(us1, { op: "day:save", day, mood: "amor" });
+    assert.deepEqual((await daySeen).item, lunch.item);
+    const dayRow = sql(`SELECT id FROM {p}items WHERE kind = 'day' AND owner = 'Pessoa 1' AND day = '${day}'`)[0];
+    assert.equal(sql(`SELECT message_id FROM {p}files WHERE file_key = '${mealPhoto.body.file.key}'`)[0].message_id, dayRow.id);
+    assert.equal((await us(us2, { op: "day:save", day, meal: { name: "cafe", text: "Pão", photo: mealPhoto.body.file.key } })).item.meals.cafe.photo, undefined);
+    assert.equal((await us(us2, { op: "day:save", day, meal: { name: "brunch", text: "x" } })).error, "Refeição desconhecida.");
+    // Momentos (fotos com legenda); tirar a foto do almoço apaga o arquivo dela.
+    const moment = await us(us1, { op: "day:save", day, moments: [{ photo: { key: peerPhoto.body.file.key }, text: "não é minha" }, { photo: { key: mealPhoto.body.file.key }, text: " Olha o prato " }] });
+    assert.deepEqual(moment.item.moments.map((item) => item.text), ["Olha o prato"]);
+    const noPhoto = await us(us1, { op: "day:save", day, meal: { name: "almoco", text: "Lasanha da vó" }, moments: [] });
+    assert.equal(noPhoto.item.meals.almoco.photo, undefined);
+    assert.equal(sql(`SELECT COUNT(*) AS n FROM {p}files WHERE file_key = '${mealPhoto.body.file.key}'`)[0].n, 0);
+
+    // Resposta pela notificação: a hora de acordar sai do texto (ou da hora do aparelho); a refeição guarda o texto.
+    const answer = (socket, field, text, clock) => us(socket, { op: "reply", day, field, text, clock });
+    assert.equal((await answer(us2, "acordar", "acordei 6 e meia")).item.wake, "06:30");
+    assert.equal((await answer(us2, "acordar", "às 8h15")).item.wake, "08:15");
+    assert.equal((await answer(us2, "acordar", "agora mesmo", "09:41")).item.wake, "09:41");
+    assert.equal((await answer(us2, "acordar", "não sei")).error, "Diga a hora (ex.: 7:30).");
+    assert.equal((await answer(us2, "jantar", "Sopinha")).item.meals.jantar.text, "Sopinha");
+    assert.equal((await answer(us2, "jantar", "  ")).error, "Conte o que você comeu.");
+
+    // Lembretes: só o primeiro aparelho mostra; o da refeição já respondida não aparece; o da rotina diz o que falta.
+    const claim = (socket, key) => us(socket, { op: "claim", key });
+    assert.equal((await claim(us1, `${day} almoco`)).fire, false);
+    assert.equal((await claim(us1, `${day} jantar`)).fire, true);
+    assert.equal((await claim(us1, `${day} jantar`)).fire, false);
+    assert.deepEqual(await claim(us1, `${day} rotina`), { ok: true, fire: true, text: "Falta: Estudar" });
+    assert.equal((await claim(us2, `${day} rotina`)).fire, false, "sem hábitos, sem lembrete da rotina");
+    assert.deepEqual((await answer(us1, "rotina", "")).item.done, habits.map((habit) => habit.id));
+    assert.equal((await claim(us1, "ev qualquer 2026-10-22")).fire, true);
+
+    // Agenda: os dois mudam e apagam qualquer compromisso; a outra pessoa fica sabendo.
+    assert.equal((await us(us1, { op: "event:save", title: "  ", date: day })).error, "Dê um nome e uma data para o compromisso.");
+    const soon = new Date(Date.now() + 40 * 60000);
+    const pad = (value) => String(value).padStart(2, "0");
+    const soonDate = `${soon.getUTCFullYear()}-${pad(soon.getUTCMonth() + 1)}-${pad(soon.getUTCDate())}`;
+    const soonTime = `${pad(soon.getUTCHours())}:${pad(soon.getUTCMinutes())}`;
+    const eventSeen = until(us2, "us", (change) => change.kind === "event" && change.created);
+    const event = await us(us1, { op: "event:save", title: "Cinema 🍿", date: soonDate, time: soonTime, place: "Shopping", icon: "film", who: "ambos", repeat: "nada", remind: 15 });
+    assert.equal(event.ok, true);
+    assert.equal(event.item.repeat, "none");
+    assert.equal(event.item.icon, "film");
+    assert.equal((await us(us1, { op: "event:save", id: event.item.id, title: "Cinema 🍿", date: soonDate, time: soonTime, place: "Shopping", icon: "<b>", remind: 15 })).item.icon, "calendar");
+    assert.equal(event.item.end, null);
+    const ranged = await us(us1, { op: "event:save", title: "Jantar", date: day, time: "19:00", end: "21:30" });
+    assert.deepEqual([ranged.item.time, ranged.item.end], ["19:00", "21:30"]);
+    assert.equal((await us(us1, { op: "event:save", id: ranged.item.id, title: "Jantar", date: day, time: "19:00", end: "18:00" })).item.end, null, "termina antes de começar: sem fim");
+    assert.equal((await us(us1, { op: "event:save", id: ranged.item.id, title: "Jantar", date: day, end: "21:00" })).item.end, null, "o dia todo: sem fim");
+    await us(us1, { op: "event:delete", id: ranged.item.id });
+    assert.equal((await eventSeen).item.id, event.item.id);
+    const schedule = await us(us2, { op: "schedule", tz: 0 });
+    const remind = schedule.items.find((item) => item.kind === "event");
+    assert.equal(remind.key, `ev ${event.item.id} ${soonDate}`);
+    assert.equal(remind.at, Date.parse(`${soonDate}T${soonTime}:00Z`) - 15 * 60000);
+    assert.equal(remind.text, `Daqui a 15 minutos · ${soonTime} · Shopping`);
+    assert.ok(schedule.items.some((item) => item.kind === "prompt" && item.field === "almoco"), "lembretes da rotina");
+    assert.ok(!schedule.items.some((item) => item.field === "lanche"), "lanche desligado por padrão");
+    // Só para quem é o compromisso (ou para os dois).
+    const edited = await us(us2, { op: "event:save", id: event.item.id, title: "Cinema", date: soonDate, time: soonTime, who: "Pessoa 1", remind: 15 });
+    assert.equal(edited.item.owner, "Pessoa 1");
+    assert.ok(!(await us(us2, { op: "schedule", tz: 0 })).items.some((item) => item.kind === "event"));
+    assert.equal((await us(us1, { op: "prompts", prompts: { lanche: "16:30", almoco: null, cafe: "25:00" } })).prompts.lanche, "16:30");
+    assert.deepEqual((await us(us1, { op: "load" })).prompts, { acordar: "09:30", cafe: null, almoco: null, lanche: "16:30", jantar: "20:30", rotina: "22:00" });
+    const eventGone = until(us1, "us", (change) => change.kind === "event" && change.deleted);
+    assert.equal((await us(us2, { op: "event:delete", id: event.item.id })).ok, true);
+    assert.equal((await eventGone).title, "Cinema");
+    // Repetições: todo mês (dia 31 cai no último dia dos meses curtos), toda semana e todo ano.
+    const occurs = (event, date) => php(`event_on(${phpValue(event)}, '${date}')`);
+    assert.equal(occurs({ date: "2026-01-31", repeat: "monthly" }, "2026-02-28"), true);
+    assert.equal(occurs({ date: "2026-01-31", repeat: "monthly" }, "2026-03-30"), false);
+    assert.equal(occurs({ date: "2026-10-22", repeat: "weekly" }, "2026-10-29"), true);
+    assert.equal(occurs({ date: "2026-10-22", repeat: "weekly" }, "2026-10-15"), false);
+    assert.equal(occurs({ date: "2024-02-29", repeat: "yearly" }, "2025-02-28"), true);
+    assert.equal(occurs({ date: "2026-10-22", repeat: "none" }, "2027-10-22"), false);
+
+    // Sonhos e metas: dinheiro guardado pelos dois (não fica negativo), passos e realizado.
+    const goal = await us(us1, { op: "goal:save", title: "Viagem pra praia", icon: "palmtree", target: 1500, steps: [{ text: "Escolher a praia" }, { text: "Reservar" }] });
+    assert.equal(goal.item.target, 1500);
+    assert.equal(goal.item.icon, "palmtree");
+    assert.equal(goal.item.saved, 0);
+    const depositSeen = until(us1, "us", (change) => change.kind === "goal" && change.action === "deposit");
+    assert.equal((await us(us2, { op: "goal:deposit", id: goal.item.id, amount: 250.555 })).item.saved, 250.56);
+    assert.equal((await depositSeen).amount, 250.56);
+    const withdrawn = await us(us1, { op: "goal:deposit", id: goal.item.id, amount: -1000 });
+    assert.equal(withdrawn.item.saved, 0);
+    assert.deepEqual(withdrawn.item.deposits.map((deposit) => [deposit.by, deposit.amount]), [["Pessoa 1", -250.56], ["Pessoa 2", 250.56]]);
+    assert.equal((await us(us1, { op: "goal:deposit", id: goal.item.id, amount: "muito" })).error, "Diga quanto.");
+    assert.equal((await us(us1, { op: "goal:step", id: goal.item.id, step: goal.item.steps[0].id, done: true })).item.steps[0].done, true);
+    const kept = await us(us2, { op: "goal:save", id: goal.item.id, title: "Viagem pra praia ☀️", steps: goal.item.steps, target: 0 });
+    assert.equal(kept.item.target, null);
+    assert.deepEqual(kept.item.deposits.length, 2, "editar não apaga o que foi guardado");
+    const done = await us(us2, { op: "goal:done", id: goal.item.id, done: true });
+    assert.equal(done.item.done, true);
+    assert.ok(done.item.doneAt);
+
+    // Cartinhas: na lista vai só o começo; a primeira vez que a outra pessoa abre, ela fica lida. Só quem escreveu muda.
+    assert.equal((await us(us1, { op: "letter:save", title: "Oi", body: "   " })).error, "Escreva alguma coisa na cartinha.");
+    const letterSeen = until(us2, "us", (change) => change.kind === "letter" && change.action === "new");
+    const body = `Meu amor,\n\n\n\n\n${"você é tudo ".repeat(30)}`;
+    const letter = await us(us1, { op: "letter:save", title: "  Pra você  ", body, paper: "rosa" });
+    assert.equal(letter.item.body, `Meu amor,\n\n\n${"você é tudo ".repeat(30).trim()}`);
+    assert.equal(letter.item.to, "Pessoa 2");
+    const listed = (await letterSeen).item;
+    assert.equal(listed.title, "Pra você");
+    assert.equal(listed.body, undefined);
+    assert.equal(listed.preview.length, 140);
+    assert.equal(listed.readAt, null);
+    assert.equal((await us(us1, { op: "letter:open", id: letter.item.id })).item.readAt, null, "quem escreveu não marca como lida");
+    const readSeen = until(us1, "us", (change) => change.kind === "letter" && change.action === "read");
+    const opened = await us(us2, { op: "letter:open", id: letter.item.id });
+    assert.equal(opened.item.body, letter.item.body);
+    assert.ok(opened.item.readAt);
+    assert.equal((await readSeen).item.readAt, opened.item.readAt);
+    assert.equal((await us(us2, { op: "letter:save", id: letter.item.id, body: "mudei" })).error, "Só quem escreveu muda a cartinha.");
+    assert.equal((await us(us2, { op: "letter:delete", id: letter.item.id })).error, "Só quem escreveu apaga a cartinha.");
+    const all = await us(us2, { op: "load" });
+    assert.deepEqual([all.events.length, all.goals.length, all.letters.length], [0, 1, 1]);
+    assert.equal(all.letters[0].body, undefined);
+    assert.deepEqual(all.habits["Pessoa 1"], habits);
+    assert.equal((await us(us1, { op: "letter:delete", id: letter.item.id })).ok, true);
+    assert.equal((await us(us1, { op: "nada" })).error, "Ação desconhecida.");
+
+    // ---------- Joguinhos ----------
+    const game = (socket, data) => withAck(socket, "game", data);
+    // Isso ou aquilo: o voto de cada um fica escondido até os dois votarem.
+    const gameSeen = until(us2, "message", (message) => Boolean(message.game));
+    const pair = await game(us1, { op: "new", type: "isso" });
+    assert.equal(pair.message.game.type, "isso");
+    assert.equal(pair.message.game.options.length, 2);
+    assert.deepEqual([pair.message.game.votes, pair.message.game.players, pair.message.game.done], [{}, [], false]);
+    assert.equal((await gameSeen).id, pair.message.id);
+    const halfSeen = until(us2, "message:update", (message) => message.id === pair.message.id);
+    const half = await game(us1, { op: "vote", id: pair.message.id, value: 0 });
+    assert.equal(half.mine, 0);
+    assert.deepEqual([half.message.game.votes, half.message.game.players], [{}, ["Pessoa 1"]]);
+    assert.deepEqual((await halfSeen).game.votes, {}, "a outra pessoa não vê o voto antes de votar");
+    assert.equal((await game(us1, { op: "vote", id: pair.message.id, value: 1 })).error, "Você já votou.");
+    assert.equal((await game(us2, { op: "vote", id: pair.message.id, value: 2 })).error, "Voto inválido.");
+    const both = await game(us2, { op: "vote", id: pair.message.id, value: 1 });
+    assert.deepEqual([both.message.game.votes, both.message.game.done], [{ "Pessoa 1": 0, "Pessoa 2": 1 }, true]);
+    // Quem é mais provável: vota num dos dois.
+    const likely = await game(us2, { op: "new", type: "quem" });
+    assert.match(likely.message.game.prompt, /^Quem é mais provável/);
+    assert.deepEqual(likely.message.game.names, ["Pessoa 2", "Pessoa 1"]);
+    assert.equal((await game(us1, { op: "vote", id: likely.message.id, value: "Intrusa" })).error, "Voto inválido.");
+    assert.equal((await game(us1, { op: "vote", id: likely.message.id, value: "Pessoa 2" })).ok, true);
+    // Verdade ou desafio: só a outra pessoa escolhe, e a carta aparece depois da escolha.
+    const vd = await game(us1, { op: "new", type: "vd" });
+    assert.deepEqual([vd.message.game.for, vd.message.game.prompt], ["Pessoa 2", null]);
+    assert.equal((await game(us1, { op: "pick", id: vd.message.id, choice: "verdade" })).error, "Quem escolhe é Pessoa 2.");
+    const picked = await game(us2, { op: "pick", id: vd.message.id, choice: "desafio" });
+    assert.equal(picked.message.game.choice, "desafio");
+    assert.ok(picked.message.game.prompt.length > 5);
+    assert.equal((await game(us2, { op: "pick", id: vd.message.id, choice: "verdade" })).message.game.choice, "desafio", "a escolha não muda");
+    // Perguntinha: as respostas aparecem quando os dois responderem.
+    const question = await game(us1, { op: "new", type: "pergunta" });
+    assert.equal((await game(us1, { op: "answer", id: question.message.id, text: "  " })).error, "Escreva sua resposta.");
+    assert.deepEqual((await game(us1, { op: "answer", id: question.message.id, text: "A praia" })).message.game.answers, {});
+    assert.deepEqual((await game(us2, { op: "answer", id: question.message.id, text: "O sofá 🛋️" })).message.game.answers, { "Pessoa 1": "A praia", "Pessoa 2": "O sofá 🛋️" });
+    assert.equal((await game(us1, { op: "new", type: "xadrez" })).error, "Jogo desconhecido.");
+
+    // Jogo da velha: cada um na sua vez, casa ocupada não vale, e a linha da vitória vem junto.
+    const tic = await game(us1, { op: "new", type: "velha" });
+    assert.deepEqual([tic.message.game.seats, tic.message.game.turn], [["Pessoa 1", "Pessoa 2"], "Pessoa 1"]);
+    const mark = (socket, cell) => game(socket, { op: "move", id: tic.message.id, cell });
+    assert.equal((await mark(us2, 0)).error, "Não é a sua vez.");
+    await mark(us1, 0);
+    assert.equal((await mark(us2, 0)).error, "Essa casa já foi.");
+    await mark(us2, 3);
+    await mark(us1, 1);
+    await mark(us2, 4);
+    const won = await mark(us1, 2);
+    assert.deepEqual([won.message.game.winner, won.message.game.line, won.message.game.board.join("")], ["Pessoa 1", [0, 1, 2], "XXXOO"]);
+    assert.equal((await mark(us2, 5)).error, "Esse jogo já acabou.");
+
+    // Dama: quem começa fica com as brancas; o servidor diz as jogadas que valem e obriga a captura.
+    const checkers = await game(us2, { op: "new", type: "dama" });
+    const start = checkers.message.game;
+    assert.deepEqual([start.board.filter((piece) => piece === "w").length, start.board.filter((piece) => piece === "b").length, start.turn], [12, 12, "Pessoa 2"]);
+    assert.equal(start.moves.length, 7);
+    const move = (socket, from, to) => game(socket, { op: "move", id: checkers.message.id, from, to });
+    assert.equal((await move(us2, 44, 36)).error, "Essa jogada não vale.");
+    await move(us2, 44, 35);
+    await move(us1, 21, 28);
+    assert.equal((await move(us2, 42, 33)).error, "Captura obrigatória: tem peça para comer!");
+    const captured = await move(us2, 35, 21);
+    assert.deepEqual([captured.message.game.board[28], captured.message.game.board[21], captured.message.game.turn], ["", "w", "Pessoa 1"]);
+    assert.ok(captured.message.game.moves.every(([, , over]) => over === undefined) && captured.message.game.moves.length === 2, "as pretas também têm que comer");
+    const resigned = await game(us1, { op: "resign", id: checkers.message.id });
+    assert.deepEqual([resigned.message.game.winner, resigned.message.game.resigned], ["Pessoa 2", "Pessoa 1"]);
+    // Regras direto no lib/potato.php: pedra come para trás; dama anda e come de longe.
+    const board = (pieces) => { const squares = Array(64).fill(""); for (const [index, piece] of Object.entries(pieces)) squares[index] = piece; return squares; };
+    const moves = (pieces, color, chain = null) => php(`dama_moves(${phpValue(board(pieces))}, '${color}', ${chain ?? "null"})`);
+    assert.deepEqual(moves({ 27: "w", 36: "b" }, "w"), [[27, 45, 36]]);
+    assert.equal(moves({ 56: "W" }, "w").length, 7);
+    assert.deepEqual(moves({ 56: "W", 35: "b" }, "w"), [[56, 28, 35], [56, 21, 35], [56, 14, 35], [56, 7, 35]]);
+    assert.deepEqual(moves({ 45: "w", 36: "b", 40: "w" }, "w", 40), []);
+
+    // Memória: as cartas fechadas nunca chegam ao navegador; acertou, joga de novo; errou, passa a vez.
+    const memory = await game(us1, { op: "new", type: "memoria" });
+    assert.deepEqual(memory.message.game.cards, Array(16).fill(null));
+    assert.equal(memory.message.game.faces, undefined);
+    const faces = JSON.parse(sql(`SELECT media FROM {p}messages WHERE id = '${memory.message.id}'`)[0].media).game.faces;
+    const flip = (socket, index) => game(socket, { op: "flip", id: memory.message.id, index });
+    const pairOf = faces.findIndex((face, index) => index > 0 && face === faces[0]);
+    const firstCard = await flip(us1, 0);
+    assert.deepEqual([firstCard.message.game.cards.filter(Boolean), firstCard.message.game.turn], [[faces[0]], "Pessoa 1"]);
+    assert.equal((await flip(us1, 0)).error, "Escolha outra carta.");
+    const pairFound = await flip(us1, pairOf);
+    assert.deepEqual([pairFound.message.game.scores["Pessoa 1"], pairFound.message.game.turn, pairFound.message.game.matched[0]], [1, "Pessoa 1", "Pessoa 1"]);
+    const others = faces.map((face, index) => index).filter((index) => index !== 0 && index !== pairOf);
+    const missA = others[0];
+    const missB = others.find((index) => faces[index] !== faces[missA]);
+    const missed = await flip(us1, missA).then(() => flip(us1, missB));
+    assert.deepEqual([missed.message.game.missed, missed.message.game.turn], [[missA, missB], "Pessoa 2"]);
+    assert.equal(missed.message.game.cards.filter(Boolean).length, 4, "o par errado fica à mostra até a próxima carta");
+    assert.equal((await flip(us1, others[2])).error, "Não é a sua vez.");
+    assert.equal((await flip(us2, missA)).message.game.cards.filter(Boolean).length, 3);
+
+    // Stop: ninguém vê as respostas do outro antes do STOP; só pede STOP quem preencheu tudo; a rodada vale pontos.
+    const stop = await game(us1, { op: "new", type: "stop" });
+    const { letter: stopLetter, categories } = stop.message.game;
+    assert.match(stopLetter, /^[A-Z]$/);
+    assert.deepEqual(categories, ["Nome", "Animal", "Comida", "Lugar", "Objeto", "Coisa fofa"]);
+    const fill = (socket, answers, extra = {}) => game(socket, { op: "fill", id: stop.message.id, answers, ...extra });
+    const word = (suffix) => `${stopLetter}${suffix}`;
+    const partial = await fill(us2, { Nome: word("ana"), Animal: "  " });
+    assert.deepEqual([partial.message.game.filled, partial.message.game.fills], [{ "Pessoa 2": 1 }, undefined]);
+    await fill(us2, { Nome: word("ana"), Animal: word("gato"), Comida: "xis", Lugar: word("rio"), Objeto: word("copo"), "Coisa fofa": word("beijo") });
+    assert.equal((await fill(us1, { Nome: word("ana") }, { stop: true })).error, "Preencha tudo antes de pedir STOP!");
+    const stopped = await fill(us1, { Nome: word("ana"), Animal: word("leão"), Comida: word("bolo"), Lugar: word("casa"), Objeto: word("lápis"), "Coisa fofa": word("abraço") }, { stop: true });
+    const round = stopped.message.game;
+    assert.equal(round.phase, "review");
+    assert.equal(round.last.stoppedBy, "Pessoa 1");
+    assert.equal(round.last.answers["Pessoa 2"].Comida, "xis");
+    assert.deepEqual([round.last.points["Pessoa 1"].Nome, round.last.points["Pessoa 1"].Animal, round.last.points["Pessoa 2"].Comida], [5, 10, 0]);
+    assert.deepEqual(round.totals, { "Pessoa 1": 55, "Pessoa 2": 45 });
+    assert.equal((await fill(us2, { Nome: "x" })).error, "Essa rodada já acabou.");
+    const second = await game(us2, { op: "next", id: stop.message.id });
+    assert.deepEqual([second.message.game.round, second.message.game.phase, second.message.game.filled], [2, "playing", {}]);
+    assert.notEqual(second.message.game.letter, stopLetter);
+    assert.equal((await game(us1, { op: "end", id: stop.message.id })).message.game.winner, "Pessoa 1");
+    // Responder a uma carta cita o nome do jogo; o jogo não conta como mensagem no perfil; o histórico vem escondido.
+    assert.equal((await withAck(us2, "message", { text: "Eu!", clientId: "cliente-jogo", replyTo: likely.message.id })).message.replyTo.text, "Quem é mais provável?");
+    const reopenedGames = await connect(secondLogin.body.token);
+    const likelyAgain = reopenedGames.history.items.find((message) => message.id === likely.message.id);
+    assert.deepEqual([likelyAgain.game.votes, likelyAgain.game.players], [{}, ["Pessoa 1"]]);
+    reopenedGames.disconnect();
+    const before = (await withAck(us1, "stats", null)).messages;
+    await game(us1, { op: "new", type: "isso" });
+    assert.equal((await withAck(us1, "stats", null)).messages, before);
+    us1.disconnect();
+    us2.disconnect();
+  }
+
   // Muitas tentativas de senha: bloqueia.
   let blocked = 0;
   for (let i = 0; i < 14; i += 1) if ((await login("Pessoa 1", "errada")).status === 429) blocked += 1;
   assert.ok(blocked >= 1);
 
-  console.log("Integração PHP + MySQL aprovada: atualização do banco antigo, página, contas com senha própria, sala de duas pessoas, GIFs, fotos e arquivos (envio, entrega protegida, faixas de bytes, limpeza), foto de perfil (também em GIF), perfil da outra pessoa, tema, papel de parede, bot de música, mensagens de voz (áudio do navegador em MP4 e WebM, duração, forma de onda e transcrição), extensão, confirmação, deduplicação, respostas, reações, leitura, apagar, digitando (e gravando áudio), chamadas, long polling, sessões da versão Node, paginação, senha esquecida e persistência.");
+  console.log("Integração PHP + MySQL aprovada: atualização do banco antigo, página, contas com senha própria, sala de duas pessoas, GIFs, fotos e arquivos (envio, entrega protegida, faixas de bytes, limpeza), foto de perfil (também em GIF), perfil da outra pessoa, tema, papel de parede, bot de música, mensagens de voz (áudio do navegador em MP4 e WebM, duração, forma de onda e transcrição), nosso cantinho (o dia de cada um com fotos, hábitos, resposta aos lembretes, agenda com repetições, sonhos e metas, cartinhas), joguinhos (cartas, velha, dama, memória e stop), extensão, confirmação, deduplicação, respostas, reações, leitura, apagar, digitando (e gravando áudio), chamadas, long polling, sessões da versão Node, paginação, senha esquecida e persistência.");
 } finally {
   servers.forEach((server) => server.kill());
   transcriberServer.close();
