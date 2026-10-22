@@ -34,6 +34,8 @@ sealed interface ChatEvent {
     data class Seen(val name: String, val receipt: ReadReceipt) : ChatEvent
     data class Typing(val active: Boolean) : ChatEvent
     data class Signal(val event: String, val data: JSONObject) : ChatEvent
+    /** Mudança no Nosso cantinho (aviso "us" do site): o dia de alguém, a agenda, um sonho, uma cartinha… */
+    data class Us(val data: JSONObject) : ChatEvent
 }
 
 /** Cliente nativo do protocolo HTTP usado pela versao PHP publicada do Potato Chat. */
@@ -145,6 +147,11 @@ class ChatRepository {
         scope.launch { runCatching { sendOperation("visibility", active) } }
     }
 
+    /** Ação do Nosso cantinho (op "us" do site: lembretes, resposta a um lembrete…). A resposta, se deu certo; senão, null. */
+    suspend fun us(data: JSONObject): JSONObject? = withContext(Dispatchers.IO) {
+        runCatching { sendOperation("us", data) as? JSONObject }.getOrNull()?.takeIf { it.optBoolean("ok") }
+    }
+
     fun react(id: String, emoji: String) = emit("react", JSONObject().put("id", id).put("emoji", emoji))
     fun delete(id: String) = emit("delete", JSONObject().put("id", id))
     fun seen(id: String) = emit("seen", JSONObject().put("id", id))
@@ -199,6 +206,7 @@ class ChatRepository {
             "message:update" -> data?.let { _events.emit(ChatEvent.MessageUpdate(it.toMessage())) }
             "seen" -> data?.let { _events.emit(ChatEvent.Seen(it.optString("name"), ReadReceipt(it.optString("id"), it.optString("at")))) }
             "typing" -> data?.let { _events.emit(ChatEvent.Typing(it.optBoolean("active"))) }
+            "us" -> data?.let { _events.emit(ChatEvent.Us(it)) }
             "webrtc-offer", "webrtc-answer", "webrtc-ice", "call-state", "call-declined", "call-ended", "call-handled", "peer-left" ->
                 _events.emit(ChatEvent.Signal(type, data ?: JSONObject()))
         }

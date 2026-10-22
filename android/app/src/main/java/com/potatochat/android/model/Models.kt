@@ -32,6 +32,12 @@ fun JSONObject.toMessage() = ChatMessage(
     } ?: emptyMap(), deleted = optBoolean("deleted"), preview = previewText()
 )
 
+// Os nomes dos joguinhos (GAME_NAMES em lib/potato.php).
+private val GAME_NAMES = mapOf(
+    "vd" to "Verdade ou desafio", "quem" to "Quem é mais provável?", "isso" to "Isso ou aquilo", "pergunta" to "Perguntinha",
+    "velha" to "Jogo da velha", "dama" to "Dama", "memoria" to "Jogo da memória", "stop" to "Stop"
+)
+
 private fun JSONObject.previewText(): String {
     val text = optString("text")
     val file = optJSONObject("file")
@@ -40,6 +46,7 @@ private fun JSONObject.previewText(): String {
         optBoolean("deleted") -> "Mensagem apagada"
         optJSONObject("gif") != null -> "GIF"
         optJSONObject("music") != null -> "Música: ${optJSONObject("music")?.optString("title").orEmpty()}"
+        optJSONObject("game") != null -> "Joguinho: ${GAME_NAMES[optJSONObject("game")?.optString("type")] ?: "uma partida"}"
         voice != null -> voice.optDouble("duration", 0.0).toInt().let { "Mensagem de voz (%d:%02d)".format(it / 60, it % 60) }
         file != null && text.isBlank() -> when (file.optString("kind")) {
             "image" -> "Foto"

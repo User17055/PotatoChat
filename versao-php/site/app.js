@@ -5347,6 +5347,8 @@ function goUs(section, { day, calDay } = {}) {
 function paintUs() {
   const [iconName, title] = US_TITLES[us.section];
   setIcon($("#us-title-icon"), iconName);
+  usView.dataset.section = us.section;
+  closeEventPop();
   $("#us-title-text").textContent = title;
   usView.querySelectorAll("[data-pane]").forEach((pane) => pane.classList.toggle("hidden", pane.dataset.pane !== us.section));
   paintTabs();
@@ -5745,145 +5747,208 @@ function occursOn(event, day) {
   return event.repeat === "yearly" && date.getMonth() === start.getMonth() && date.getDate() === Math.min(start.getDate(), last);
 }
 
-// No mesmo dia: primeiro o que é o dia todo, depois pela hora.
+// No mesmo dia: primeiro o que é o dia inteiro, depois pela hora.
 const eventsOn = (day) => us.events.filter((event) => occursOn(event, day)).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
-const whoClass = (name) => (name === "ambos" ? "both" : name === me ? "mine" : "theirs");
-const eventHours = (event) => (event.time ? `${event.time}${event.end ? `–${event.end}` : ""}` : "O dia todo");
+const eventHours = (event) => (event.time ? `${event.time}${event.end ? ` – ${event.end}` : ""}` : "Dia inteiro");
 const clockMinutes = (clock) => Number(clock.slice(0, 2)) * 60 + Number(clock.slice(3, 5));
+const minutesClock = (minutes) => `${pad2(Math.floor(minutes / 60) % 24)}:${pad2(minutes % 60)}`;
 // A semana começa no domingo, como no calendário da parede.
 const weekStart = (day) => shiftDay(day, -dayDate(day).getDay());
+const CAL_VIEWS = ["day", "week", "month", "list"];
 const CAL_VIEW_KEY = "potato.calView";
+const CAL_HIDDEN_KEY = "potato.calHidden";
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
-// Semana: a grade vai das 6h à meia-noite (o que for antes das 6h aparece no topo), HOUR_HEIGHT px por hora.
-const FIRST_HOUR = 6;
-const HOUR_HEIGHT = 44;
-let calView = store.get("localStorage", CAL_VIEW_KEY) === "week" ? "week" : "month";
+const HOUR_HEIGHT = 48;
+// Cada agenda tem a sua cor, a mesma para os dois: a dos dois e a de cada pessoa (na ordem das contas).
+const BOTH_COLOR = "#e8608a";
+const PERSON_COLORS = ["#4c8bf5", "#33b679"];
+const calColor = (who) => (who === "ambos" ? BOTH_COLOR : PERSON_COLORS[Math.max(0, presenceList.findIndex((user) => user.name === who))] || PERSON_COLORS[0]);
+const savedView = store.get("localStorage", CAL_VIEW_KEY);
+let calView = CAL_VIEWS.includes(savedView) ? savedView : matchMedia("(max-width: 760px)").matches ? "list" : "month";
+// Agendas escondidas (desmarcadas na lista "Agendas"), só neste aparelho.
+const hiddenCals = new Set(store.get("localStorage", CAL_HIDDEN_KEY) || []);
+const shownOn = (day) => eventsOn(day).filter((event) => !hiddenCals.has(event.who));
+// Mês aberto no mini calendário (anda sozinho pelas setinhas dele).
+let miniMonth = "";
+const monthName = (date, options = { month: "long", year: "numeric" }) => capitalize(new Intl.DateTimeFormat("pt-BR", options).format(date));
 
 function paintAgenda() {
   us.calDay ||= todayKey();
   us.month ||= us.calDay.slice(0, 7);
   usView.querySelectorAll("[data-cal-view]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.calView === calView)));
-  if (calView === "week") paintWeek();
-  else paintMonth();
-  $("#cal-day-title").textContent = `${dayName(us.calDay)} · ${shortDate(us.calDay)}`;
-  const chosen = eventsOn(us.calDay);
-  $("#cal-day").replaceChildren(...(chosen.length ? chosen.map((event) => eventRow(event, us.calDay)) : [emptyNote("Nada marcado nesse dia. Que tal um encontro?")]));
-  const upcoming = [];
-  for (let offset = 0; offset < 120 && upcoming.length < 8; offset += 1) {
-    const day = shiftDay(todayKey(), offset);
-    for (const event of eventsOn(day)) if (upcoming.length < 8) upcoming.push([event, day]);
-  }
-  $("#cal-next-list").replaceChildren(...(upcoming.length ? upcoming.map(([event, day]) => eventRow(event, day, true)) : [emptyNote("Nenhum compromisso nos próximos meses.")]));
+  $("#cal-body").dataset.view = calView;
+  ({ day: () => paintTimeGrid(1), week: () => paintTimeGrid(7), month: paintMonth, list: paintList })[calView]();
+  paintMiniCal();
+  paintLegend();
+  paintUpcoming();
   paintSideAgenda();
 }
 
-// Mês: cada dia com os compromissos escritos (no celular, tracinhos na cor de quem é), como num calendário de verdade.
+function setCalView(view) {
+  calView = view;
+  store.set("localStorage", CAL_VIEW_KEY, view);
+  closeEventPop();
+  paintAgenda();
+  fx.view($("#cal-body"), 1);
+  sound.play("tap");
+}
+
+// Mostra um dia (no dia, na semana, no mês ou na lista que estiver aberta).
+function goCalDay(day) {
+  us.calDay = day;
+  us.month = day.slice(0, 7);
+  miniMonth = us.month;
+  paintAgenda();
+}
+
+// ---- mês ----
+
+// O mês inteiro em semanas; em cada dia, os compromissos: os do dia inteiro numa faixa colorida, os com hora com a
+// bolinha da cor da agenda. Mais de três: "+2 mais", que abre o dia.
 function paintMonth() {
   const [year, month] = us.month.split("-").map(Number);
   const first = new Date(year, month - 1, 1, 12);
-  $("#cal-month").textContent = capitalize(new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(first));
+  $("#cal-month").textContent = monthName(first);
   const start = shiftDay(isoDay(first), -first.getDay());
   const weeks = Math.ceil((first.getDay() + new Date(year, month, 0).getDate()) / 7);
   const grid = el("div", "month-grid");
+  grid.style.setProperty("--weeks", weeks);
   grid.append(...WEEKDAYS.map((name) => el("span", "month-weekday", name)));
   for (let index = 0; index < weeks * 7; index += 1) {
     const day = shiftDay(start, index);
-    const events = eventsOn(day);
+    const date = dayDate(day);
+    const events = shownOn(day);
     const cell = el("div", "month-cell");
     cell.dataset.day = day;
     cell.classList.toggle("other", day.slice(0, 7) !== us.month);
     cell.classList.toggle("today", day === todayKey());
     cell.classList.toggle("selected", day === us.calDay);
-    const number = el("button", "month-number", String(dayDate(day).getDate()));
+    const number = el("button", "month-number", date.getDate() === 1 ? `1 de ${new Intl.DateTimeFormat("pt-BR", { month: "short" }).format(date).replace(".", "")}` : String(date.getDate()));
     number.type = "button";
-    number.dataset.day = day;
-    number.setAttribute("aria-label", `${fullDate(day)}${events.length ? `, ${events.length} ${events.length === 1 ? "compromisso" : "compromissos"}` : ""}`);
-    if (day === us.calDay) number.setAttribute("aria-current", "date");
-    const chips = el("div", "month-events");
-    for (const event of events.slice(0, 3)) {
-      const chip = el("button", `month-chip ${whoClass(event.who)}`);
-      chip.type = "button";
-      chip.dataset.event = event.id;
-      chip.dataset.day = day;
-      chip.title = `${eventHours(event)} · ${event.title}`;
-      if (event.time) chip.append(el("span", "chip-time", event.time));
-      chip.append(el("span", "chip-title", event.title));
-      chips.append(chip);
+    number.dataset.goDay = day;
+    number.setAttribute("aria-label", `${fullDate(day)}${events.length ? `, ${events.length} ${events.length === 1 ? "compromisso" : "compromissos"}` : ""}. Abrir o dia`);
+    const list = el("div", "month-events");
+    const room = events.length > 3 ? 2 : 3;
+    for (const event of events.slice(0, room)) list.append(calChip(event, day));
+    if (events.length > room) {
+      const more = el("button", "month-more", `+${events.length - room} mais`);
+      more.type = "button";
+      more.dataset.goDay = day;
+      list.append(more);
     }
-    if (events.length > 3) chips.append(el("span", "month-more", `+${events.length - 3}`));
-    cell.append(number, chips);
+    cell.append(number, list);
     grid.append(cell);
   }
   $("#cal-body").replaceChildren(grid);
 }
 
-// Semana: os sete dias lado a lado, com a grade de horários; cada compromisso é um bloco do tamanho que dura (sem
-// hora de acabar, uma hora). Os que acontecem ao mesmo tempo dividem a coluna. Hoje tem a linha da hora atual.
-function paintWeek() {
-  const days = Array.from({ length: 7 }, (_, index) => shiftDay(weekStart(us.calDay), index));
-  $("#cal-month").textContent = `${shortDate(days[0])} – ${shortDate(days[6])}`;
-  const week = el("div", "week");
-  week.append(el("span", "week-corner"));
+function calChip(event, day) {
+  const chip = el("button", `cal-chip${event.time ? "" : " all-day"}${isPast(event, day) ? " past" : ""}`);
+  chip.type = "button";
+  chip.dataset.event = event.id;
+  chip.dataset.day = day;
+  chip.style.setProperty("--ev", calColor(event.who));
+  chip.title = `${eventHours(event)} · ${event.title}`;
+  if (event.time) chip.append(el("i", "chip-dot"), el("span", "chip-time", event.time));
+  chip.append(el("span", "chip-title", event.title));
+  return chip;
+}
+
+// Já passou? (Os que passaram ficam mais apagados, como nos calendários.)
+function isPast(event, day) {
+  if (day !== todayKey()) return day < todayKey();
+  return Boolean(event.time) && clockMinutes(event.end || minutesClock(clockMinutes(event.time) + 60)) <= clockMinutes(nowClock());
+}
+
+// ---- dia e semana ----
+
+// Os dias lado a lado com a grade das 24 horas: cada compromisso é um bloco do tamanho que dura (sem hora de acabar,
+// uma hora); os que se cruzam dividem a coluna. Hoje tem a linha vermelha da hora atual. Tocar num horário vazio marca ali.
+function paintTimeGrid(count) {
+  const first = count === 7 ? weekStart(us.calDay) : us.calDay;
+  const days = Array.from({ length: count }, (_, index) => shiftDay(first, index));
+  $("#cal-month").textContent = count === 1 ? capitalize(fullDate(us.calDay)) : weekTitle(days[0], days[6]);
+  const grid = el("div", `time-grid days-${count}`);
+  grid.style.setProperty("--days", count);
+  const offset = -new Date().getTimezoneOffset() / 60;
+  grid.append(el("span", "tg-corner", `GMT${offset < 0 ? "-" : "+"}${pad2(Math.abs(offset))}`));
   for (const day of days) {
-    const head = el("button", `week-day${day === todayKey() ? " today" : ""}${day === us.calDay ? " selected" : ""}`);
+    const head = el("button", `tg-day${day === todayKey() ? " today" : ""}${day < todayKey() ? " past" : ""}`);
     head.type = "button";
-    head.dataset.day = day;
-    head.setAttribute("aria-label", fullDate(day));
+    head.dataset.goDay = day;
+    head.setAttribute("aria-label", `${fullDate(day)}. Abrir o dia`);
     head.append(el("small", "", WEEKDAYS[dayDate(day).getDay()]), el("strong", "", String(dayDate(day).getDate())));
-    week.append(head);
+    grid.append(head);
   }
-  week.append(el("span", "week-label", "dia todo"));
+  grid.append(el("span", "tg-label", "dia inteiro"));
   for (const day of days) {
-    const cell = el("div", "week-allday");
+    const cell = el("div", "tg-allday");
     cell.dataset.day = day;
-    for (const event of eventsOn(day).filter((item) => !item.time)) cell.append(weekEvent(event, day, "week-chip"));
-    week.append(cell);
+    for (const event of shownOn(day).filter((item) => !item.time)) cell.append(calChip(event, day));
+    grid.append(cell);
   }
-  const hours = el("div", "week-hours");
-  for (let hour = FIRST_HOUR; hour < 24; hour += 1) hours.append(el("span", "", `${pad2(hour)}h`));
-  week.append(hours);
+  const hours = el("div", "tg-hours");
+  for (let hour = 0; hour < 24; hour += 1) hours.append(el("span", "", hour ? `${pad2(hour)}:00` : ""));
+  grid.append(hours);
   for (const day of days) {
-    const column = el("div", `week-column${day === todayKey() ? " today" : ""}${day === us.calDay ? " selected" : ""}`);
+    const column = el("div", `tg-column${day === todayKey() ? " today" : ""}`);
     column.dataset.day = day;
-    column.style.height = `${(24 - FIRST_HOUR) * HOUR_HEIGHT}px`;
-    for (const { event, start, end, lane, lanes } of layoutDay(eventsOn(day).filter((item) => item.time))) {
-      const top = Math.max(0, start - FIRST_HOUR * 60);
-      const block = weekEvent(event, day, "week-event");
-      block.style.top = `${top / 60 * HOUR_HEIGHT}px`;
-      block.style.height = `${Math.max(22, (end - FIRST_HOUR * 60 - top) / 60 * HOUR_HEIGHT - 2)}px`;
-      block.style.left = `calc(${lane * 100 / lanes}% + 2px)`;
-      block.style.width = `calc(${100 / lanes}% - 4px)`;
+    for (const { event, start, end, lane, lanes } of layoutDay(shownOn(day).filter((item) => item.time))) {
+      const block = el("button", `tg-event${end - start < 45 ? " short" : ""}${isPast(event, day) ? " past" : ""}`);
+      block.type = "button";
+      block.dataset.event = event.id;
+      block.dataset.day = day;
+      block.style.setProperty("--ev", calColor(event.who));
+      block.style.top = `${start / 60 * HOUR_HEIGHT}px`;
+      block.style.height = `${Math.max(20, (end - start) / 60 * HOUR_HEIGHT - 2)}px`;
+      const share = 100 / lanes;
+      const width = lane < lanes - 1 ? Math.min(100 - lane * share, share * 1.7) : share;
+      block.style.left = `calc(${lane * share}% + 1px)`;
+      block.style.width = `calc(${width}% - ${lanes > 1 ? 3 : 8}px)`;
+      block.style.zIndex = String(1 + lane);
+      block.title = `${eventHours(event)} · ${event.title}${event.place ? ` · ${event.place}` : ""}`;
+      block.append(el("strong", "", event.title), el("small", "", `${eventHours(event)}${event.place ? ` · ${event.place}` : ""}`));
       column.append(block);
     }
     if (day === todayKey()) {
-      const now = clockMinutes(nowClock()) - FIRST_HOUR * 60;
-      if (now > 0) {
-        const line = el("i", "week-now");
-        line.style.top = `${now / 60 * HOUR_HEIGHT}px`;
-        column.append(line);
-      }
+      const line = el("i", "tg-now");
+      line.style.top = `${clockMinutes(nowClock()) / 60 * HOUR_HEIGHT}px`;
+      column.append(line);
     }
-    week.append(column);
+    grid.append(column);
   }
-  const scroll = el("div", "week-scroll");
-  scroll.append(week);
+  const scroll = el("div", "tg-scroll");
+  scroll.append(grid);
   $("#cal-body").replaceChildren(scroll);
-  // Começa perto da hora atual (ou das 8h).
-  const focus = days.includes(todayKey()) ? clockMinutes(nowClock()) / 60 - 1.5 : 8;
-  scroll.scrollTop = Math.max(0, (focus - FIRST_HOUR) * HOUR_HEIGHT);
-  // No celular não cabem os sete dias: a semana rola para o lado até o dia escolhido.
-  const chosen = week.querySelector(".week-day.selected");
+  // Começa perto da hora atual (ou das 7h30).
+  const focus = days.includes(todayKey()) ? clockMinutes(nowClock()) / 60 - 2 : 7.5;
+  scroll.scrollTop = Math.max(0, focus * HOUR_HEIGHT);
+  // No celular, a semana não cabe: rola para o lado até o dia escolhido.
+  const chosen = [...grid.querySelectorAll(".tg-day")].find((head) => head.dataset.goDay === us.calDay);
   if (chosen && scroll.scrollWidth > scroll.clientWidth) {
     const left = chosen.getBoundingClientRect().left - scroll.getBoundingClientRect().left + scroll.scrollLeft;
-    scroll.scrollLeft = Math.max(0, left - 46 - (scroll.clientWidth - 46 - chosen.offsetWidth) / 2);
+    scroll.scrollLeft = Math.max(0, left - 56 - (scroll.clientWidth - 56 - chosen.offsetWidth) / 2);
   }
+}
+
+function weekTitle(first, last) {
+  const a = dayDate(first);
+  const b = dayDate(last);
+  // No celular, o curtinho ("18 – 24 out"): o completo não cabe ao lado das setas.
+  if (matchMedia("(max-width: 760px)").matches) {
+    const short = (date) => new Intl.DateTimeFormat("pt-BR", { month: "short" }).format(date).replace(".", "");
+    return a.getMonth() === b.getMonth() ? `${a.getDate()} – ${b.getDate()} ${short(b)}` : `${a.getDate()} ${short(a)} – ${b.getDate()} ${short(b)}`;
+  }
+  if (a.getMonth() === b.getMonth()) return `${a.getDate()} – ${b.getDate()} de ${new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(b)}`;
+  const short = (date) => `${date.getDate()} de ${monthName(date, { month: "short" }).replace(".", "").toLowerCase()}`;
+  return `${short(a)} – ${short(b)} de ${b.getFullYear()}`;
 }
 
 // Compromissos com hora no mesmo dia: os que se cruzam ficam em faixas lado a lado (lane de lanes).
 function layoutDay(events) {
   const items = events.map((event) => {
     const start = clockMinutes(event.time);
-    return { event, start, end: Math.max(start + 30, event.end ? clockMinutes(event.end) : start + 60) };
+    return { event, start, end: Math.min(24 * 60, Math.max(start + 30, event.end ? clockMinutes(event.end) : start + 60)) };
   }).sort((a, b) => a.start - b.start);
   const placed = [];
   let group = [];
@@ -5909,37 +5974,185 @@ function layoutDay(events) {
   return placed;
 }
 
-function weekEvent(event, day, className) {
-  const block = el("button", `${className} ${whoClass(event.who)}`);
-  block.type = "button";
-  block.dataset.event = event.id;
-  block.dataset.day = day;
-  block.title = `${eventHours(event)} · ${event.title}${event.place ? ` · ${event.place}` : ""}`;
-  block.append(el("strong", "", event.title));
-  if (event.time) block.append(el("small", "", eventHours(event)));
-  return block;
-}
+// ---- lista ----
 
-function eventRow(event, day, withDate = false) {
-  const row = el("button", `event-row ${whoClass(event.who)}`);
-  row.type = "button";
-  row.dataset.event = event.id;
-  row.dataset.day = day;
-  const text = el("span", "event-text");
-  const meta = [eventHours(event), event.place, event.who === "ambos" ? "Os dois" : who(event.who)].filter(Boolean);
-  if (event.repeat !== "none") meta.push(REPEAT_LABEL[event.repeat].toLowerCase());
-  const details = el("small", "", meta.join(" · "));
-  if (event.remind !== null) details.append(icon("bell", "icon meta-icon"));
-  text.append(el("strong", "", event.title), details);
-  row.append(iconBadge(event.icon || "calendar", `event-emoji ${whoClass(event.who)}`), text);
-  if (withDate) {
-    const label = day === todayKey() ? "Hoje" : day === shiftDay(todayKey(), 1) ? "Amanhã" : new Intl.DateTimeFormat("pt-BR", { weekday: "short", day: "numeric", month: "short" }).format(dayDate(day)).replace(/\./g, "");
-    row.append(el("span", "event-date", label));
+// Os próximos dois meses, dia por dia (só os dias com compromisso), como a "programação" dos calendários.
+function paintList() {
+  const start = us.calDay;
+  $("#cal-month").textContent = monthName(dayDate(start));
+  const wrap = el("div", "cal-list");
+  for (let offset = 0; offset < 62; offset += 1) {
+    const day = shiftDay(start, offset);
+    const events = shownOn(day);
+    if (!events.length) continue;
+    const date = dayDate(day);
+    const group = el("div", `list-day${day === todayKey() ? " today" : ""}`);
+    const label = el("button", "list-date");
+    label.type = "button";
+    label.dataset.goDay = day;
+    label.append(el("strong", "", String(date.getDate())), el("small", "", `${monthName(date, { month: "short" }).replace(".", "")}, ${WEEKDAYS[date.getDay()].toLowerCase()}`));
+    const items = el("div", "list-events");
+    for (const event of events) {
+      const row = el("button", `list-event${isPast(event, day) ? " past" : ""}`);
+      row.type = "button";
+      row.dataset.event = event.id;
+      row.dataset.day = day;
+      row.style.setProperty("--ev", calColor(event.who));
+      const text = el("span", "list-what");
+      text.append(el("strong", "", event.title));
+      if (event.place) text.append(el("small", "", event.place));
+      row.append(el("i", "chip-dot"), el("span", "list-time", eventHours(event)), text);
+      if (event.repeat !== "none") row.append(icon("repeat", "icon list-flag"));
+      items.append(row);
+    }
+    group.append(label, items);
+    wrap.append(group);
   }
-  return row;
+  if (!wrap.children.length) wrap.append(emptyNote("Nada marcado nos próximos dois meses."));
+  $("#cal-body").replaceChildren(wrap);
 }
 
-function editEvent(event = null, day = us.calDay || todayKey(), time = "19:00") {
+// ---- ao lado: mini calendário, agendas e próximos ----
+
+function paintMiniCal() {
+  miniMonth ||= us.calDay.slice(0, 7);
+  const [year, month] = miniMonth.split("-").map(Number);
+  const first = new Date(year, month - 1, 1, 12);
+  const start = shiftDay(isoDay(first), -first.getDay());
+  const week = calView === "week" ? weekStart(us.calDay) : "";
+  const head = el("div", "mini-head");
+  const arrow = (step, name, label) => {
+    const button = el("button", "mini-arrow");
+    button.type = "button";
+    button.dataset.mini = String(step);
+    button.setAttribute("aria-label", label);
+    button.append(icon(name));
+    return button;
+  };
+  head.append(el("strong", "", monthName(first)), arrow(-1, "chevron-left", "Mês anterior"), arrow(1, "chevron-right", "Próximo mês"));
+  const grid = el("div", "mini-grid");
+  grid.append(...["D", "S", "T", "Q", "Q", "S", "S"].map((letter) => el("span", "mini-weekday", letter)));
+  for (let index = 0; index < 42; index += 1) {
+    const day = shiftDay(start, index);
+    const button = el("button", "mini-day", String(dayDate(day).getDate()));
+    button.type = "button";
+    button.dataset.pickDay = day;
+    button.classList.toggle("other", day.slice(0, 7) !== miniMonth);
+    button.classList.toggle("today", day === todayKey());
+    button.classList.toggle("selected", day === us.calDay);
+    button.classList.toggle("in-week", Boolean(week) && day >= week && day <= shiftDay(week, 6));
+    button.classList.toggle("has", shownOn(day).length > 0);
+    button.setAttribute("aria-label", fullDate(day));
+    grid.append(button);
+  }
+  $("#mini-cal").replaceChildren(head, grid);
+}
+
+function paintLegend() {
+  const cals = [["ambos", "Dos dois"], ...presenceList.map((user) => [user.name, user.name === me ? `${user.name} (você)` : user.name])];
+  $("#cal-legend").replaceChildren(...cals.map(([key, label]) => {
+    const row = el("button", "legend-row");
+    row.type = "button";
+    row.dataset.cal = key;
+    row.setAttribute("aria-pressed", String(!hiddenCals.has(key)));
+    row.style.setProperty("--ev", calColor(key));
+    const box = el("span", "legend-box");
+    box.append(icon("check"));
+    row.append(box, el("span", "", label));
+    return row;
+  }));
+}
+
+function paintUpcoming() {
+  const upcoming = [];
+  for (let offset = 0; offset < 120 && upcoming.length < 6; offset += 1) {
+    const day = shiftDay(todayKey(), offset);
+    for (const event of shownOn(day)) if (upcoming.length < 6 && !isPast(event, day)) upcoming.push([event, day]);
+  }
+  $("#cal-next-list").replaceChildren(...(upcoming.length ? upcoming.map(([event, day]) => {
+    const row = el("button", "up-row");
+    row.type = "button";
+    row.dataset.event = event.id;
+    row.dataset.day = day;
+    row.style.setProperty("--ev", calColor(event.who));
+    const when = day === todayKey() ? "Hoje" : day === shiftDay(todayKey(), 1) ? "Amanhã" : capitalize(new Intl.DateTimeFormat("pt-BR", { weekday: "short", day: "numeric", month: "short" }).format(dayDate(day)).replace(/\./g, ""));
+    row.append(el("strong", "", event.title), el("small", "", `${when} · ${eventHours(event)}`));
+    return row;
+  }) : [el("p", "up-empty", "Nada marcado por enquanto.")]));
+}
+
+// ---- detalhes do compromisso ----
+
+const eventPop = $("#event-pop");
+// Compromisso aberto no cartãozinho ({ event, day }).
+let popped = null;
+
+function openEventPop(event, day, anchor) {
+  popped = { event, day };
+  eventPop.style.setProperty("--ev", calColor(event.who));
+  setIcon($("#pop-icon"), event.icon || "calendar");
+  $("#pop-title").textContent = event.title;
+  $("#pop-when").textContent = `${capitalize(fullDate(day))} · ${eventHours(event)}`;
+  const detail = (iconName, text) => {
+    const item = el("li");
+    item.append(icon(iconName), el("span", "", text));
+    return item;
+  };
+  const details = [detail("users", event.who === "ambos" ? "Agenda dos dois" : event.who === me ? "Sua agenda" : `Agenda de ${event.who}`)];
+  if (event.place) details.push(detail("map-pin", event.place));
+  if (event.repeat !== "none") details.push(detail("repeat", REPEAT_LABEL[event.repeat]));
+  if (event.remind !== null) details.push(detail("bell", REMIND_OPTIONS.find(([value]) => value === event.remind)?.[1] || "Com lembrete"));
+  if (event.note) details.push(detail("book-open", event.note));
+  $("#pop-details").replaceChildren(...details);
+  eventPop.classList.remove("hidden");
+  // No computador, ao lado do compromisso (cabendo na tela); no celular, sobe de baixo (styles.css).
+  if (!matchMedia("(max-width: 760px)").matches) {
+    const box = anchor.getBoundingClientRect();
+    const width = eventPop.offsetWidth;
+    const height = eventPop.offsetHeight;
+    const left = box.right + 12 + width < innerWidth ? box.right + 12 : Math.max(12, box.left - 12 - width);
+    eventPop.style.left = `${left}px`;
+    eventPop.style.top = `${Math.min(innerHeight - height - 12, Math.max(12, box.top + box.height / 2 - height / 2))}px`;
+  }
+  fx.show(eventPop, { y: 10, scale: 0.96 });
+  document.addEventListener("keydown", onPopKey, true);
+}
+
+function closeEventPop() {
+  if (!popped) return;
+  popped = null;
+  eventPop.classList.add("hidden");
+  eventPop.style.left = eventPop.style.top = "";
+  document.removeEventListener("keydown", onPopKey, true);
+}
+
+function onPopKey(event) {
+  if (event.key !== "Escape") return;
+  event.stopPropagation();
+  closeEventPop();
+}
+
+eventPop.addEventListener("click", async (event) => {
+  const action = event.target.closest("[data-pop]")?.dataset.pop;
+  if (!action || !popped) return;
+  const { event: item, day } = popped;
+  closeEventPop();
+  if (action === "edit") editEvent(item, day);
+  else if (action === "delete") {
+    if (!await confirmDialog({ title: "Apagar o compromisso?", text: item.repeat === "none" ? "Ele some da agenda dos dois." : "Ele some da agenda dos dois, em todas as vezes que repete.", confirm: "Apagar" })) return;
+    if (!await usCall({ op: "event:delete", id: item.id })) return;
+    us.events = us.events.filter((entry) => entry.id !== item.id);
+    paintAgenda();
+    loadSchedule();
+    toast("Compromisso apagado", "ok", "calendar");
+  }
+});
+
+document.addEventListener("pointerdown", (event) => {
+  if (popped && !event.target.closest("#event-pop, [data-event], #confirm")) closeEventPop();
+}, true);
+
+function editEvent(event = null, day = us.calDay || todayKey(), time = "19:00", end = "") {
   const people = presenceList.map((user) => user.name);
   openSheet({
     title: event ? "Compromisso" : "Novo compromisso",
@@ -5948,10 +6161,10 @@ function editEvent(event = null, day = us.calDay || todayKey(), time = "19:00") 
       { name: "icon", type: "chips", iconOnly: true, value: event?.icon || "calendar", options: EVENT_ICONS.map(([name, label]) => [name, label, "", name]) },
       { name: "title", type: "text", label: "O que é?", value: event?.title, placeholder: "Cinema, jantar, consulta…", max: 120 },
       { name: "date", type: "date", label: "Dia", value: event?.date || day },
-      { name: "time", type: "time", label: "Começa", value: event ? event.time : time, optional: "O dia todo", fallback: "19:00" },
-      { name: "end", type: "time", label: "Termina", value: event?.end, optional: "Sem hora", fallback: "21:00" },
+      { name: "time", type: "time", label: "Começa", value: event ? event.time : time, optional: "Dia inteiro", fallback: "19:00" },
+      { name: "end", type: "time", label: "Termina", value: event ? event.end : end, optional: "Sem hora", fallback: "21:00" },
       { name: "place", type: "text", label: "Onde", value: event?.place, placeholder: "Opcional", max: 120 },
-      { name: "who", type: "select", label: "De quem", value: event?.who || "ambos", options: [["ambos", "Dos dois"], ...people.map((name) => [name, name === me ? "Só meu" : `Só de ${name}`])] },
+      { name: "who", type: "select", label: "Agenda", value: event?.who || "ambos", options: [["ambos", "Dos dois"], ...people.map((name) => [name, name === me ? "Minha" : `De ${name}`])] },
       { name: "repeat", type: "select", label: "Repetir", value: event?.repeat || "none", options: Object.entries(REPEAT_LABEL) },
       { name: "remind", type: "select", label: "Lembrete", numeric: true, value: event ? event.remind ?? "" : 60, options: REMIND_OPTIONS },
       { name: "note", type: "textarea", label: "Anotação", value: event?.note, placeholder: "Opcional", max: 1000, rows: 2 }
@@ -5963,9 +6176,7 @@ function editEvent(event = null, day = us.calDay || todayKey(), time = "19:00") 
       const result = await usCall({ op: "event:save", id: event?.id, ...values });
       if (!result) return false;
       upsert(us.events, result.item);
-      us.calDay = result.item.date;
-      us.month = result.item.date.slice(0, 7);
-      paintAgenda();
+      goCalDay(result.item.date);
       loadSchedule();
       if (!event) {
         toast("Marcado na agenda dos dois", "ok", "calendar");
@@ -5984,74 +6195,86 @@ function editEvent(event = null, day = us.calDay || todayKey(), time = "19:00") 
   });
 }
 
-// Tocar num compromisso abre ele; num dia, escolhe o dia; dois toques num dia (ou num horário da semana) marca ali.
+// Tocar num compromisso abre os detalhes; no número do dia (ou no "+2 mais"), abre o dia; num horário vazio da semana
+// ou do dia, marca ali; num dia do mês, escolhe o dia (tocar de novo marca nele).
 $("#cal-body").addEventListener("click", (event) => {
   const chip = event.target.closest("[data-event]");
   const item = chip && us.events.find((entry) => entry.id === chip.dataset.event);
-  if (item) return editEvent(item, chip.dataset.day);
-  const day = event.target.closest("[data-day]")?.dataset.day;
-  if (!day || day === us.calDay) return;
-  us.calDay = day;
-  if (calView === "month" && day.slice(0, 7) !== us.month) us.month = day.slice(0, 7);
-  paintAgenda();
-  sound.play("tap");
-});
-
-$("#cal-body").addEventListener("dblclick", (event) => {
-  if (event.target.closest("[data-event]")) return;
-  const target = event.target.closest("[data-day]");
-  if (!target) return;
-  let time = "19:00";
-  if (target.matches(".week-column")) {
-    const hour = Math.min(23, FIRST_HOUR + Math.floor((event.clientY - target.getBoundingClientRect().top) / HOUR_HEIGHT));
-    time = `${pad2(hour)}:00`;
+  if (item) return openEventPop(item, chip.dataset.day, chip);
+  const go = event.target.closest("[data-go-day]");
+  if (go) {
+    goCalDay(go.dataset.goDay);
+    return setCalView("day");
   }
-  editEvent(null, target.dataset.day, time);
+  const column = event.target.closest(".tg-column");
+  if (column) {
+    const minutes = Math.max(0, Math.floor((event.clientY - column.getBoundingClientRect().top) / HOUR_HEIGHT * 2) * 30);
+    return editEvent(null, column.dataset.day, minutesClock(Math.min(minutes, 23 * 60)), minutesClock(Math.min(minutes + 60, 23 * 60 + 59)));
+  }
+  const cell = event.target.closest("[data-day]");
+  if (!cell) return;
+  if (cell.dataset.day === us.calDay) return editEvent(null, cell.dataset.day);
+  goCalDay(cell.dataset.day);
+  sound.play("tap");
 });
 
 for (const [id, step] of [["#cal-prev", -1], ["#cal-next", 1]]) {
   $(id).addEventListener("click", () => {
-    if (calView === "week") {
-      us.calDay = shiftDay(us.calDay, step * 7);
-      us.month = us.calDay.slice(0, 7);
-    } else {
+    if (calView === "month") {
       const [year, month] = us.month.split("-").map(Number);
       const date = new Date(year, month - 1 + step, 1, 12);
       us.month = `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`;
+      us.calDay = us.calDay.slice(0, 7) === us.month ? us.calDay : `${us.month}-01`;
+      miniMonth = us.month;
+      paintAgenda();
+    } else {
+      goCalDay(shiftDay(us.calDay, step * { day: 1, week: 7, list: 30 }[calView]));
     }
-    paintAgenda();
     sound.play("tap");
   });
 }
 
 $("#cal-today").addEventListener("click", () => {
-  us.calDay = todayKey();
-  us.month = us.calDay.slice(0, 7);
-  paintAgenda();
+  goCalDay(todayKey());
   sound.play("tap");
 });
 
-usView.querySelector(".agenda-views").addEventListener("click", (event) => {
+usView.querySelector(".cal-views").addEventListener("click", (event) => {
   const button = event.target.closest("[data-cal-view]");
-  if (!button || button.dataset.calView === calView) return;
-  calView = button.dataset.calView;
-  store.set("localStorage", CAL_VIEW_KEY, calView);
-  // Na semana, o dia escolhido precisa estar no mês que estava aberto.
-  if (calView === "week" && us.calDay.slice(0, 7) !== us.month) us.calDay = `${us.month}-01`;
-  paintAgenda();
-  fx.press(button);
+  if (button && button.dataset.calView !== calView) setCalView(button.dataset.calView);
+});
+
+$("#mini-cal").addEventListener("click", (event) => {
+  const arrow = event.target.closest("[data-mini]");
+  if (arrow) {
+    const [year, month] = miniMonth.split("-").map(Number);
+    const date = new Date(year, month - 1 + Number(arrow.dataset.mini), 1, 12);
+    miniMonth = `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`;
+    return paintMiniCal();
+  }
+  const day = event.target.closest("[data-pick-day]")?.dataset.pickDay;
+  if (!day) return;
+  goCalDay(day);
   sound.play("tap");
 });
 
-$("#event-add").addEventListener("click", () => editEvent(null, us.calDay));
+$("#cal-legend").addEventListener("click", (event) => {
+  const row = event.target.closest("[data-cal]");
+  if (!row) return;
+  if (hiddenCals.has(row.dataset.cal)) hiddenCals.delete(row.dataset.cal);
+  else hiddenCals.add(row.dataset.cal);
+  store.set("localStorage", CAL_HIDDEN_KEY, [...hiddenCals]);
+  paintAgenda();
+  sound.play("tap");
+});
 
-for (const events of [$("#cal-day"), $("#cal-next-list")]) {
-  events.addEventListener("click", (event) => {
-    const row = event.target.closest("[data-event]");
-    const item = row && us.events.find((entry) => entry.id === row.dataset.event);
-    if (item) editEvent(item, row.dataset.day);
-  });
-}
+$("#cal-next-list").addEventListener("click", (event) => {
+  const row = event.target.closest("[data-event]");
+  const item = row && us.events.find((entry) => entry.id === row.dataset.event);
+  if (item) openEventPop(item, row.dataset.day, row);
+});
+
+for (const id of ["#event-add", "#event-fab"]) $(id).addEventListener("click", () => editEvent(null, us.calDay));
 
 // ---- sonhos e metas ----
 
@@ -6258,7 +6481,8 @@ async function openLetter(id) {
   const fresh = meta.owner !== me && !meta.readAt;
   paintLetter({ ...meta, body: null });
   letterView.classList.remove("hidden");
-  fx.incoming($("#letter-paper"));
+  $("#envelope").className = `envelope paper-${meta.paper}`;
+  fx.letter($("#envelope"), $("#letter-paper"));
   document.addEventListener("keydown", onLetterKey, true);
   sound.play("whoosh");
   const result = await usCall({ op: "letter:open", id });
@@ -6921,6 +7145,7 @@ function gameCard(message) {
   const game = message.game;
   const box = el("div", "game");
   box.dataset.type = game.type;
+  box.append(el("span", "game-cover"));
   const head = el("div", "game-head");
   const name = el("span", "game-name");
   name.append(iconBadge(GAME_ICONS[game.type] || "dice", `game-mark game-${game.type}`), GAME_NAMES[game.type] || "Joguinho");
@@ -7022,14 +7247,14 @@ function boardSummary(message, box) {
     const mini = el("div", "mini-velha");
     game.board.forEach((mark, cell) => {
       const square = el("span", game.line?.includes(cell) ? "win" : "");
-      if (mark) square.append(icon(mark === "X" ? "x" : "circle", `icon mark ${mark === "X" ? "x" : "o"}`));
+      if (mark) square.append(velhaMark(mark));
       mini.append(square);
     });
     box.append(mini);
   }
   const row = el("div", "game-options");
   const playing = game.seats.includes(me);
-  row.append(gameButton(game.winner || !playing ? "Ver" : yourTurn || game.type === "stop" ? "Jogar" : "Abrir", "open", undefined, "game-ctl game-option primary"));
+  row.append(gameButton(game.winner || !playing ? "Ver" : yourTurn || game.type === "stop" ? "Jogar" : "Abrir", "open", undefined, "game-ctl game-option main"));
   if (game.winner && playing) row.append(gameButton("Revanche", "again", undefined, "game-ctl game-option", "rotate-ccw"));
   box.append(row);
 }
@@ -7104,9 +7329,11 @@ messagesEl.addEventListener("keydown", onGameEnter);
 // stop) têm o tabuleiro e os dois jogadores; os de carta, a mesma carta da conversa.
 
 const tableEl = $("#game-table");
-// Partida aberta (id da mensagem), a peça escolhida na dama, a rodada do stop já montada (os campos não são refeitos
-// a cada novidade) e as cartas da memória que estavam viradas (para animar só as que viraram agora).
-const table = { id: "", selected: null, built: "", shown: [], busy: false };
+// Partida aberta (id da mensagem), a peça escolhida na dama e a rodada do stop já montada (os campos não são refeitos a
+// cada novidade). O resto é o que estava na tela na última vez, para animar só o que mudou: as cartas da memória
+// viradas e com dono, o par errado, as marcas da velha e a linha da vitória, a escolha do verdade ou desafio.
+const table = { id: "", selected: null, built: "", busy: false };
+const tableFresh = () => ({ shown: [], matched: [], missKey: "", board: null, line: null, choice: null, done: false, dealt: false });
 let stopTimer = 0;
 
 function onTableKey(event) {
@@ -7117,7 +7344,7 @@ function onTableKey(event) {
 
 function openTable(id) {
   if (!byId.get(id)?.game) return;
-  Object.assign(table, { id, selected: null, built: "", shown: [], busy: false });
+  Object.assign(table, { id, selected: null, built: "", busy: false }, tableFresh());
   paintTable();
   tableEl.classList.remove("hidden");
   fx.incoming(tableEl.querySelector(".table-card"));
@@ -7149,14 +7376,22 @@ function paintTable() {
     paintPlayers(game);
     ({ velha: paintVelha, dama: paintDama, memoria: paintMemory, stop: paintStop })[game.type](message);
   } else {
-    // Carta: a mesma da conversa, sem o cabeçalho (o título já está em cima).
+    // Carta: uma carta de verdade na mesa, com a ilustração do jogo. Chega girando; no verdade ou desafio, vira quando
+    // a escolha é feita; o resultado pula quando os dois tiverem ido.
     $("#table-players").replaceChildren();
+    const card = el("div", "play-card");
+    card.dataset.type = game.type;
     const box = el("div", "game in-table");
     box.dataset.type = game.type;
     if (game.type === "vd") truthOrDare(message, box);
     else if (game.type === "pergunta") questionCard(message, box);
     else voteCard(message, box);
-    $("#table-board").replaceChildren(box);
+    card.append(el("span", "play-cover"), box);
+    $("#table-board").replaceChildren(card);
+    if (!table.dealt) fx.dealCard(card);
+    else if (game.type === "vd" && game.choice && !table.choice) fx.revealCard(card);
+    else if (game.done && !table.done) fx.pop(box.querySelector(".game-result, .game-answers"));
+    Object.assign(table, { dealt: true, choice: game.choice ?? null, done: Boolean(game.done) });
   }
   paintTableActions(game);
 }
@@ -7186,20 +7421,78 @@ function paintPlayers(game) {
   }));
 }
 
+function svgNode(tag, attributes = {}) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, value);
+  return node;
+}
+
+// Um X (dois traços) ou um O (um círculo) desenhado em SVG, para o GSAP traçar como se fosse à mão.
+function velhaMark(mark, className = "mark") {
+  const svg = svgNode("svg", { viewBox: "0 0 100 100", class: `${className} ${mark === "X" ? "x" : "o"}`, "aria-hidden": "true" });
+  if (mark === "X") svg.append(svgNode("path", { d: "M27 27 73 73" }), svgNode("path", { d: "M73 27 27 73" }));
+  else svg.append(svgNode("path", { d: "M50 23a27 27 0 1 1-.1 0" }));
+  return svg;
+}
+
+// Jogo da velha: o tabuleiro riscado à mão; cada X e O é traçado quando aparece, e a linha da vitória risca as três
+// casas. Na sua vez, passar por uma casa vazia mostra a sua marca bem clarinha. Embaixo, o placar da série.
 function paintVelha(message) {
   const game = message.game;
+  const mine = game.seats.indexOf(me) === 1 ? "O" : "X";
   const canPlay = !game.winner && game.turn === me && !table.busy;
-  const grid = el("div", "velha-board");
+  const board = el("div", `velha-board${canPlay ? " playable" : ""}`);
+  const lines = svgNode("svg", { viewBox: "0 0 300 300", class: "velha-lines", "aria-hidden": "true" });
+  for (const d of ["M100 14c-3 90-2 182 2 272", "M201 12c-2 92-3 182 1 274", "M14 101c90-4 182-3 272 2", "M12 200c92-3 182-4 274 1"]) lines.append(svgNode("path", { d }));
+  board.append(lines);
+  const fresh = [];
   game.board.forEach((mark, cell) => {
     const square = el("button", `velha-cell${game.line?.includes(cell) ? " win" : ""}`);
-    if (mark) square.append(icon(mark === "X" ? "x" : "circle", `icon mark ${mark === "X" ? "x" : "o"}`));
     square.type = "button";
     square.dataset.cell = String(cell);
     square.disabled = !canPlay || Boolean(mark);
     square.setAttribute("aria-label", `Casa ${cell + 1}${mark ? `: ${mark}` : ", vazia"}`);
-    grid.append(square);
+    if (mark) {
+      const drawn = velhaMark(mark);
+      square.append(drawn);
+      if (!table.board || table.board[cell] !== mark) fresh.push(...drawn.querySelectorAll("path"));
+    } else if (canPlay) {
+      square.append(velhaMark(mine, "mark ghost"));
+    }
+    board.append(square);
   });
-  $("#table-board").replaceChildren(grid);
+  let strike = null;
+  if (game.line) {
+    const point = (cell) => [50 + (cell % 3) * 100, 50 + Math.floor(cell / 3) * 100];
+    const [x1, y1] = point(game.line[0]);
+    const [x2, y2] = point(game.line[2]);
+    const length = Math.hypot(x2 - x1, y2 - y1);
+    const [dx, dy] = [(x2 - x1) / length * 36, (y2 - y1) / length * 36];
+    const svg = svgNode("svg", { viewBox: "0 0 300 300", class: "velha-strike", "aria-hidden": "true" });
+    strike = svgNode("path", { d: `M${x1 - dx} ${y1 - dy}L${x2 + dx} ${y2 + dy}` });
+    svg.append(strike);
+    board.append(svg);
+  }
+  $("#table-board").replaceChildren(board, velhaSeries(game));
+  const first = !table.board;
+  fx.draw(fresh, first ? { duration: 0.3, stagger: 0.06 } : {});
+  if (strike && (first || !table.line)) fx.draw([strike], { duration: 0.5, delay: first ? fresh.length * 0.06 + 0.15 : 0.4 });
+  table.board = [...game.board];
+  table.line = game.line;
+}
+
+// Placar da série: as partidas de jogo da velha entre vocês que estão na conversa carregada.
+function velhaSeries(game) {
+  const score = {};
+  for (const message of list) {
+    const winner = message.game?.type === "velha" && !message.deleted ? message.game.winner : null;
+    if (winner) score[winner] = (score[winner] || 0) + 1;
+  }
+  const [a, b] = game.seats;
+  const line = el("p", "velha-series");
+  line.append(el("span", "", "Série"), el("strong", "", `${who(a)} ${score[a] || 0} × ${score[b] || 0} ${who(b)}`));
+  if (score.empate) line.append(el("span", "", `${score.empate} ${score.empate === 1 ? "empate" : "empates"}`));
+  return line;
 }
 
 // Dama: quem joga com as pretas vê o tabuleiro do lado dele. As jogadas que valem vêm do servidor (moves).
@@ -7255,14 +7548,18 @@ function pickSquare(message, index) {
   }
 }
 
+// Memória: as cartas chegam distribuídas, viram em 3D (GSAP), o par certo pula e o errado treme e vira de volta.
 function paintMemory(message) {
   const game = message.game;
   const canPlay = !game.winner && game.turn === me && !table.busy;
   const grid = el("div", "memory-board");
+  const flipped = [];
+  const paired = [];
+  const missedInners = [];
   game.cards.forEach((face, index) => {
     const owner = game.matched[index];
     const missed = game.missed?.includes(index);
-    const card = el("button", `memory-card${face ? " up" : ""}${face && !table.shown[index] ? " flip-in" : ""}${owner ? ` matched ${owner === me ? "mine" : "theirs"}` : ""}${missed ? " missed" : ""}`);
+    const card = el("button", `memory-card${face ? " up" : ""}${owner ? ` matched ${owner === me ? "mine" : "theirs"}` : ""}${missed ? " missed" : ""}`);
     card.type = "button";
     card.dataset.card = String(index);
     card.disabled = !canPlay || Boolean(face && !missed);
@@ -7275,9 +7572,18 @@ function paintMemory(message) {
     inner.append(back, front);
     card.append(inner);
     grid.append(card);
+    if (face && !table.shown[index]) flipped.push(inner);
+    if (owner && !table.matched[index]) paired.push(card);
+    if (missed) missedInners.push(inner);
   });
-  table.shown = game.cards.map(Boolean);
   $("#table-board").replaceChildren(grid);
+  const first = !table.shown.length;
+  if (first) fx.deal([...grid.children]);
+  else flipped.forEach((inner) => fx.flip(inner));
+  if (!first) fx.match(paired);
+  const missKey = game.missed?.join() || "";
+  if (missKey && missKey !== table.missKey) fx.miss(missedInners);
+  Object.assign(table, { shown: game.cards.map(Boolean), matched: [...game.matched], missKey });
 }
 
 // Stop: os campos são montados uma vez por rodada (as novidades do outro só mudam o placar em cima).
@@ -7295,7 +7601,7 @@ function paintStop(message) {
   const board = $("#table-board");
   if (game.phase === "playing" && game.seats.includes(me)) {
     const draft = stopDraft(message);
-    const wrap = el("div", "stop");
+    const wrap = el("div", "stop-board");
     const letter = el("div", "stop-letter");
     letter.append(el("small", "", `Rodada ${game.round}`), el("strong", "", game.letter));
     const form = el("form", "stop-form");

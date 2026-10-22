@@ -399,6 +399,88 @@ export const fx = {
     if (gsap) gsap.to(element, { scale: 1 + Math.min(value * 1.4, 0.35), duration: 0.12, overwrite: true });
   },
 
+  // ---- jogos e cartinhas ----
+
+  // Cartas entrando na mesa, uma depois da outra, a partir do meio (memória).
+  deal(cards) {
+    if (!motion() || !cards.length) return;
+    gsap.from(cards, { y: 46, rotation: () => rand(-16, 16), scale: 0.55, opacity: 0, duration: 0.6, ease: "back.out(1.7)", stagger: { each: 0.035, from: "center" }, clearProps: "transform,opacity" });
+  },
+
+  // A carta vira e mostra a figura (o verso gira em 3D).
+  flip(inner) {
+    if (!motion()) return;
+    gsap.fromTo(inner, { rotationY: 0 }, { rotationY: 180, duration: 0.6, ease: "back.out(1.5)" });
+  },
+
+  // Par certo: as duas cartas pulam juntas.
+  match(cards) {
+    if (!motion() || !cards.length) return;
+    gsap.fromTo(cards, { scale: 1 }, { scale: 1.14, duration: 0.18, yoyo: true, repeat: 1, ease: "power2.out", delay: 0.45, clearProps: "scale" });
+  },
+
+  // Par errado: as duas tremem e viram de volta (dá tempo de decorar onde estão).
+  miss(inners, delay = 0) {
+    if (!motion() || !inners.length) return;
+    gsap.timeline({ delay })
+      .to(inners, { x: -6, duration: 0.06, repeat: 5, yoyo: true, ease: "sine.inOut" }, 1.1)
+      .to(inners, { x: 0, duration: 0.05 })
+      .to(inners, { rotationY: 0, duration: 0.55, ease: "power2.inOut" }, "+=0.35");
+  },
+
+  // Traço sendo desenhado à mão (X e O do jogo da velha, o risco da vitória).
+  draw(paths, { duration = 0.42, delay = 0, stagger = 0.14 } = {}) {
+    if (!motion() || !paths.length) return;
+    for (const path of paths) {
+      const length = path.getTotalLength();
+      path.style.strokeDasharray = length;
+      path.style.strokeDashoffset = length;
+    }
+    gsap.to(paths, { strokeDashoffset: 0, duration, delay, stagger, ease: "power2.out", onComplete: () => paths.forEach((path) => { path.style.strokeDasharray = ""; path.style.strokeDashoffset = ""; }) });
+  },
+
+  // Carta de jogo chegando na mesa (girando um pouco) ou virando para revelar o que tem.
+  dealCard(card) {
+    if (!motion()) return;
+    gsap.from(card, { y: 70, rotation: -10, scale: 0.75, opacity: 0, duration: 0.65, ease: "back.out(1.5)", clearProps: "transform,opacity" });
+  },
+
+  revealCard(card) {
+    if (!motion()) return;
+    gsap.fromTo(card, { rotationY: -100, scale: 0.92 }, { rotationY: 0, scale: 1, duration: 0.75, ease: "back.out(1.4)", clearProps: "transform" });
+  },
+
+  // Cartinha: o envelope chega, o selo some, a aba abre, a carta sobe e vira a cartinha aberta.
+  // Tocar no envelope pula a animação.
+  letter(envelope, paper) {
+    if (!motion()) {
+      envelope.classList.add("hidden");
+      return;
+    }
+    const flap = envelope.querySelector(".env-flap");
+    const seal = envelope.querySelector(".env-seal");
+    const sheet = envelope.querySelector(".env-sheet");
+    envelope.classList.remove("hidden");
+    gsap.set([flap, seal, sheet, envelope], { clearProps: "all" });
+    gsap.set(paper, { opacity: 0, y: 90, scale: 0.6 });
+    const timeline = gsap.timeline({
+      onComplete: () => {
+        envelope.classList.add("hidden");
+        gsap.set(paper, { clearProps: "all" });
+      }
+    });
+    timeline
+      .fromTo(envelope, { scale: 0.35, rotation: -14, opacity: 0, y: 40 }, { scale: 1, rotation: 0, opacity: 1, y: 0, duration: 0.6, ease: "back.out(1.6)" })
+      .to(envelope, { rotation: 3, duration: 0.12, yoyo: true, repeat: 3, ease: "sine.inOut" })
+      .to(seal, { scale: 0, rotation: 90, opacity: 0, duration: 0.28, ease: "back.in(2)" })
+      .to(flap, { rotationX: 180, duration: 0.5, ease: "power2.inOut" }, "-=0.05")
+      .set(flap, { zIndex: -1 })
+      .to(sheet, { y: -96, duration: 0.5, ease: "power2.out" })
+      .to(envelope, { y: 90, opacity: 0, scale: 0.9, duration: 0.38, ease: "power2.in" }, "+=0.05")
+      .to(paper, { opacity: 1, y: 0, scale: 1, duration: 0.55, ease: "back.out(1.3)" }, "-=0.3");
+    envelope.onclick = () => timeline.progress(1);
+  },
+
   // Explosão de emojis a partir de um ponto (ex.: duplo clique numa mensagem).
   burst(x, y, emojis = ["❤️"], count = 12) {
     if (!motion()) return;

@@ -117,8 +117,19 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
-        webView.loadUrl(SITE_URL)
+        // Aberto por uma notificação do Nosso cantinho: o site já começa na parte certa (#agenda, #cartinhas…).
+        webView.loadUrl(SITE_URL + section(intent)?.let { "#$it" }.orEmpty())
     }
+
+    // Com o app já aberto, a notificação do Nosso cantinho só troca a parte que aparece.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        val section = section(intent) ?: return
+        webView.evaluateJavascript("window.potatoOpen && window.potatoOpen(${JSONObject.quote(section)})", null)
+    }
+
+    private fun section(intent: Intent?): String? =
+        intent?.getStringExtra(CantinhoNotifications.EXTRA_OPEN)?.takeIf { it in setOf("hoje", "agenda", "sonhos", "cartinhas", "jogos") }
 
     @Suppress("SetJavaScriptEnabled")
     private fun configureWebView() {
@@ -321,6 +332,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun createChannels() {
+        CantinhoNotifications.createChannels(this)
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(MESSAGE_CHANNEL, "Mensagens", NotificationManager.IMPORTANCE_HIGH).apply { setShowBadge(true) })
         manager.createNotificationChannel(NotificationChannel(CALL_CHANNEL, "Chamadas", NotificationManager.IMPORTANCE_HIGH).apply { setShowBadge(false) })

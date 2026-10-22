@@ -743,31 +743,41 @@ function asset(string $file): string
             </button>
           </section>
 
-          <!-- Agenda dos dois: o mês (com os compromissos escritos em cada dia) ou a semana (com os horários), o dia
-               escolhido e os próximos. -->
-          <section class="us-pane" data-pane="agenda">
-            <div class="agenda-bar">
-              <div class="agenda-nav">
-                <button id="cal-prev" class="nav-round" type="button" title="Anterior" aria-label="Anterior"><svg class="icon"><use href="#i-chevron-left" /></svg></button>
-                <button id="cal-next" class="nav-round" type="button" title="Próximo" aria-label="Próximo"><svg class="icon"><use href="#i-chevron-right" /></svg></button>
-                <button id="cal-today" class="pill ghost small" type="button">Hoje</button>
-                <strong id="cal-month"></strong>
-              </div>
-              <div class="agenda-tools">
-                <div class="agenda-views" role="group" aria-label="Ver por">
-                  <button type="button" data-cal-view="month">Mês</button>
-                  <button type="button" data-cal-view="week">Semana</button>
+          <!-- Agenda dos dois, como um calendário de verdade: ao lado, o mini calendário, as agendas (a dos dois e a de
+               cada um, cada uma com a sua cor; dá para esconder) e os próximos; no meio, o dia, a semana, o mês ou a lista. -->
+          <section class="us-pane agenda-pane" data-pane="agenda">
+            <div class="cal-layout">
+              <aside class="cal-side" aria-label="Agendas">
+                <button id="event-add" class="cal-create" type="button"><svg class="icon"><use href="#i-plus" /></svg>Criar</button>
+                <div id="mini-cal" class="mini-cal"></div>
+                <section class="cal-section" aria-labelledby="cal-legend-title">
+                  <h4 id="cal-legend-title">Agendas</h4>
+                  <div id="cal-legend" class="cal-legend"></div>
+                </section>
+                <section class="cal-section" aria-labelledby="cal-next-title">
+                  <h4 id="cal-next-title">Próximos</h4>
+                  <div id="cal-next-list" class="up-list"></div>
+                </section>
+              </aside>
+              <div class="cal-main">
+                <div class="cal-toolbar">
+                  <button id="cal-today" class="cal-today" type="button">Hoje</button>
+                  <div class="cal-arrows">
+                    <button id="cal-prev" class="cal-arrow" type="button" title="Anterior" aria-label="Anterior"><svg class="icon"><use href="#i-chevron-left" /></svg></button>
+                    <button id="cal-next" class="cal-arrow" type="button" title="Próximo" aria-label="Próximo"><svg class="icon"><use href="#i-chevron-right" /></svg></button>
+                  </div>
+                  <h3 id="cal-month" class="cal-title" aria-live="polite"></h3>
+                  <div class="cal-views" role="group" aria-label="Ver por">
+                    <button type="button" data-cal-view="day">Dia</button>
+                    <button type="button" data-cal-view="week">Semana</button>
+                    <button type="button" data-cal-view="month">Mês</button>
+                    <button type="button" data-cal-view="list">Lista</button>
+                  </div>
                 </div>
-                <button id="event-add" class="pill gold small" type="button"><svg class="icon"><use href="#i-plus" /></svg>Compromisso</button>
+                <div id="cal-body" class="cal-body"></div>
               </div>
             </div>
-            <div id="cal-body" class="us-card cal-card"></div>
-            <div class="pane-head">
-              <h3 id="cal-day-title" class="us-subtitle"></h3>
-            </div>
-            <div id="cal-day" class="event-list"></div>
-            <h3 class="us-subtitle">Próximos</h3>
-            <div id="cal-next-list" class="event-list"></div>
+            <button id="event-fab" class="cal-fab" type="button" title="Novo compromisso" aria-label="Novo compromisso"><svg class="icon"><use href="#i-plus" /></svg></button>
           </section>
 
           <!-- Sonhos e metas dos dois: dinheiro guardado (com a barra até o objetivo), passos e realizados. -->
@@ -800,25 +810,25 @@ function asset(string $file): string
             <h3 class="us-subtitle">De tabuleiro</h3>
             <div class="games">
               <article class="game-tile velha">
-                <span class="game-badge" aria-hidden="true"><svg class="icon"><use href="#i-hash" /></svg></span>
+                <span class="game-art" aria-hidden="true"></span>
                 <h3>Jogo da velha</h3>
                 <p>O clássico: três em linha. Quem começa fica com o X.</p>
                 <button class="pill gold small" type="button" data-game-new="velha"><svg class="icon"><use href="#i-play" /></svg>Jogar</button>
               </article>
               <article class="game-tile dama">
-                <span class="game-badge" aria-hidden="true"><svg class="icon"><use href="#i-crown" /></svg></span>
+                <span class="game-art" aria-hidden="true"></span>
                 <h3>Dama</h3>
                 <p>Captura obrigatória e dama que voa. Quem começa joga com as brancas.</p>
                 <button class="pill gold small" type="button" data-game-new="dama"><svg class="icon"><use href="#i-play" /></svg>Jogar</button>
               </article>
               <article class="game-tile memoria">
-                <span class="game-badge" aria-hidden="true"><svg class="icon"><use href="#i-brain" /></svg></span>
+                <span class="game-art" aria-hidden="true"></span>
                 <h3>Jogo da memória</h3>
                 <p>Oito pares escondidos. Achou um par, joga de novo; quem achar mais ganha.</p>
                 <button class="pill gold small" type="button" data-game-new="memoria"><svg class="icon"><use href="#i-play" /></svg>Jogar</button>
               </article>
               <article class="game-tile stop">
-                <span class="game-badge" aria-hidden="true"><svg class="icon"><use href="#i-hand" /></svg></span>
+                <span class="game-art" aria-hidden="true"></span>
                 <h3>Stop</h3>
                 <p>Uma letra e seis categorias. Preencheu tudo? Grite STOP e a rodada acaba para os dois!</p>
                 <button class="pill gold small" type="button" data-game-new="stop"><svg class="icon"><use href="#i-play" /></svg>Jogar</button>
@@ -827,25 +837,25 @@ function asset(string $file): string
             <h3 class="us-subtitle">Do casal</h3>
             <div class="games">
               <article class="game-tile quem">
-                <span class="game-badge" aria-hidden="true"><svg class="icon"><use href="#i-users" /></svg></span>
+                <span class="game-art" aria-hidden="true"></span>
                 <h3>Quem é mais provável?</h3>
                 <p>Cada um vota em quem combina mais. Os votos aparecem quando os dois votarem.</p>
                 <button class="pill gold small" type="button" data-game-new="quem"><svg class="icon"><use href="#i-play" /></svg>Jogar</button>
               </article>
               <article class="game-tile vd">
-                <span class="game-badge" aria-hidden="true"><svg class="icon"><use href="#i-dice" /></svg></span>
+                <span class="game-art" aria-hidden="true"></span>
                 <h3>Verdade ou desafio</h3>
                 <p data-game-hint="vd">A outra pessoa escolhe: verdade ou desafio. Perguntas e desafios fofinhos.</p>
                 <button class="pill gold small" type="button" data-game-new="vd"><svg class="icon"><use href="#i-play" /></svg>Desafiar</button>
               </article>
               <article class="game-tile isso">
-                <span class="game-badge" aria-hidden="true"><svg class="icon"><use href="#i-split" /></svg></span>
+                <span class="game-art" aria-hidden="true"></span>
                 <h3>Isso ou aquilo</h3>
                 <p>Duas opções. Cada um escolhe sem ver a escolha do outro. Será que combinam?</p>
                 <button class="pill gold small" type="button" data-game-new="isso"><svg class="icon"><use href="#i-play" /></svg>Jogar</button>
               </article>
               <article class="game-tile pergunta">
-                <span class="game-badge" aria-hidden="true"><svg class="icon"><use href="#i-question" /></svg></span>
+                <span class="game-art" aria-hidden="true"></span>
                 <h3>Perguntinha</h3>
                 <p>Uma pergunta para os dois. As respostas só aparecem quando os dois responderem.</p>
                 <button class="pill gold small" type="button" data-game-new="pergunta"><svg class="icon"><use href="#i-play" /></svg>Jogar</button>
@@ -1011,8 +1021,29 @@ function asset(string $file): string
       </form>
     </div>
 
-    <!-- Cartinha aberta, no papel que quem escreveu escolheu. -->
+    <!-- Detalhes de um compromisso (tocar nele na agenda). No celular, sobe de baixo. -->
+    <div id="event-pop" class="event-pop hidden" role="dialog" aria-labelledby="pop-title">
+      <div class="pop-tools">
+        <button type="button" data-pop="edit" title="Editar" aria-label="Editar"><svg class="icon"><use href="#i-pencil" /></svg></button>
+        <button type="button" data-pop="delete" title="Apagar" aria-label="Apagar"><svg class="icon"><use href="#i-trash" /></svg></button>
+        <button type="button" data-pop="close" title="Fechar" aria-label="Fechar"><svg class="icon"><use href="#i-x" /></svg></button>
+      </div>
+      <div class="pop-head">
+        <span class="pop-color" aria-hidden="true"><svg class="icon"><use id="pop-icon" href="#i-calendar" /></svg></span>
+        <div><h3 id="pop-title"></h3><p id="pop-when"></p></div>
+      </div>
+      <ul id="pop-details" class="pop-details"></ul>
+    </div>
+
+    <!-- Cartinha aberta, no papel que quem escreveu escolheu. Antes, o envelope chega e abre (fx.letter). -->
     <div id="letter-view" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="letter-title">
+      <div id="envelope" class="envelope hidden" aria-hidden="true">
+        <span class="env-back"></span>
+        <span class="env-sheet"></span>
+        <span class="env-front"></span>
+        <span class="env-flap"></span>
+        <span class="env-seal"><svg class="icon"><use href="#i-heart" /></svg></span>
+      </div>
       <article id="letter-paper" class="letter-paper">
         <button id="letter-close" class="peer-close" type="button" title="Fechar" aria-label="Fechar"><svg class="icon"><use href="#i-x" /></svg></button>
         <p id="letter-to" class="letter-to"></p>

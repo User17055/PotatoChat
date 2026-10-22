@@ -28,7 +28,7 @@ versao-php/
 │   ├── config.php     dados do MySQL  ← edite antes de enviar
 │   ├── realtime.js    conexão em tempo real (substitui o Socket.IO)
 │   ├── app.js, fx.js, sound.js, styles.css, img/, vendor/
-│   ├── lib/           código do servidor (bloqueado para o navegador)
+│   ├── lib/           código do servidor (bloqueado para o navegador); as cartas dos joguinhos ficam em lib/jogos.php
 │   └── .htaccess      protege config.php e lib/ (arquivo oculto: não esqueça de enviar)
 ├── extensao/      ← extensão do Chrome adaptada (carregue no Chrome, não vai para o servidor)
 ├── banco.sql      ← opcional: tabelas para importar pelo phpMyAdmin
@@ -155,6 +155,60 @@ Os filmes da Netflix e da HBO Max são protegidos contra cópia: só tocam no si
 - A sala mostra o título, o relógio da sessão (igual para os dois) e o botão **Abrir na Netflix** / **Abrir na HBO Max**.
 - **Nenhuma senha fica guardada:** salvar a senha da Netflix ou da HBO Max no banco não faria o filme tocar dentro do site e ainda deixaria as contas em risco.
 
+## Nosso cantinho
+
+Um lugar só de vocês dois, fora da conversa. No computador, cada parte é um item da barra lateral (embaixo da conversa); no celular e no painel da extensão, a barra lateral abre pelo **botão de menu** (☰) no canto de cima, que ganha um pontinho vermelho quando tem novidade lá dentro (cartinha nova, partida esperando a sua jogada…). Tudo muda ao vivo para os dois, e fica na tabela `potato_items` (as fotos ficam em `potato_files`, como as da conversa).
+
+### Rotina do dia
+
+O dia de cada um, lado a lado (no celular, um embaixo do outro). Cada pessoa preenche só o seu; o da outra aparece para ver. As setas do topo voltam aos dias anteriores.
+
+- **Acordou:** a hora em que acordou.
+- **Refeições:** café da manhã, almoço, lanche e jantar, cada uma com o que comeu e uma **foto do prato** (opcional). A hora em que contou aparece junto.
+- **Rotina:** os hábitos de cada um (beber água, academia, estudar…). Monte a lista em *Montar*/*Editar* e toque em cada um quando fizer; o contador mostra quantos já foram, e completar tudo solta confete.
+- **Humor**, **momentos do dia** (fotos com legenda, até 8) e **como foi o dia** (um texto livre).
+- Quando a outra pessoa conta o que comeu, chega um aviso (e, no Android com o app fechado, uma notificação).
+
+**Lembretes da rotina:** em *Lembretes da rotina*, escolha os horários (o padrão é acordar 9h30, café 10h30, almoço 13h30, jantar 20h30 e rotina 22h; o lanche começa desligado). Na hora, o app pergunta ("O que você almoçou hoje?"), mas só o que você ainda não contou; o da rotina diz quais hábitos faltam.
+
+- **No Android, com o app fechado:** chega uma notificação com **Responder** — escreve ali mesmo ("arroz, feijão e bife") e a resposta vai direto para o seu dia, sem abrir o app. Na de acordar, dá para escrever a hora ("7:30", "7h", "6 e meia") ou tocar em *Acordei agora*; na da rotina, *Fiz tudo* marca todos os hábitos.
+- **Com o site aberto** (e alguém mexendo nele), aparece um aviso no canto, com o campo para responder. Cada lembrete aparece num aparelho só.
+
+### Agenda
+
+A agenda dos dois, como um calendário de verdade:
+
+- **Dia, Semana, Mês e Lista**, com *Hoje* e as setas para andar. No mês, cada dia mostra os compromissos (no celular, tracinhos coloridos); na semana e no dia, a grade das 24 horas com a linha vermelha da hora atual; a lista mostra os próximos dois meses, dia por dia.
+- Ao lado (no computador): **Criar**, o mini calendário, as **agendas** e os **próximos**. Cada agenda tem a sua cor, igual para os dois: a *dos dois* e a de cada pessoa; desmarcar uma esconde os compromissos dela (só no seu aparelho).
+- Tocar num compromisso abre os detalhes (dia, hora, onde, de quem, repetição, lembrete, anotação), com editar e apagar. Tocar num horário vazio da semana ou do dia já marca naquele horário; no mês, tocar num dia escolhe o dia, e tocar de novo marca nele.
+- Cada compromisso tem ícone, título, dia, hora de começar e de terminar (ou o dia inteiro), lugar, de quem é, **repetição** (toda semana, todo mês — bom para o mesversário: no dia 31, cai no último dia dos meses mais curtos — ou todo ano) e **lembrete** (na hora, de 15 minutos a 1 dia antes). O lembrete chega como notificação no Android e como aviso no site aberto.
+- Quando a outra pessoa marca um compromisso, chega um aviso; no menu, embaixo de *Agenda*, aparece o próximo.
+
+### Sonhos e metas
+
+Os sonhos dos dois, cada um com ícone, nome, anotação e, se quiser, **quanto juntar** (com a barra até o objetivo e o dinheiro que cada um guardou ou tirou), **até quando** e **passos** para marcar. *Realizamos!* comemora e leva o sonho para os *Realizados*.
+
+### Cartinhas
+
+O blog de cartinhas: escreva quando quiser, num papel de cor (creme, rosa, azul, lilás ou verde). Para a outra pessoa, a cartinha nova aparece com o selo **Nova!** (e o número no menu) até ser aberta; ao abrir, um envelope chega e abre, e a carta sobe. Quem escreveu vê quando foi lida e pode editar ou apagar. O rascunho fica guardado no aparelho até ser enviado.
+
+## Joguinhos
+
+Em *Jogos* (no menu, ou no clipe da conversa → *Joguinhos*), cada jogo tem um cartão com a ilustração dele. Escolher um abre a **mesinha de jogo** na hora, e a outra pessoa recebe o convite na conversa (com a mesma ilustração e o botão *Jogar*). As partidas que ainda estão valendo aparecem em *Partidas em andamento*, e o servidor confere cada jogada e de quem é a vez.
+
+| Jogo | Como funciona |
+| --- | --- |
+| Jogo da velha | Quem começa fica com o X. O tabuleiro é riscado à mão, cada X e O é traçado na hora e a linha da vitória risca as três casas. Embaixo, o placar da série entre vocês |
+| Dama | Quem começa joga com as brancas; quem joga com as pretas vê o tabuleiro do lado dele. Pedra anda uma casa para a frente e come para os dois lados; dama anda e come de longe. Comer é obrigatório e continua enquanto der. Dá para desistir |
+| Jogo da memória | Oito pares de figuras. As cartas são distribuídas e viram em 3D; acertou, joga de novo; errou, as duas tremem e viram de volta. Quem achar mais pares ganha. As cartas fechadas nunca saem do servidor |
+| Stop | Uma letra e seis categorias (nome, animal, comida, lugar, objeto e coisa fofa). Quem preencher tudo pede **STOP** e a rodada acaba para os dois; o outro só vê quantos campos você já preencheu. 10 pontos por palavra com a letra certa, 5 se os dois escreveram a mesma |
+| Quem é mais provável? | Cada um vota em um dos dois. Os votos só aparecem quando os dois votarem |
+| Verdade ou desafio | A outra pessoa escolhe verdade ou desafio e a carta vira, com uma pergunta ou um desafio fofinho; ela responde na conversa e pode desafiar de volta |
+| Isso ou aquilo | Duas opções; cada um escolhe sem ver a escolha do outro. Será que combinam? |
+| Perguntinha | Uma pergunta para os dois; as respostas aparecem quando os dois responderem |
+
+As cartas de verdade ou desafio, quem é mais provável, isso ou aquilo e perguntinha estão em `site/lib/jogos.php` (dá para acrescentar à vontade) e não se repetem até o baralho acabar. As ilustrações dos jogos ficam em `site/img/jogos`.
+
 ## Chamadas e transmissão de tela
 
 Os botões do topo da conversa ligam por voz, por vídeo ou já transmitindo a tela; durante a chamada, a barra de baixo liga e desliga microfone, câmera e transmissão.
@@ -203,7 +257,7 @@ php -S localhost:8000 -t site
 
 Depois abra `http://localhost:8000`. O servidor embutido do PHP atende uma requisição por vez, então nele o chat usa consultas curtas automaticamente. Na hospedagem, ele usa *long polling*.
 
-Teste automático (Node 20+ e PHP no PATH): `npm test`. Por padrão ele usa o MySQL em `127.0.0.1:3399`, banco `potato_teste`, usuário `potato`, senha `senha-teste`. Para usar outro, defina `POTATO_TEST_DB_HOST`, `_PORT`, `_NAME`, `_USER` e `_PASS`. Ele cria tabelas com um prefixo próprio e as apaga no fim.
+Teste automático (Node 20+ e PHP no PATH): `npm test`. Ele também cobre o Nosso cantinho (o dia, os hábitos, as respostas aos lembretes, a agenda com repetições, os sonhos e as cartinhas) e as regras dos joguinhos. Por padrão ele usa o MySQL em `127.0.0.1:3399`, banco `potato_teste`, usuário `potato`, senha `senha-teste`. Para usar outro, defina `POTATO_TEST_DB_HOST`, `_PORT`, `_NAME`, `_USER` e `_PASS`. Ele cria tabelas com um prefixo próprio e as apaga no fim.
 
 ## Limites
 

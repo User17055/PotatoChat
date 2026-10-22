@@ -3,6 +3,7 @@
 O app abre o site do Potato Chat (a versão PHP publicada em `https://potato.andrejrs.com.br/`) num WebView e completa o que um site sozinho não faz no celular:
 
 - **Notificações de verdade**, também com o app fechado: um serviço em segundo plano fica conectado ao chat e mostra cada mensagem no estilo de conversa do Android, com a **foto de quem mandou**, as últimas mensagens de antes como contexto e o **Responder** direto da barra. Fotos, áudios e GIFs aparecem como "Foto", "Mensagem de voz (0:12)", "GIF"…
+- **Nosso cantinho** (com o app fechado): os **lembretes da rotina** chegam como notificação com **Responder** — "O que você almoçou?" se responde ali mesmo, e a resposta vai direto para o dia da pessoa. Na de acordar, dá para escrever a hora ou tocar em *Acordei agora*; na da rotina, *Fiz tudo*. Também chegam os lembretes dos compromissos da agenda e as novidades da outra pessoa (cartinha nova, compromisso marcado, sonho realizado, o que comeu). Tocar abre o app direto naquela parte. Os canais *Lembretes* e *Nosso cantinho* podem ser ajustados nas configurações de notificação do Android.
 - **Permissões** de microfone e câmera (chamadas e mensagens de voz), de notificações e de arquivos (anexar e baixar).
 - **Teclado**: com ele aberto, o site encolhe até em cima dele, então o campo de mensagem fica sempre à vista; as abas de baixo saem só enquanto ele está aberto.
 - Ícone próprio (a batata do site), também no tema monocromático do Android 13+.

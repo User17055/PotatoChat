@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 260">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5ee8a8"/><stop offset="1" stop-color="#16807f"/></linearGradient>
+    <filter id="sh" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="8" stdDeviation="7" flood-color="#043a33" flood-opacity=".4"/></filter>
+  </defs>
+  <rect width="400" height="260" fill="url(#bg)"/>
+  <circle cx="200" cy="-20" r="140" fill="#fff" opacity=".08"/>
+  <g filter="url(#sh)">
+    <g transform="translate(116 136) rotate(-9)">
+      <rect x="-62" y="-72" width="124" height="144" rx="20" fill="#fff"/>
+      <circle cx="0" cy="-12" r="34" fill="#ffd36b"/>
+      <g stroke="#ffd36b" stroke-width="6" stroke-linecap="round"><path d="M0-62v-6M0 44v-6M-50-12h-6M56-12h-6"/></g>
+      <path d="M-46 46q23-14 46 0t46 0" stroke="#5cc8ff" stroke-width="7" fill="none" stroke-linecap="round"/>
+    </g>
+    <g transform="translate(284 136) rotate(9)">
+      <rect x="-62" y="-72" width="124" height="144" rx="20" fill="#fff"/>
+      <path d="M-40 40 0-40 40 40z" fill="#5ec08a"/>
+      <path d="M-14 40 22-16 52 40z" fill="#2e9a69"/>
+      <path d="M-14-26 0-40 14-26 5-26 0-31-5-26z" fill="#fff"/>
+      <circle cx="30" cy="-36" r="10" fill="#d9e6ff"/>
+    </g>
+    <g transform="translate(200 132)">
+      <circle r="28" fill="#123f3c"/>
+      <text x="0" y="9" text-anchor="middle" font-family="Poppins, Arial, sans-serif" font-size="24" font-weight="800" fill="#fff">ou</text>
+    </g>
+  </g>
+</svg>
