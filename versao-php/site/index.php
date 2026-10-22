@@ -783,6 +783,7 @@ function asset(string $file): string
                     <button type="button" data-cal-view="list">Lista</button>
                   </div>
                 </div>
+                <div id="cal-legend-top" class="cal-legend-top" role="group" aria-label="Agendas"></div>
                 <div id="cal-body" class="cal-body"></div>
               </div>
             </div>

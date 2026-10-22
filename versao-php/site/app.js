@@ -38,6 +38,10 @@ const rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { url
 // Quando o site roda dentro do painel lateral da extensão, conversa com ela via postMessage.
 const parentOrigin = window.parent !== window ? (location.ancestorOrigins?.[0] || "") : "";
 const inExtension = parentOrigin.startsWith("chrome-extension://");
+// No app do Android: o próprio app deixa o site entre a barra de status e a de navegação (styles.css zera as margens
+// de tela), e os lembretes e as novidades com o app fechado vêm dele (notificação com responder).
+const inAndroid = /PotatoChatAndroid/.test(navigator.userAgent);
+document.documentElement.classList.toggle("in-android", inAndroid);
 
 let socket = null;
 let me = "";
@@ -1698,6 +1702,7 @@ async function startRecording(mode) {
   recWave.replaceChildren();
   paintRecorder();
   fx.show(recorderEl, { x: 24 });
+  if (mode === "locked") fx.recorder(messageForm);
   sound.play("record");
   navigator.vibrate?.(15);
   // O contexto de áudio da redução de ruído nasce ainda no toque: criado depois, o navegador pode deixá-lo parado,
@@ -1761,7 +1766,11 @@ async function startRecording(mode) {
 
 function recordTick(session) {
   const now = performance.now();
-  session.peak = Math.max(session.peak, voiceLevel(session.meter()));
+  const level = voiceLevel(session.meter());
+  session.peak = Math.max(session.peak, level);
+  // A faixa (e o microfone, segurando) ganha um brilho em volta que cresce com a voz.
+  session.glow = (session.glow || 0) * 0.75 + level * 0.25;
+  messageForm.style.setProperty("--level", session.glow.toFixed(2));
   // Uma barra a cada 100 ms. Com a aba em segundo plano o timer atrasa: as barras que faltam repetem o nível.
   if (now - session.lastBar >= 100) {
     for (let drawn = 0; now - session.lastBar >= 100; session.lastBar += 100, drawn++) {
@@ -1784,6 +1793,7 @@ function lockRecording() {
   rec.mode = "locked";
   rec.lockedAt = performance.now();
   paintRecorder();
+  fx.recorder(messageForm);
 }
 
 // Fecha o arquivo (o gravador entrega o último pedaço ao parar) e solta o microfone. Dá o áudio pronto
@@ -1828,8 +1838,13 @@ function stopRecording(keep) {
     session.audio.pause();
     URL.revokeObjectURL(session.audio.src);
   }
-  recorderEl.classList.add("hidden");
-  paintRecorder();
+  messageForm.style.removeProperty("--level");
+  // A faixa sai animada (para o enviar ou para a lixeira) e só depois o campo volta (se não começou outra gravação).
+  fx.recorderOut(messageForm, keep, () => {
+    if (rec) return;
+    recorderEl.classList.add("hidden");
+    paintRecorder();
+  });
   closeRecorder(session).then((take) => {
     if (keep) sendVoice(take);
   });
@@ -1841,6 +1856,7 @@ async function reviewRecording() {
   const session = rec;
   if (session?.mode !== "locked" || !session.recorder) return;
   session.mode = "review";
+  messageForm.style.removeProperty("--level");
   paintRecorder();
   sound.play("tap");
   const take = await closeRecorder(session);
@@ -1864,6 +1880,7 @@ async function reviewRecording() {
     return bar;
   }));
   paintPreview(session);
+  fx.recorderReview([...recWave.children], recStop.querySelector(".when-play"));
 }
 
 // Onde está o áudio parado: as barras já tocadas acendem e o tempo conta (no começo ou no fim, mostra o total).
@@ -5167,8 +5184,6 @@ const REMIND_OPTIONS = [["", "Sem lembrete"], [0, "Na hora"], [15, "15 minutos a
 const PAPERS = [["creme", "Creme"], ["rosa", "Rosa"], ["azul", "Azul"], ["lilas", "Lilás"], ["verde", "Verde"]];
 const LETTER_DRAFT_KEY = "potato.letterDraft";
 const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
-// No app do Android, os lembretes e as novidades com o app fechado vêm dele (notificação com responder).
-const inAndroid = /PotatoChatAndroid/.test(navigator.userAgent);
 const savedSection = store.get("localStorage", US_SECTION_KEY);
 // O que vem do servidor (ação "load" e os avisos "us"): os dias já abertos (data → { nome: dia }), a agenda, os sonhos
 // e metas, as cartinhas (sem o texto inteiro), os hábitos dos dois e os lembretes desta pessoa.
@@ -5925,7 +5940,7 @@ function paintMonth() {
 }
 
 function calChip(event, day) {
-  const chip = el("button", `cal-chip${event.time ? "" : " all-day"}${isPast(event, day) ? " past" : ""}`);
+  const chip = el("button", `cal-chip${event.time ? "" : " all-day"}`);
   chip.type = "button";
   chip.dataset.event = event.id;
   chip.dataset.day = day;
@@ -5936,7 +5951,7 @@ function calChip(event, day) {
   return chip;
 }
 
-// Já passou? (Os que passaram ficam mais apagados, como nos calendários.)
+// Já passou? (Os próximos, ao lado do calendário, começam do que ainda não passou.)
 function isPast(event, day) {
   if (day !== todayKey()) return day < todayKey();
   return Boolean(event.time) && clockMinutes(event.end || minutesClock(clockMinutes(event.time) + 60)) <= clockMinutes(nowClock());
@@ -5976,7 +5991,7 @@ function paintTimeGrid(count) {
     const column = el("div", `tg-column${day === todayKey() ? " today" : ""}`);
     column.dataset.day = day;
     for (const { event, start, end, lane, lanes } of layoutDay(shownOn(day).filter((item) => item.time))) {
-      const block = el("button", `tg-event${end - start < 45 ? " short" : ""}${isPast(event, day) ? " past" : ""}`);
+      const block = el("button", `tg-event${end - start < 45 ? " short" : ""}`);
       block.type = "button";
       block.dataset.event = event.id;
       block.dataset.day = day;
@@ -6075,7 +6090,7 @@ function paintList() {
     label.append(el("strong", "", String(date.getDate())), el("small", "", `${monthName(date, { month: "short" }).replace(".", "")}, ${WEEKDAYS[date.getDay()].toLowerCase()}`));
     const items = el("div", "list-events");
     for (const event of events) {
-      const row = el("button", `list-event${isPast(event, day) ? " past" : ""}`);
+      const row = el("button", "list-event");
       row.type = "button";
       row.dataset.event = event.id;
       row.dataset.day = day;
@@ -6130,9 +6145,10 @@ function paintMiniCal() {
   $("#mini-cal").replaceChildren(head, grid);
 }
 
+// As agendas e as cores delas: ao lado do calendário e, no celular, numa fileira em cima dele. Tocar mostra ou esconde.
 function paintLegend() {
   const cals = [["ambos", "Dos dois"], ...presenceList.map((user) => [user.name, user.name === me ? `${user.name} (você)` : user.name])];
-  $("#cal-legend").replaceChildren(...cals.map(([key, label]) => {
+  for (const box of [$("#cal-legend"), $("#cal-legend-top")]) box.replaceChildren(...cals.map(([key, label]) => {
     const row = el("button", "legend-row");
     row.type = "button";
     row.dataset.cal = key;
@@ -6340,7 +6356,7 @@ $("#mini-cal").addEventListener("click", (event) => {
   sound.play("tap");
 });
 
-$("#cal-legend").addEventListener("click", (event) => {
+function toggleCal(event) {
   const row = event.target.closest("[data-cal]");
   if (!row) return;
   if (hiddenCals.has(row.dataset.cal)) hiddenCals.delete(row.dataset.cal);
@@ -6348,7 +6364,9 @@ $("#cal-legend").addEventListener("click", (event) => {
   store.set("localStorage", CAL_HIDDEN_KEY, [...hiddenCals]);
   paintAgenda();
   sound.play("tap");
-});
+}
+$("#cal-legend").addEventListener("click", toggleCal);
+$("#cal-legend-top").addEventListener("click", toggleCal);
 
 $("#cal-next-list").addEventListener("click", (event) => {
   const row = event.target.closest("[data-event]");

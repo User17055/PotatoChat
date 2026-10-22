@@ -140,6 +140,42 @@ export const fx = {
     this.press(button);
   },
 
+  // Gravar sem segurar: a faixa nasce do botão de enviar, com mola, e o parar, o tempo e a lixeira pulam em seguida.
+  recorder(form) {
+    if (!motion()) return;
+    gsap.fromTo(form.querySelector(".rec-pill"), { scaleX: 0.15, scaleY: 0.6, opacity: 0, transformOrigin: "100% 50%" },
+      { scaleX: 1, scaleY: 1, opacity: 1, duration: 0.75, ease: "elastic.out(1, 0.7)", clearProps: "transform,opacity" });
+    gsap.fromTo(form.querySelectorAll(".rec-stop, .rec-clock, .rec-cancel"), { scale: 0, opacity: 0 },
+      { scale: 1, opacity: 1, duration: 0.5, stagger: 0.08, delay: 0.15, ease: "back.out(2.6)", clearProps: "transform,opacity" });
+    this.press(form.querySelector(".mic"));
+  },
+
+  // Parou para ouvir: a onda inteira cresce da esquerda para a direita, e o play aparece pulando.
+  recorderReview(bars, button) {
+    if (!motion()) return;
+    if (bars.length) gsap.fromTo(bars, { scaleY: 0 }, { scaleY: 1, duration: 0.5, stagger: 0.012, ease: "back.out(3)", clearProps: "transform" });
+    this.pop(button);
+  },
+
+  // Fim da faixa: enviando, ela encolhe para o enviar e o aviãozinho voa; apagando, cai na lixeira, que treme.
+  // done volta o campo de mensagem ao normal (na hora, sem animação ou segurando o microfone).
+  recorderOut(form, sent, done) {
+    if (!motion() || !form.classList.contains("rec-locked")) return done();
+    const pill = form.querySelector(".rec-pill");
+    const plane = form.querySelector(".mic .when-send");
+    const finish = () => {
+      gsap.set([pill, plane], { clearProps: "transform,opacity" });
+      done();
+    };
+    if (sent) {
+      gsap.to(plane, { x: 28, y: -28, rotate: -12, opacity: 0, duration: 0.3, ease: "power2.in" });
+      gsap.to(pill, { scaleX: 0.08, opacity: 0, transformOrigin: "100% 50%", duration: 0.3, ease: "power3.in", onComplete: finish });
+    } else {
+      this.shake(form.querySelector(".rec-cancel"));
+      gsap.to(pill, { y: 30, scale: 0.5, opacity: 0, transformOrigin: "0% 100%", duration: 0.32, ease: "power2.in", onComplete: finish });
+    }
+  },
+
   show(element, from = { y: 12 }) {
     element.classList.remove("hidden");
     if (motion()) gsap.fromTo(element, { opacity: 0, ...from }, { opacity: 1, x: 0, y: 0, scale: 1, duration: 0.35, ease: "power3.out" });

@@ -94,8 +94,7 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            // Teclado aberto: o site encolhe até em cima dele. Sem isso o teclado cobria o fim da conversa, e o site
-            // não tinha como saber que ele abriu (as abas de baixo dependem disso).
+            // Teclado aberto: o site encolhe até em cima dele. Sem isso o teclado cobria o fim da conversa.
             val bottom = maxOf(bars.bottom, insets.getInsets(WindowInsetsCompat.Type.ime()).bottom)
             val params = webView.layoutParams as FrameLayout.LayoutParams
             if (params.topMargin != bars.top || params.bottomMargin != bottom) {
@@ -103,7 +102,9 @@ class MainActivity : ComponentActivity() {
                 params.bottomMargin = bottom
                 webView.layoutParams = params
             }
-            insets
+            // As barras já ficam de fora (as margens acima): o WebView não recebe as medidas delas, senão o site
+            // (safe-area) deixaria o mesmo espaço de novo, uma faixa escura embaixo.
+            WindowInsetsCompat.CONSUMED
         }
         setContentView(root)
         ViewCompat.requestApplyInsets(root)

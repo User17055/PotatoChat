@@ -2,6 +2,12 @@
    Potato Chat — estilos
    ===================================================================== */
 
+/* ---------- margens da tela ----------
+   A barra de status e a de navegação (ou de gestos). No app do Android, quem cuida delas é o próprio app (o site já
+   fica entre as duas barras): lá elas valem zero, senão o espaço sobraria duas vezes (uma faixa escura embaixo). */
+:root { --safe-top: env(safe-area-inset-top, 0px); --safe-bottom: env(safe-area-inset-bottom, 0px); }
+:root.in-android { --safe-top: 0px; --safe-bottom: 0px; }
+
 /* ---------- temas ----------
    O padrão é "Escuro". Cada tema troca só as cores (data-theme no <html>, escolhido no perfil). */
 :root {
@@ -410,7 +416,7 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .mic .icon { width: 20px; height: 20px; stroke-width: 2.2; }
 .mic .when-send, .rec-locked .mic .when-mic { display: none; }
 .rec-locked .mic .when-send { display: block; }
-.recording:not(.rec-locked) .mic { scale: 1.3; animation: mic-hold 1.4s ease-out infinite; }
+.recording:not(.rec-locked) .mic { scale: 1.3; outline: calc(var(--level, 0) * 12px) solid color-mix(in srgb, var(--accent) 28%, transparent); animation: mic-hold 1.4s ease-out infinite; transition: outline-width .1s, scale .3s cubic-bezier(.34, 1.56, .64, 1); }
 @keyframes mic-hold { from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 50%, transparent); } to { box-shadow: 0 0 0 14px transparent; } }
 /* A faixa cobre o campo (e os botões da esquerda); o microfone continua à direita. */
 .recorder { position: absolute; inset: 7px 57px 7px 7px; z-index: 3; display: flex; align-items: center; gap: 10px; padding: 0 4px 0 10px; border-radius: 16px; background: var(--surface); }
@@ -420,10 +426,12 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .rec-clock { flex: none; display: inline-flex; align-items: center; gap: 8px; min-width: 54px; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .rec-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--live); animation: rec-blink 1.2s ease-in-out infinite; }
 @keyframes rec-blink { 50% { opacity: .3; } }
-/* Barras novas entram pela direita; as antigas somem esmaecendo pela esquerda. */
+/* Barras novas entram pela direita (crescendo, então a onda desliza em vez de pular) com uma molinha; as antigas
+   somem esmaecendo pela esquerda. */
 .rec-wave { flex: 1; min-width: 0; height: 30px; display: flex; align-items: center; justify-content: flex-end; gap: 2px; overflow: hidden; -webkit-mask-image: linear-gradient(90deg, transparent, #000 28px); mask-image: linear-gradient(90deg, transparent, #000 28px); }
-.rec-wave i { flex: none; width: 3px; height: max(3px, calc(var(--h) * 100%)); border-radius: 2px; background: var(--accent); animation: rec-bar .2s ease-out; }
-@keyframes rec-bar { from { scale: 1 .2; } }
+.rec-wave i { flex: none; width: 3px; height: max(3px, calc(var(--h) * 100%)); border-radius: 2px; background: var(--accent); animation: rec-bar-in .1s linear, rec-bar-pop .45s cubic-bezier(.34, 1.56, .64, 1); }
+@keyframes rec-bar-in { from { width: 0; margin-left: -2px; } }
+@keyframes rec-bar-pop { from { scale: 1 .1; } }
 .rec-slide { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 2px; overflow: hidden; color: var(--muted); font-size: 13px; white-space: nowrap; }
 .rec-slide .icon { width: 16px; height: 16px; animation: rec-nudge 1.2s ease-in-out infinite; }
 @keyframes rec-nudge { 50% { translate: -4px 0; } }
@@ -443,9 +451,13 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .composer.rec-locked { display: grid; grid-template-columns: auto 1fr auto; grid-template-areas: "bar bar bar" "trash . send"; align-items: center; gap: 10px 8px; padding: 8px; border-radius: 28px; }
 .rec-locked :is(.quick-emojis, .attach-button, .gif-button, textarea) { display: none; }
 .rec-locked .recorder { display: contents; }
-.rec-locked .rec-pill { grid-area: bar; height: 52px; gap: 12px; padding: 0 18px 0 7px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 28%, transparent); animation: rec-pill-in .35s cubic-bezier(.34, 1.56, .64, 1); }
-@keyframes rec-pill-in { from { opacity: 0; scale: .94 .7; } }
-.rec-stop { flex: none; width: 38px; height: 38px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: color-mix(in srgb, var(--accent-ink) 14%, transparent); color: var(--accent-ink); transition: background .2s, scale .15s; }
+.rec-locked .rec-pill { grid-area: bar; height: 52px; gap: 12px; padding: 0 18px 0 7px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 28%, transparent); }
+/* Gravando: um brilho passa pela faixa, um anel pulsa no parar e, em volta da faixa, um halo cresce com a voz. */
+.rec-locked:not(.rec-review) .rec-pill { background: linear-gradient(100deg, var(--accent) 35%, color-mix(in srgb, var(--accent) 76%, #fff) 50%, var(--accent) 65%) 0 0 / 300% 100% no-repeat var(--accent); box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 28%, transparent), 0 0 0 calc(var(--level, 0) * 9px) color-mix(in srgb, var(--accent) 24%, transparent); animation: rec-shine 2.6s linear infinite; transition: box-shadow .1s; }
+@keyframes rec-shine { from { background-position: 100% 0; } to { background-position: 0 0; } }
+.rec-locked:not(.rec-review) .rec-stop::before { content: ""; position: absolute; inset: 0; border: 2px solid var(--accent-ink); border-radius: 50%; opacity: 0; pointer-events: none; animation: rec-ring 1.6s ease-out infinite; }
+@keyframes rec-ring { from { opacity: .5; scale: 1; } to { opacity: 0; scale: 1.75; } }
+.rec-stop { position: relative; flex: none; width: 38px; height: 38px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: color-mix(in srgb, var(--accent-ink) 14%, transparent); color: var(--accent-ink); transition: background .2s, scale .15s; }
 .rec-stop:hover { background: color-mix(in srgb, var(--accent-ink) 24%, transparent); }
 .rec-stop:active { scale: .9; }
 .rec-stop .icon { width: 18px; height: 18px; }
@@ -735,9 +747,9 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .music-panel.expanded .music-hero { position: fixed; inset: 0; z-index: 5; width: auto; height: auto; aspect-ratio: auto; margin: 0; border-radius: 0; scale: 1; background: #000; box-shadow: none; }
 .music-panel.expanded .music-cover { object-fit: contain; scale: 1; }
 .music-panel.expanded .music-stage iframe { left: 0; width: 100%; translate: none; }
-.music-panel.expanded .music-expand { top: max(14px, env(safe-area-inset-top)); right: 14px; bottom: auto; width: 46px; height: 46px; background: #ffffff2b; }
+.music-panel.expanded .music-expand { top: max(14px, var(--safe-top)); right: 14px; bottom: auto; width: 46px; height: 46px; background: #ffffff2b; }
 .music-panel.expanded .music-expand .icon { width: 20px; height: 20px; }
-.music-panel.expanded .music-caption { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; display: grid; gap: 3px; padding: 70px 24px max(26px, env(safe-area-inset-bottom)); background: linear-gradient(transparent, #000000d9); color: #fff; pointer-events: none; transition: opacity .3s; }
+.music-panel.expanded .music-caption { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; display: grid; gap: 3px; padding: 70px 24px max(26px, var(--safe-bottom)); background: linear-gradient(transparent, #000000d9); color: #fff; pointer-events: none; transition: opacity .3s; }
 .music-panel.expanded.show-video[data-source="youtube"]:not(.paused) .music-caption { opacity: 0; }
 .music-caption strong { font-size: 22px; font-weight: 700; line-height: 1.3; }
 .music-caption span { color: #ffffffb3; font-size: 15px; }
@@ -1094,7 +1106,7 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 /* Tela cheia (no iPhone, que não deixa a de verdade, o palco cobre a tela do navegador). */
 .watch-panel.expanded { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; margin: 0; border: 0; border-radius: 0; }
 .watch-panel.expanded .watch-stage { flex: 1; max-height: none; aspect-ratio: auto; }
-.watch-panel.expanded .watch-bar { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+.watch-panel.expanded .watch-bar { padding-bottom: max(10px, var(--safe-bottom)); }
 
 .attach-icon.watch { background: linear-gradient(140deg, #ffb35c, #f0576b); }
 .attach-icon.games { background: linear-gradient(140deg, #5ee0a0, #2f8fe0); }
@@ -1527,6 +1539,8 @@ button.day-note:hover { background: var(--surface-3); }
 .legend-box .icon { width: 13px; height: 13px; stroke-width: 3.2; transition: opacity .15s; }
 .legend-row[aria-pressed="false"] .legend-box { background: transparent; }
 .legend-row[aria-pressed="false"] .legend-box .icon { opacity: 0; }
+/* No celular, as agendas (de quem é cada cor) ficam numa fileira em cima do calendário. */
+.cal-legend-top { display: none; }
 .up-row { display: grid; gap: 1px; width: 100%; padding: 7px 10px 7px 12px; border: 0; border-left: 3px solid var(--ev); border-radius: 0 10px 10px 0; background: transparent; color: var(--ink); text-align: left; }
 .up-row:hover { background: var(--hover); }
 .up-row strong { overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
@@ -1548,15 +1562,15 @@ button.day-note:hover { background: var(--surface-3); }
 .cal-views button[aria-pressed="true"] { background: color-mix(in srgb, var(--accent) 24%, transparent); color: var(--ink); }
 .cal-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .cal-fab { display: none; }
-/* Compromissos no mês e no "dia inteiro": com hora, a bolinha da cor da agenda; o dia inteiro, uma faixa colorida. */
-.cal-chip { display: flex; align-items: center; gap: 5px; width: 100%; min-width: 0; padding: 1px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font-size: 11.5px; line-height: 1.6; text-align: left; transition: background .15s, filter .15s; }
-.cal-chip:hover { background: var(--hover); }
+/* Compromissos no mês e no "dia inteiro": cada um na cor da agenda (a dos dois ou a de cada pessoa). Com hora, um
+   fundo clarinho da cor e a bolinha; o dia inteiro, a faixa toda colorida. */
+.cal-chip { display: flex; align-items: center; gap: 5px; width: 100%; min-width: 0; padding: 1px 6px; border: 0; border-radius: 6px; background: color-mix(in srgb, var(--ev) 20%, transparent); color: var(--ink); font-size: 11.5px; line-height: 1.6; text-align: left; transition: background .15s, filter .15s; }
+.cal-chip:hover { background: color-mix(in srgb, var(--ev) 32%, transparent); }
 .cal-chip.all-day { background: var(--ev); color: #fff; font-weight: 600; }
 .cal-chip.all-day:hover { filter: brightness(1.1); }
 .chip-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--ev); }
 .chip-time { flex: none; color: var(--muted); font-size: 11px; }
 .chip-title { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-:is(.cal-chip, .tg-event, .list-event).past { opacity: .55; }
 /* Mês */
 .month-grid { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-template-rows: auto repeat(var(--weeks), minmax(96px, 1fr)); overflow-y: auto; }
 .month-weekday { padding: 8px 0 4px; border-left: 1px solid var(--line-soft); color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-align: center; text-transform: uppercase; }
@@ -1609,9 +1623,9 @@ button.day-note:hover { background: var(--surface-3); }
 .list-date strong { min-width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; font-size: 20px; font-weight: 500; }
 .list-date small { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
 .list-day.today .list-date strong { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
-.list-events { display: grid; gap: 2px; }
-.list-event { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 9px 10px; border: 0; border-radius: 12px; background: transparent; color: var(--ink); text-align: left; transition: background .15s; }
-.list-event:hover { background: var(--hover); }
+.list-events { display: grid; gap: 4px; }
+.list-event { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 9px 10px 9px 14px; border: 0; border-radius: 12px; background: color-mix(in srgb, var(--ev) 13%, transparent); box-shadow: inset 4px 0 0 var(--ev); color: var(--ink); text-align: left; transition: background .15s; }
+.list-event:hover { background: color-mix(in srgb, var(--ev) 24%, transparent); }
 .list-event .chip-dot { width: 11px; height: 11px; }
 .list-time { flex: none; width: 110px; color: var(--muted); font-size: 12.5px; }
 .list-what { flex: 1; min-width: 0; display: grid; }
@@ -1934,7 +1948,7 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
 .field-input.letter-input { min-height: 240px; font-family: Georgia, "Times New Roman", serif; font-size: 16px; line-height: 1.7; }
 
 /* Lembrete com o site aberto: um cartão no canto, com o campo para responder. */
-.nudge { position: fixed; top: max(16px, env(safe-area-inset-top)); right: 16px; z-index: 45; width: min(calc(100vw - 32px), 360px); display: grid; gap: 6px; padding: 16px 16px 14px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: 22px; background: color-mix(in srgb, var(--surface) 96%, transparent); backdrop-filter: blur(14px); box-shadow: 0 24px 60px #000a; }
+.nudge { position: fixed; top: max(16px, var(--safe-top)); right: 16px; z-index: 45; width: min(calc(100vw - 32px), 360px); display: grid; gap: 6px; padding: 16px 16px 14px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: 22px; background: color-mix(in srgb, var(--surface) 96%, transparent); backdrop-filter: blur(14px); box-shadow: 0 24px 60px #000a; }
 .nudge .peer-close { top: 10px; right: 10px; width: 30px; height: 30px; }
 .nudge-head { display: flex; align-items: center; gap: 10px; padding-right: 34px; }
 .nudge-head .sheet-icon { width: 34px; height: 34px; border-radius: 11px; }
@@ -2056,7 +2070,7 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
 
 @media (max-width: 760px) {
   .menu-button { display: grid; }
-  .sidebar { position: fixed; top: 0; bottom: 0; left: 0; z-index: 41; width: min(84vw, 320px); display: flex; padding-top: max(24px, env(safe-area-inset-top)); padding-bottom: max(16px, env(safe-area-inset-bottom)); background: var(--bg-2); box-shadow: 20px 0 60px #0009; transform: translateX(-104%); visibility: hidden; transition: transform .32s cubic-bezier(.32, .72, 0, 1), visibility 0s .32s; }
+  .sidebar { position: fixed; top: 0; bottom: 0; left: 0; z-index: 41; width: min(84vw, 320px); display: flex; padding-top: max(24px, var(--safe-top)); padding-bottom: max(16px, var(--safe-bottom)); background: var(--bg-2); box-shadow: 20px 0 60px #0009; transform: translateX(-104%); visibility: hidden; transition: transform .32s cubic-bezier(.32, .72, 0, 1), visibility 0s .32s; }
   .menu-open .sidebar { transform: none; visibility: visible; transition: transform .32s cubic-bezier(.32, .72, 0, 1), visibility 0s; }
   .menu-backdrop { position: fixed; inset: 0; z-index: 40; display: block; background: var(--backdrop); backdrop-filter: blur(4px); opacity: 0; pointer-events: none; transition: opacity .3s; }
   .menu-open .menu-backdrop { opacity: 1; pointer-events: auto; }
@@ -2074,17 +2088,22 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
   .month-grid { grid-template-rows: auto repeat(var(--weeks), minmax(62px, 1fr)); }
   .month-cell { padding: 2px 2px 3px; }
   .month-number { min-width: 22px; height: 22px; padding: 0 4px; font-size: 11px; }
-  /* No celular não cabe o nome: cada compromisso vira um tracinho na cor da agenda. */
+  /* No celular cabe pouco: cada compromisso vira uma faixinha na cor da agenda, com o começo do nome. */
   .month-events { gap: 2px; }
-  .month-cell .cal-chip { height: 5px; padding: 0; border-radius: 3px; background: var(--ev); font-size: 0; }
-  .month-cell .cal-chip > * { display: none; }
+  .month-cell .cal-chip { display: block; padding: 0 3px; border-radius: 4px; background: var(--ev); color: #fff; font-size: 9.5px; line-height: 15px; }
+  .month-cell .cal-chip > :not(.chip-title) { display: none; }
+  .month-cell .chip-title { display: block; text-overflow: clip; }
+  .cal-legend-top { display: flex; gap: 6px; padding: 0 8px 8px; overflow-x: auto; scrollbar-width: none; }
+  .cal-legend-top .legend-row { flex: none; width: auto; gap: 7px; padding: 5px 11px 5px 6px; border: 1px solid color-mix(in srgb, var(--ev) 45%, var(--line)); border-radius: 999px; background: color-mix(in srgb, var(--ev) 12%, transparent); font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .cal-legend-top .legend-box { width: 16px; height: 16px; border-radius: 50%; }
+  .cal-legend-top .legend-box .icon { width: 11px; height: 11px; }
   .month-more { padding: 0 2px; font-size: 9.5px; }
   .list-day { grid-template-columns: 58px minmax(0, 1fr); padding: 6px 8px; }
   .list-date { flex-direction: column; gap: 0; }
   .list-time { width: auto; min-width: 70px; font-size: 11.5px; }
-  .cal-fab { position: fixed; right: 16px; bottom: calc(20px + env(safe-area-inset-bottom)); z-index: 30; width: 56px; height: 56px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 18px; background: var(--accent); color: var(--accent-ink); box-shadow: 0 10px 26px #0007; }
+  .cal-fab { position: fixed; right: 16px; bottom: calc(20px + var(--safe-bottom)); z-index: 30; width: 56px; height: 56px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 18px; background: var(--accent); color: var(--accent-ink); box-shadow: 0 10px 26px #0007; }
   .cal-fab .icon { width: 26px; height: 26px; stroke-width: 2.6; }
-  .event-pop { top: auto !important; left: 8px !important; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); width: auto; border-radius: 22px; }
+  .event-pop { top: auto !important; left: 8px !important; right: 8px; bottom: calc(8px + var(--safe-bottom)); width: auto; border-radius: 22px; }
   .day-cards, .goal-list { grid-template-columns: minmax(0, 1fr); }
   .games { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .game-tile { padding: 14px 12px; }
@@ -2105,7 +2124,7 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
   .conversation, .profile-view, .us-view { height: auto; min-height: 0; }
   .profile-top { min-height: 64px; padding: 10px 16px; }
   /* Tocador: ocupa a tela toda e sobe de baixo, como no Spotify (arrastar para baixo fecha). */
-  .music-panel { inset: 0; width: auto; max-height: none; padding: max(14px, env(safe-area-inset-top)) 22px max(24px, env(safe-area-inset-bottom)); border-radius: 0; box-shadow: none; transition: transform .42s cubic-bezier(.32, .72, 0, 1), translate .42s cubic-bezier(.32, .72, 0, 1), visibility 0s, --tone .8s; }
+  .music-panel { inset: 0; width: auto; max-height: none; padding: max(14px, var(--safe-top)) 22px max(24px, var(--safe-bottom)); border-radius: 0; box-shadow: none; transition: transform .42s cubic-bezier(.32, .72, 0, 1), translate .42s cubic-bezier(.32, .72, 0, 1), visibility 0s, --tone .8s; }
   .music-panel.closed { opacity: 1; transform: translateY(102%); transition: transform .34s cubic-bezier(.32, .72, 0, 1), translate .34s cubic-bezier(.32, .72, 0, 1), visibility 0s .34s, --tone .8s; }
   .music-panel.dragging { transition: none; }
   .music-head, .music-hero { touch-action: none; }
@@ -2158,7 +2177,7 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
   .topbar .icon-button:not(.music-button) .icon { width: 21px; height: 21px; }
   .messages { padding: 16px 12px 10px; }
   .message { max-width: 86%; }
-  .composer { margin: 6px 10px calc(10px + env(safe-area-inset-bottom)); }
+  .composer { margin: 6px 10px calc(10px + var(--safe-bottom)); }
   .reply-bar { margin: 0 10px; }
   .typing { padding: 0 14px; }
   .jump { right: 14px; }
@@ -2196,6 +2215,6 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
   .message.show-tools .bubble, .message.show-tools .bubble::after,
   button.person.active, button.person.active::before, button.person.active .avatar::before,
   .typing.on .typing-bubble, .typing.on .typing-bubble i, .eq i, .music-unblock, .music-empty-art, .marquee > span, .ticker-line,
-  .rec-dot, .rec-slide .icon, .rec-lock .icon, .rec-pill, .recording .mic, .typing-mic, .voice-play.loading::after, .letter-flag.new { animation: none !important; }
+  .rec-dot, .rec-slide .icon, .rec-lock .icon, .rec-pill, .rec-stop::before, .rec-wave i, .recording .mic, .typing-mic, .voice-play.loading::after, .letter-flag.new { animation: none !important; }
   .sidebar, .menu-backdrop { transition: none !important; }
 }

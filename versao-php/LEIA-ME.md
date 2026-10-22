@@ -178,8 +178,8 @@ O dia de cada um, lado a lado (no celular, um embaixo do outro). Cada pessoa pre
 
 A agenda dos dois, como um calendário de verdade:
 
-- **Dia, Semana, Mês e Lista**, com *Hoje* e as setas para andar. No mês, cada dia mostra os compromissos (no celular, tracinhos coloridos); na semana e no dia, a grade das 24 horas com a linha vermelha da hora atual; a lista mostra os próximos dois meses, dia por dia.
-- Ao lado (no computador): **Criar**, o mini calendário, as **agendas** e os **próximos**. Cada agenda tem a sua cor, igual para os dois: a *dos dois* e a de cada pessoa; desmarcar uma esconde os compromissos dela (só no seu aparelho).
+- **Dia, Semana, Mês e Lista**, com *Hoje* e as setas para andar. Cada compromisso aparece na cor da agenda dele. No mês, cada dia mostra os compromissos (no celular, faixinhas coloridas com o começo do nome); na semana e no dia, a grade das 24 horas com a linha vermelha da hora atual; a lista mostra os próximos dois meses, dia por dia.
+- Ao lado (no computador): **Criar**, o mini calendário, as **agendas** e os **próximos**. Cada agenda tem a sua cor, igual para os dois: a *dos dois* (rosa) e a de cada pessoa (azul e verde); desmarcar uma esconde os compromissos dela (só no seu aparelho). No celular, as agendas ficam numa fileira em cima do calendário.
 - Tocar num compromisso abre os detalhes (dia, hora, onde, de quem, repetição, lembrete, anotação), com editar e apagar. Tocar num horário vazio da semana ou do dia já marca naquele horário; no mês, tocar num dia escolhe o dia, e tocar de novo marca nele.
 - Cada compromisso tem ícone, título, dia, hora de começar e de terminar (ou o dia inteiro), lugar, de quem é, **repetição** (toda semana, todo mês — bom para o mesversário: no dia 31, cai no último dia dos meses mais curtos — ou todo ano) e **lembrete** (na hora, de 15 minutos a 1 dia antes). O lembrete chega como notificação no Android e como aviso no site aberto.
 - Quando a outra pessoa marca um compromisso, chega um aviso; no menu, embaixo de *Agenda*, aparece o próximo.
