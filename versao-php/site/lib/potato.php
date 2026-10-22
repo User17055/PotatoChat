@@ -2343,6 +2343,23 @@ function game_act(array $me, array $body): array
         return ['ok' => true, 'message' => $message];
     }
 
+    // Placar: as partidas de tabuleiro que já acabaram (todas, não só as da conversa carregada), por jogo: as vitórias
+    // de cada um e os empates.
+    if ($op === 'score') {
+        $score = [];
+        foreach (query('SELECT media FROM ' . t('messages') . " WHERE source = 'game' AND deleted = 0")->fetchAll(PDO::FETCH_COLUMN) as $media) {
+            $game = json_decode((string) $media, true)['game'] ?? null;
+            $winner = $game['winner'] ?? null;
+            if (!$winner || !isset($game['seats'])) continue;
+            $score[$game['type']] = $score[$game['type']] ?? ['wins' => [], 'ties' => 0];
+            if ($winner === 'empate') $score[$game['type']]['ties']++;
+            else $score[$game['type']]['wins'][$winner] = ($score[$game['type']]['wins'][$winner] ?? 0) + 1;
+        }
+        foreach ($score as &$entry) $entry['wins'] = (object) $entry['wins'];
+        unset($entry);
+        return ['ok' => true, 'score' => (object) $score];
+    }
+
     $row = find_message(str($body['id'] ?? ''));
     $media = $row && !$row['deleted'] && $row['media'] ? json_decode((string) $row['media'], true) : null;
     $game = $media['game'] ?? null;

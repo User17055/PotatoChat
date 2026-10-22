@@ -120,7 +120,7 @@ button, input, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; -webkit-tap-highlight-color: transparent; }
 button:disabled { cursor: default; opacity: .55; }
 /* Ao tocar, o botão afunda um pouquinho. Usa scale (e não transform) para não brigar com as animações do GSAP. */
-:is(.icon-button, .pill, .primary, .tab, .theme-choice, .jump, .round, .gif-button, .load-more, .chip, .quick-emojis button):active:not(:disabled) { scale: .92; }
+:is(.icon-button, .pill, .primary, .theme-choice, .jump, .round, .gif-button, .load-more, .chip, .quick-emojis button):active:not(:disabled) { scale: .92; }
 :is(.setting-row, button.person):active:not(:disabled) { scale: .98; }
 svg { flex: none; }
 .icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
@@ -237,7 +237,7 @@ button.person.active .avatar::before { content: ""; position: absolute; inset: -
 button.person:hover .person-edit, button.person:focus-visible .person-edit { opacity: 1; transform: rotate(60deg); }
 @media (hover: none) { .person-edit { opacity: .6; } }
 .sidebar-bottom { display: grid; gap: 6px; padding-top: 12px; border-top: 1px solid var(--line); }
-.side-profile .avatar::after, .tab .avatar::after { display: none; }
+.side-profile .avatar::after { display: none; }
 .side-profile strong { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- avatares ---------- */
@@ -435,8 +435,34 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .rec-lock .icon + .icon { width: 16px; height: 16px; animation: rec-nudge-up 1.2s ease-in-out infinite; }
 @keyframes lock-in { from { opacity: 0; translate: 0 14px; } }
 @keyframes rec-nudge-up { 50% { translate: 0 -4px; } }
-/* Segurando: só o tempo e o "deslize para cancelar". Sem segurar: lixeira, tempo e a onda ao vivo. */
-.composer:not(.rec-locked) :is(.rec-cancel, .rec-wave), .rec-locked .rec-slide { display: none; }
+/* Segurando: só o tempo e o "deslize para cancelar". Sem segurar: a faixa colorida, a lixeira e o enviar. */
+.rec-pill { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; }
+.composer:not(.rec-locked) :is(.rec-cancel, .rec-wave, .rec-stop), .rec-locked .rec-slide { display: none; }
+/* Sem segurar, como no Instagram: a faixa colorida em cima (parar, a onda ao vivo e o tempo) e, embaixo, o apagar e
+   o enviar. Parado (.rec-review), a faixa toca o áudio, e as barras já tocadas acendem. */
+.composer.rec-locked { display: grid; grid-template-columns: auto 1fr auto; grid-template-areas: "bar bar bar" "trash . send"; align-items: center; gap: 10px 8px; padding: 8px; border-radius: 28px; }
+.rec-locked :is(.quick-emojis, .attach-button, .gif-button, textarea) { display: none; }
+.rec-locked .recorder { display: contents; }
+.rec-locked .rec-pill { grid-area: bar; height: 52px; gap: 12px; padding: 0 18px 0 7px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 28%, transparent); animation: rec-pill-in .35s cubic-bezier(.34, 1.56, .64, 1); }
+@keyframes rec-pill-in { from { opacity: 0; scale: .94 .7; } }
+.rec-stop { flex: none; width: 38px; height: 38px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: color-mix(in srgb, var(--accent-ink) 14%, transparent); color: var(--accent-ink); transition: background .2s, scale .15s; }
+.rec-stop:hover { background: color-mix(in srgb, var(--accent-ink) 24%, transparent); }
+.rec-stop:active { scale: .9; }
+.rec-stop .icon { width: 18px; height: 18px; }
+.rec-stop .when-rec { width: 22px; height: 22px; }
+.rec-stop .when-play { margin-left: 2px; }
+.rec-stop :is(.when-play, .when-pause), .rec-review .rec-stop .when-rec { display: none; }
+.rec-review:not(.rec-playing) .rec-stop .when-play, .rec-playing .rec-stop .when-pause { display: block; }
+.rec-locked .rec-wave { height: 28px; }
+.rec-locked .rec-wave i { background: var(--accent-ink); }
+.rec-review .rec-wave { justify-content: space-between; -webkit-mask-image: none; mask-image: none; }
+.rec-review .rec-wave i { opacity: .38; animation: none; transition: opacity .12s; }
+.rec-review .rec-wave i.played { opacity: 1; }
+.rec-locked .rec-clock { order: 3; min-width: 0; color: var(--accent-ink); font-size: 15px; }
+.rec-locked .rec-dot { display: none; }
+.rec-locked .rec-cancel { grid-area: trash; width: 44px; height: 44px; margin: 0; color: var(--ink); }
+.rec-locked .rec-cancel .icon { width: 22px; height: 22px; }
+.rec-locked .mic { grid-area: send; width: 72px; height: 44px; border-radius: 999px; }
 
 /* No balão, tudo numa grade só (para alinhar): o play na mesma linha da onda (centro com centro), a velocidade no
    canto direito e, embaixo da onda, o tempo (com o "Transcrever") na mesma linha da hora. A transcrição vem por último. */
@@ -1336,19 +1362,8 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 /* Troca de tema: o navegador tira uma foto da tela antiga e o fx.reveal abre a nova num círculo. */
 ::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
 
-/* ---------- abas (só no celular e no painel da extensão) ---------- */
-.tabbar { display: none; }
-.tab { position: relative; z-index: 1; height: 46px; display: grid; place-items: center; border: 0; background: transparent; color: var(--muted); transition: color .25s; }
-.tab .icon { width: 24px; height: 24px; }
-.tab.active { color: var(--accent); }
-.tab .avatar { width: 28px; height: 28px; font-size: 12px; box-shadow: 0 0 0 2px transparent; transition: box-shadow .25s; }
-.tab.active .avatar { box-shadow: 0 0 0 2px var(--bg-2), 0 0 0 4px var(--accent); }
-/* Pílula atrás da aba aberta, que desliza de uma para a outra. */
-.tab-glow { position: absolute; top: 6px; left: 12px; width: calc((100% - 24px) / 2); height: 46px; pointer-events: none; transition: transform .5s cubic-bezier(.34, 1.4, .5, 1); }
-.tab-glow::before { content: ""; position: absolute; inset: 0 calc(50% - 38px); border-radius: 999px; background: color-mix(in srgb, var(--accent) 14%, transparent); }
-.app-shell[data-tab="profile"] .tab-glow { transform: translateX(100%); }
-.tab-badge { position: absolute; top: 2px; left: calc(50% + 6px); min-width: 18px; height: 18px; padding: 0 5px; display: grid; place-items: center; border-radius: 9px; background: var(--live); color: #fff; font-size: 10.5px; font-weight: 700; box-shadow: 0 0 0 2px var(--bg-2); }
-.person .tab-badge { position: static; margin-left: auto; box-shadow: none; }
+/* Mensagens que chegaram fora da conversa: o número na conversa, no menu. */
+.tab-badge { min-width: 18px; height: 18px; margin-left: auto; padding: 0 5px; display: grid; place-items: center; border-radius: 9px; background: var(--live); color: #fff; font-size: 10.5px; font-weight: 700; }
 
 /* =====================================================================
    Nosso cantinho (aba entre a conversa e o perfil)
@@ -1704,6 +1719,33 @@ button.day-note:hover { background: var(--surface-3); }
 
 /* ---------- jogos (a seção) ---------- */
 .games-lead { margin: 0 0 4px; }
+/* Placar: você e a outra pessoa, as vitórias grandes no meio; quem está na frente ganha a coroa. */
+.score-card { margin-top: 16px; display: grid; gap: 14px; padding: 16px 16px 14px; border: 1px solid var(--line); border-radius: 24px; background: radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 70%), color-mix(in srgb, var(--surface) 88%, transparent); box-shadow: 0 14px 34px #0004; }
+.score-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.score-head strong { color: var(--muted); font-size: 13px; font-weight: 600; letter-spacing: .02em; }
+.score-lead { padding: 4px 11px; border-radius: 999px; background: var(--surface-2); color: var(--ink); font-size: 12px; font-weight: 700; text-align: right; }
+.score-lead.mine { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
+.score-main { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 8px; }
+.score-side { min-width: 0; display: grid; justify-items: center; gap: 4px; text-align: center; }
+.score-side .avatar.score-face { width: 64px; height: 64px; margin-bottom: 4px; font-size: 24px; box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px transparent; transition: box-shadow .3s; }
+.score-side.lead .score-face { box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px #f5c04f, 0 0 24px color-mix(in srgb, #f5c04f 40%, transparent); }
+.score-face::after { display: none; }
+.score-crown { position: absolute; top: -15px; left: 50%; translate: -50% 0; rotate: -12deg; width: 26px; height: 26px; display: grid; place-items: center; color: #f5c04f; filter: drop-shadow(0 2px 4px #0008); }
+.score-crown .icon { width: 24px; height: 24px; fill: currentColor; stroke: #8a5a00; stroke-width: 1.2; }
+.score-name { max-width: 100%; overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.score-side small, .score-mid small { color: var(--muted); font-size: 11.5px; }
+.score-mid { display: grid; justify-items: center; gap: 2px; }
+.score-nums { display: flex; align-items: center; gap: 10px; }
+.score-nums b { min-width: 1ch; color: var(--muted); font-size: 40px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+.score-nums b.ahead { color: var(--ink); }
+.score-x { color: var(--faint); font-size: 20px; font-weight: 600; }
+.score-games { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; padding-top: 12px; border-top: 1px solid var(--line); }
+.score-game { display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px 4px 4px; border-radius: 999px; background: var(--surface-2); font-size: 12px; font-weight: 600; }
+.score-game .game-mark { width: 22px; height: 22px; border-radius: 50%; }
+.score-game .game-mark .icon { width: 13px; height: 13px; }
+.score-game b { font-variant-numeric: tabular-nums; }
+.score-game small { color: var(--muted); font-size: 11px; font-weight: 500; }
+.score-game.ties { padding-left: 10px; color: var(--muted); }
 .games { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
 /* Cada jogo é um cartão com a ilustração dele (img/jogos) de fundo; o texto fica embaixo, sobre um degradê. */
 .game-tile { position: relative; isolation: isolate; min-height: 252px; display: flex; flex-direction: column; justify-content: flex-end; align-items: flex-start; gap: 4px; padding: 16px; overflow: hidden; border: 0; border-radius: 22px; background: #0d0b09; color: #fff; box-shadow: 0 14px 34px #0005; transition: transform .35s cubic-bezier(.34, 1.56, .64, 1), box-shadow .3s; }
@@ -1766,6 +1808,24 @@ button.day-note:hover { background: var(--surface-3); }
 .game-option .avatar { width: 26px; height: 26px; font-size: 11px; }
 .game-option .avatar::after { display: none; }
 .game-votes { width: 100%; color: var(--muted); font-size: 11px; font-weight: 500; }
+/* quem é mais provável: um cartão com a foto grande de cada um */
+.game-options.who { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.who-pick { flex-direction: column; flex-wrap: nowrap; justify-content: flex-start; gap: 8px; padding: 14px 8px 12px; border-radius: 18px; transition: border-color .2s, background .2s, transform .15s, opacity .25s; }
+.who-pick .avatar.who-face { width: 72px; height: 72px; font-size: 28px; box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px transparent, 0 8px 18px #0006; transition: box-shadow .25s, transform .25s; }
+.who-pick:hover:not(:disabled) .who-face { transform: translateY(-2px) scale(1.04); box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px color-mix(in srgb, #ff7eb6 55%, transparent), 0 10px 22px #0007; }
+.who-pick.picked .who-face { box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px var(--accent), 0 8px 18px #0006; }
+.who-check { position: absolute; right: -4px; bottom: -4px; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; border: 2px solid var(--surface); background: var(--accent); color: var(--accent-ink); scale: 0; transition: scale .25s cubic-bezier(.34, 1.56, .64, 1); }
+.who-check .icon { width: 13px; height: 13px; stroke-width: 3; }
+.who-pick.picked .who-check { scale: 1; }
+.who-name { font-size: 14px; font-weight: 700; }
+.game-options.who.voted .who-pick:not(.picked) { opacity: .5; }
+.who-pick.agreed { border-color: #ff7eb6; background: color-mix(in srgb, #ff7eb6 14%, var(--surface)); }
+.who-pick.agreed .who-face { box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px #ff7eb6, 0 0 26px color-mix(in srgb, #ff7eb6 55%, transparent); }
+.who-votes { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+.who-votes .avatar { width: 18px; height: 18px; font-size: 9px; }
+.who-votes .avatar + .avatar { margin-left: -9px; box-shadow: 0 0 0 2px var(--surface); }
+.who-votes .avatar::after { display: none; }
+.game.in-table .who-pick .avatar.who-face { width: 96px; height: 96px; font-size: 36px; }
 .game-wait { margin: 0; color: var(--muted); font-size: 12.5px; }
 .game-result { margin: 0; font-size: 14px; font-weight: 700; }
 .game-result.match { color: #ff7eb6; }
@@ -2022,7 +2082,7 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
   .list-day { grid-template-columns: 58px minmax(0, 1fr); padding: 6px 8px; }
   .list-date { flex-direction: column; gap: 0; }
   .list-time { width: auto; min-width: 70px; font-size: 11.5px; }
-  .cal-fab { position: fixed; right: 16px; bottom: calc(84px + env(safe-area-inset-bottom)); z-index: 30; width: 56px; height: 56px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 18px; background: var(--accent); color: var(--accent-ink); box-shadow: 0 10px 26px #0007; }
+  .cal-fab { position: fixed; right: 16px; bottom: calc(20px + env(safe-area-inset-bottom)); z-index: 30; width: 56px; height: 56px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 18px; background: var(--accent); color: var(--accent-ink); box-shadow: 0 10px 26px #0007; }
   .cal-fab .icon { width: 26px; height: 26px; stroke-width: 2.6; }
   .event-pop { top: auto !important; left: 8px !important; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); width: auto; border-radius: 22px; }
   .day-cards, .goal-list { grid-template-columns: minmax(0, 1fr); }
@@ -2041,10 +2101,8 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
    Telas pequenas e painel lateral da extensão
    ===================================================================== */
 @media (max-width: 760px) {
-  .app-shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .app-shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
   .conversation, .profile-view, .us-view { height: auto; min-height: 0; }
-  .tabbar { position: relative; display: grid; grid-template-columns: 1fr 1fr; padding: 6px 12px calc(6px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: color-mix(in srgb, var(--bg-2) 92%, transparent); backdrop-filter: blur(14px); }
-  .in-call .tabbar { display: none; }
   .profile-top { min-height: 64px; padding: 10px 16px; }
   /* Tocador: ocupa a tela toda e sobe de baixo, como no Spotify (arrastar para baixo fecha). */
   .music-panel { inset: 0; width: auto; max-height: none; padding: max(14px, env(safe-area-inset-top)) 22px max(24px, env(safe-area-inset-bottom)); border-radius: 0; box-shadow: none; transition: transform .42s cubic-bezier(.32, .72, 0, 1), translate .42s cubic-bezier(.32, .72, 0, 1), visibility 0s, --tone .8s; }
@@ -2060,8 +2118,8 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
   .music-button.has-art { gap: 7px; padding: 0 11px 0 4px; }
   .mini-art { width: 26px; height: 26px; }
   .music-empty { margin-top: 14vh; }
-  /* Sala no celular: o vídeo em cima, a conversa embaixo (sem as abas). */
-  .app-shell.watching .tabbar, .watching .topbar { display: none; }
+  /* Sala no celular: o vídeo em cima, a conversa embaixo. */
+  .watching .topbar { display: none; }
   .watching .watch-panel { margin: 0; border: 0; border-radius: 0; }
   .watching .watch-panel:not(.has-video) .watch-stage { aspect-ratio: auto; min-height: 380px; }
   .watching .watch-panel.browsing:not(.has-video) .watch-stage { min-height: min(66dvh, 560px); }
@@ -2100,7 +2158,7 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
   .topbar .icon-button:not(.music-button) .icon { width: 21px; height: 21px; }
   .messages { padding: 16px 12px 10px; }
   .message { max-width: 86%; }
-  .composer { margin: 6px 10px 10px; }
+  .composer { margin: 6px 10px calc(10px + env(safe-area-inset-bottom)); }
   .reply-bar { margin: 0 10px; }
   .typing { padding: 0 14px; }
   .jump { right: 14px; }
@@ -2118,10 +2176,6 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
   .round .icon { width: 18px; height: 18px; }
   .round.hangup { width: 52px; }
   .volume input { width: 64px; }
-}
-/* Celular com o teclado aberto: as abas saem para sobrar espaço acima dele (app.js marca .keyboard-open). */
-@media (max-width: 760px) and (pointer: coarse) {
-  .keyboard-open .tabbar { display: none; }
 }
 @media (max-width: 420px) {
   .quick-emojis button:not(:first-child) { display: none; }
@@ -2142,6 +2196,6 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
   .message.show-tools .bubble, .message.show-tools .bubble::after,
   button.person.active, button.person.active::before, button.person.active .avatar::before,
   .typing.on .typing-bubble, .typing.on .typing-bubble i, .eq i, .music-unblock, .music-empty-art, .marquee > span, .ticker-line,
-  .rec-dot, .rec-slide .icon, .rec-lock .icon, .recording .mic, .typing-mic, .voice-play.loading::after, .letter-flag.new { animation: none !important; }
+  .rec-dot, .rec-slide .icon, .rec-lock .icon, .rec-pill, .recording .mic, .typing-mic, .voice-play.loading::after, .letter-flag.new { animation: none !important; }
   .sidebar, .menu-backdrop { transition: none !important; }
 }

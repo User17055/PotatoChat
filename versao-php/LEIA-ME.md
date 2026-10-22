@@ -51,7 +51,7 @@ Para atualizar o site depois, envie de novo só os arquivos alterados. Os navega
 
 ## Perfil: conta, foto e tema
 
-Foto, tema, notificações, sons e *Sair* ficam juntos na aba **Perfil**, separada da conversa: no computador, em *Ver seu perfil*, no pé da barra lateral; no celular (e no painel da extensão), na sua foto, na barra de baixo. O perfil também mostra quantas mensagens você mandou, quantas reações deu e há quantos dias vocês conversam.
+Foto, tema, notificações, sons e *Sair* ficam juntos na aba **Perfil**, separada da conversa: no computador, em *Ver seu perfil*, no pé da barra lateral; no celular (e no painel da extensão), no **botão de menu** (☰) do canto de cima, que abre a mesma barra lateral (a conversa fica no topo dela e o seu perfil, no pé; o pontinho vermelho do botão acende quando chega mensagem com você fora da conversa). O perfil também mostra quantas mensagens você mandou, quantas reações deu e há quantos dias vocês conversam.
 
 - **Perfil da outra pessoa:** tocar no nome ou na foto dela, no topo da conversa, abre o perfil dela: a foto (toque para ampliar), o status ao vivo ("online agora", "digitando…", "Visto por último…"), quantas mensagens ela mandou, quantas reações deu, há quantos dias vocês conversam e atalhos para chamada de voz, de vídeo ou para escrever.
 - **Senha:** fica no banco só como *hash* (`pass_hash` na tabela `potato_users`), nunca o texto da senha.
@@ -85,7 +85,7 @@ O clipe, ao lado do botão GIF, abre duas opções: **Foto ou vídeo** (no celul
 
 Com o campo de mensagem vazio, o botão de enviar vira um **microfone**:
 
-- **Um toque** começa a gravar sem precisar segurar. A faixa mostra o tempo e a onda da voz; depois, é só tocar em enviar (o mesmo botão) ou na lixeira.
+- **Um toque** começa a gravar sem precisar segurar, como no Instagram: a faixa colorida fica em cima (parar, a onda da voz e o tempo) e, embaixo, a lixeira e o enviar. O **quadradinho** para a gravação sem enviar: a faixa vira um tocador para ouvir antes (o mesmo botão toca e pausa, e a onda vai se pintando); depois, é só enviar ou apagar.
 - **Segurando**, grava enquanto o dedo (ou o mouse) estiver no botão e envia ao soltar. Deslizar para a esquerda cancela; **arrastar para cima até o cadeado** trava a gravação, e aí dá para soltar o dedo e falar à vontade (depois é só tocar em enviar ou na lixeira).
 - **Redução de ruído:** antes de gravar, o som do microfone passa por um corte dos graves (ronco abaixo de 80 Hz) e pelo [RNNoise](https://github.com/xiph/rnnoise), uma rede neural feita para separar a voz do barulho de fundo (ventilador, trânsito, TV), que roda no próprio aparelho (nada vai para fora). Num teste com fala e ruído de ventilador, o fundo caiu cerca de 37 dB e a voz ficou com o mesmo volume. Vem ligada; no **Perfil**, a chave *Redução de ruído* desliga (vale só para o aparelho). Os arquivos ficam em `site/vendor/noise` ([web-noise-suppressor](https://github.com/sapphi-red/web-noise-suppressor), licença MIT, com o RNNoise da Xiph, licença BSD) e são baixados só na primeira gravação.
 - No computador, `Enter` com o microfone em foco começa a gravar e `Esc` cancela.
@@ -194,7 +194,7 @@ O blog de cartinhas: escreva quando quiser, num papel de cor (creme, rosa, azul,
 
 ## Joguinhos
 
-Em *Jogos* (no menu, ou no clipe da conversa → *Joguinhos*), cada jogo tem um cartão com a ilustração dele. Escolher um abre a **mesinha de jogo** na hora, e a outra pessoa recebe o convite na conversa (com a mesma ilustração e o botão *Jogar*). As partidas que ainda estão valendo aparecem em *Partidas em andamento*, e o servidor confere cada jogada e de quem é a vez.
+Em *Jogos* (no menu, ou no clipe da conversa → *Joguinhos*), cada jogo tem um cartão com a ilustração dele. Escolher um abre a **mesinha de jogo** na hora, e a outra pessoa recebe o convite na conversa (com a mesma ilustração e o botão *Jogar*). Em cima ficam o **placar** dos dois (as vitórias de cada um, as derrotas, os empates e quem está na frente, com a coroa, contando todas as partidas de tabuleiro que já acabaram, e embaixo jogo por jogo) e, só quando tem, as partidas **esperando você** (a sua vez, o seu voto ou a sua resposta). O servidor confere cada jogada e de quem é a vez.
 
 | Jogo | Como funciona |
 | --- | --- |

@@ -149,7 +149,7 @@ function paintAvatar(node, name) {
 
 // Avatares fora da lista de pessoas (abas, barra lateral, perfil e chamada).
 function repaintAvatars() {
-  for (const node of [$("#tab-avatar"), $("#side-avatar"), $("#profile-face")]) paintAvatar(node, me);
+  for (const node of [$("#side-avatar"), $("#profile-face")]) paintAvatar(node, me);
   $("#side-name").textContent = me || "Você";
   if (!call) return;
   paintAvatar($("#me-face"), me);
@@ -553,6 +553,8 @@ function updateMessage(message) {
   byId.set(message.id, message);
   // Jogos: avisos (sua vez, quem ganhou) e a mesinha aberta acompanha a jogada (e fecha se a partida for apagada).
   if (message.game) gameNotice(previous.game, message.game, message);
+  // Uma partida acabou (ou uma que já tinha acabado foi apagada): o placar muda.
+  if (Boolean(message.game?.winner) !== Boolean(previous.game?.winner)) loadScore();
   if (table.id === message.id) paintTable();
   if (message.game || previous.game) paintUsBadge();
   if ((message.game || previous.game) && tab === "us" && us.section === "jogos") paintGames();
@@ -1565,7 +1567,8 @@ function loadOlder() {
 // ---------- mensagens de voz ----------
 
 // Gravar: com o campo vazio, o microfone fica no lugar do enviar. Um toque grava sem segurar (depois é só enviar
-// ou apagar); segurando, a pessoa fala e solta para enviar, e deslizar para a esquerda cancela.
+// ou apagar, ou parar para ouvir antes); segurando, a pessoa fala e solta para enviar, e deslizar para a esquerda
+// cancela.
 // Ouvir: um áudio por vez, com forma de onda (tocar ou arrastar nela pula), velocidade e, no fim, o próximo
 // áudio seguido da mesma pessoa.
 const micButton = $("#mic-button");
@@ -1574,6 +1577,7 @@ const recTime = $("#rec-time");
 const recWave = $("#rec-wave");
 const recSlide = $("#rec-slide");
 const recLock = $("#rec-lock");
+const recStop = $("#rec-stop");
 // MP4/AAC primeiro: toca em qualquer aparelho, inclusive no iPhone, que nem sempre toca o WebM/Opus.
 const VOICE_TYPES = ["audio/mp4;codecs=mp4a.40.2", "audio/webm;codecs=opus", "audio/mp4", "audio/ogg;codecs=opus", "audio/webm"];
 const VOICE_EXTENSION = { mp4: "m4a", webm: "webm", ogg: "ogg" };
@@ -1591,7 +1595,8 @@ const NOISE_KEY = "potato.noise";
 const canRecord = Boolean(window.MediaRecorder && navigator.mediaDevices?.getUserMedia);
 if (!canRecord) messageForm.classList.add("no-voice");
 
-// Gravação em andamento (ou esperando a permissão do microfone); null = parada.
+// Gravação em andamento (ou esperando a permissão do microfone, ou parada esperando enviar: mode "review");
+// null = nenhuma.
 let rec = null;
 // Dedo (ou mouse) segurando o microfone.
 let micHold = null;
@@ -1619,11 +1624,18 @@ function voiceFileName(type) {
 }
 
 function paintRecorder() {
-  const locked = rec?.mode === "locked";
+  const review = rec?.mode === "review";
+  const locked = rec?.mode === "locked" || review;
+  const playing = Boolean(rec?.audio && !rec.audio.paused);
   messageForm.classList.toggle("recording", Boolean(rec));
   messageForm.classList.toggle("rec-locked", locked);
+  messageForm.classList.toggle("rec-review", review);
+  messageForm.classList.toggle("rec-playing", playing);
   micButton.setAttribute("aria-label", locked ? "Enviar áudio" : "Gravar áudio");
   micButton.title = locked ? "Enviar áudio" : "Gravar áudio: toque para gravar, ou segure e solte para enviar";
+  const stopLabel = !review ? "Parar a gravação" : playing ? "Pausar" : "Ouvir o áudio";
+  recStop.setAttribute("aria-label", stopLabel);
+  recStop.title = review ? stopLabel : "Parar para ouvir antes de enviar";
   recSlide.style.transform = recSlide.style.opacity = recLock.style.transform = "";
   recLock.classList.remove("ready");
 }
@@ -1734,7 +1746,7 @@ async function startRecording(mode) {
     session.chunks.push(event.data);
     session.size += event.data.size;
     // Quase no maior arquivo que o servidor aceita: envia o que já tem.
-    if (rec === session && fileMax && session.size > fileMax * 0.95) {
+    if (rec === session && session.mode !== "review" && fileMax && session.size > fileMax * 0.95) {
       toast("O áudio chegou ao tamanho máximo e foi enviado.");
       stopRecording(true);
     }
@@ -1774,34 +1786,115 @@ function lockRecording() {
   paintRecorder();
 }
 
+// Fecha o arquivo (o gravador entrega o último pedaço ao parar) e solta o microfone. Dá o áudio pronto
+// ({ blob, seconds, voice }), ou null se o microfone ainda nem tinha sido liberado.
+function closeRecorder(session) {
+  if (session.closing) return session.closing;
+  clearInterval(session.timer);
+  clearInterval(session.typing);
+  if (session.started) socket?.emit("typing", false);
+  const recorder = session.recorder;
+  // Ainda esperando a permissão: o startRecording solta o microfone quando ela chegar.
+  if (!recorder) return Promise.resolve(null);
+  const seconds = (performance.now() - session.started) / 1000;
+  session.closing = new Promise((resolve) => {
+    const finish = () => {
+      releaseMicStream(session);
+      const type = recorder.mimeType || session.chunks[0]?.type || "audio/webm";
+      resolve({ blob: new File(session.chunks, voiceFileName(type), { type }), seconds, voice: { duration: Math.round(seconds * 10) / 10, peaks: voicePeaks(session.levels) } });
+    };
+    if (recorder.state === "inactive") return finish();
+    recorder.addEventListener("stop", finish, { once: true });
+    recorder.stop();
+  });
+  return session.closing;
+}
+
+function sendVoice(take) {
+  if (!take) return;
+  if (take.seconds < VOICE_MIN) return toast("Áudio curto demais.");
+  if (fileMax && take.blob.size > fileMax) return toast(`O áudio ficou grande demais (máximo de ${formatSize(fileMax)}).`, "error");
+  send("", null, { blob: take.blob, voice: take.voice });
+}
+
 // Para a gravação. keep = enviar (se tiver pelo menos VOICE_MIN segundos); senão, joga fora.
 function stopRecording(keep) {
   const session = rec;
   if (!session) return;
   rec = null;
   micHold = null;
-  clearInterval(session.timer);
-  clearInterval(session.typing);
-  if (session.started) socket?.emit("typing", false);
+  if (session.audio) {
+    cancelAnimationFrame(session.frame);
+    session.audio.pause();
+    URL.revokeObjectURL(session.audio.src);
+  }
   recorderEl.classList.add("hidden");
   paintRecorder();
-  const recorder = session.recorder;
-  // Ainda esperando a permissão: o startRecording solta o microfone quando ela chegar.
-  if (!recorder) return;
-  const seconds = (performance.now() - session.started) / 1000;
-  const finish = () => {
-    releaseMicStream(session);
-    if (!keep) return;
-    if (seconds < VOICE_MIN) return toast("Áudio curto demais.");
-    const type = recorder.mimeType || session.chunks[0]?.type || "audio/webm";
-    const blob = new File(session.chunks, voiceFileName(type), { type });
-    if (fileMax && blob.size > fileMax) return toast(`O áudio ficou grande demais (máximo de ${formatSize(fileMax)}).`, "error");
-    send("", null, { blob, voice: { duration: Math.round(seconds * 10) / 10, peaks: voicePeaks(session.levels) } });
-  };
-  if (recorder.state === "inactive") return finish();
-  recorder.addEventListener("stop", finish, { once: true });
-  recorder.stop();
+  closeRecorder(session).then((take) => {
+    if (keep) sendVoice(take);
+  });
 }
+
+// O quadradinho (gravando sem segurar): a gravação para, mas o áudio espera, para ouvir antes de enviar ou apagar.
+// A faixa vira um tocador: o mesmo botão toca e pausa, e a onda inteira vai se pintando enquanto toca.
+async function reviewRecording() {
+  const session = rec;
+  if (session?.mode !== "locked" || !session.recorder) return;
+  session.mode = "review";
+  paintRecorder();
+  sound.play("tap");
+  const take = await closeRecorder(session);
+  if (rec !== session) return;
+  if (take.seconds < VOICE_MIN) {
+    toast("Áudio curto demais.");
+    return stopRecording(false);
+  }
+  session.take = take;
+  const audio = session.audio = new Audio(URL.createObjectURL(take.blob));
+  const repaint = () => {
+    if (rec !== session) return;
+    paintPreview(session);
+    paintRecorder();
+  };
+  audio.addEventListener("pause", repaint);
+  audio.addEventListener("ended", repaint);
+  recWave.replaceChildren(...take.voice.peaks.map((peak) => {
+    const bar = el("i");
+    bar.style.setProperty("--h", (peak / 100).toFixed(2));
+    return bar;
+  }));
+  paintPreview(session);
+}
+
+// Onde está o áudio parado: as barras já tocadas acendem e o tempo conta (no começo ou no fim, mostra o total).
+function paintPreview(session) {
+  const { audio, take } = session;
+  const progress = audio.ended ? 0 : Math.min(1, audio.currentTime / take.seconds);
+  const played = Math.round(progress * recWave.childElementCount);
+  [...recWave.children].forEach((bar, index) => bar.classList.toggle("played", index < played));
+  recTime.textContent = clockTime(progress ? audio.currentTime : take.seconds);
+}
+
+function togglePreview() {
+  const session = rec;
+  const audio = session?.audio;
+  if (!audio) return;
+  if (!audio.paused) return audio.pause();
+  stopVoice();
+  audio.play().catch(() => {});
+  const step = () => {
+    if (rec !== session || audio.paused) return;
+    paintPreview(session);
+    session.frame = requestAnimationFrame(step);
+  };
+  session.frame = requestAnimationFrame(step);
+  paintRecorder();
+}
+
+recStop.addEventListener("click", () => {
+  if (rec?.mode === "locked") reviewRecording();
+  else if (rec?.mode === "review") togglePreview();
+});
 
 micButton.addEventListener("pointerdown", (event) => {
   if (rec || event.button !== 0 || !event.isPrimary) return;
@@ -1859,7 +1952,7 @@ micButton.addEventListener("click", (event) => {
     return;
   }
   // O clique que chega logo depois do toque que começou a gravação não envia.
-  if (rec.mode === "locked" && performance.now() - rec.lockedAt > 300) stopRecording(true);
+  if (rec.mode !== "hold" && performance.now() - rec.lockedAt > 300) stopRecording(true);
 });
 
 $("#rec-cancel").addEventListener("click", () => {
@@ -2371,8 +2464,9 @@ paintNoise();
 
 const profileView = $("#profile-view");
 let tab = "chat";
-// Mensagens que chegaram enquanto a pessoa olhava o perfil.
+// Mensagens que chegaram enquanto a pessoa olhava o perfil (ou o Nosso cantinho), e as novidades do Nosso cantinho.
 let unreadAway = 0;
+let usNews = 0;
 // A conversa some com display: none e perde a rolagem; null = estava no fim.
 let chatScroll = null;
 
@@ -2397,12 +2491,19 @@ function paintUnread() {
     badge.textContent = unreadAway > 99 ? "99+" : String(unreadAway);
     badge.classList.toggle("hidden", !unreadAway);
   });
+  paintMenuDot();
+}
+
+// No celular, a conversa e o perfil ficam no menu: o pontinho do botão acende com mensagem nova fora da conversa e
+// com novidade no Nosso cantinho.
+function paintMenuDot() {
+  document.querySelectorAll(".menu-dot").forEach((dot) => dot.classList.toggle("hidden", !(unreadAway + usNews)));
 }
 
 function bumpUnread() {
   unreadAway += 1;
   paintUnread();
-  document.querySelectorAll(".unread-badge").forEach((badge) => fx.pop(badge));
+  document.querySelectorAll(".unread-badge, .menu-dot").forEach((badge) => fx.pop(badge));
 }
 
 // Ordem das abas (a tela nova entra do lado de onde a aba está).
@@ -2440,27 +2541,7 @@ document.addEventListener("click", (event) => {
   const target = event.target.closest("[data-tab-target]");
   if (!target) return;
   showTab(target.dataset.tabTarget);
-  if (target.classList.contains("tab")) fx.press(target);
 });
-
-// Teclado do celular aberto = um campo de texto com o foco e a tela mais baixa que o normal (styles.css esconde as
-// abas). Só o foco não basta: no Android, fechar o teclado não tira o foco do campo, e as abas sumiam até tocar fora.
-let screenWidth = innerWidth;
-let tallest = 0;
-function paintKeyboard() {
-  const height = Math.min(innerHeight, window.visualViewport?.height || innerHeight);
-  if (innerWidth !== screenWidth) {
-    screenWidth = innerWidth;
-    tallest = 0;
-  }
-  tallest = Math.max(tallest, height);
-  const typing = document.activeElement?.matches?.("textarea, input:not([type=range]):not([type=file]):not([type=checkbox])");
-  document.documentElement.classList.toggle("keyboard-open", Boolean(typing) && height < tallest - 120);
-}
-window.visualViewport?.addEventListener("resize", paintKeyboard);
-addEventListener("resize", paintKeyboard);
-document.addEventListener("focusin", paintKeyboard);
-document.addEventListener("focusout", () => setTimeout(paintKeyboard));
 
 // No perfil, Esc volta para a conversa (a não ser que uma janela esteja aberta: aí o Esc é dela).
 window.addEventListener("keydown", (event) => {
@@ -5277,15 +5358,15 @@ const US_TITLES = { hoje: ["sun", "Rotina do dia"], agenda: ["calendar", "Agenda
 // pontinho quando tem novidade lá dentro (também as da outra pessoa no dia, na agenda e nos sonhos).
 function paintUsBadge() {
   const letters = unreadLetters();
-  const turns = list.filter((message) => message.game && !message.deleted && gameOpen(message.game) && gameWaiting(message.game).startsWith("Sua vez")).length;
+  const turns = list.filter((message) => message.game && !message.deleted && myTurn(message.game)).length;
   for (const [selector, count] of [[".letters-new", letters], [".games-turn", turns]]) {
     document.querySelectorAll(selector).forEach((badge) => {
       badge.textContent = count > 99 ? "99+" : String(count);
       badge.classList.toggle("hidden", !count);
     });
   }
-  const news = letters + turns + (tab === "us" ? 0 : usUnseen);
-  document.querySelectorAll(".menu-dot").forEach((dot) => dot.classList.toggle("hidden", !news));
+  usNews = letters + turns + (tab === "us" ? 0 : usUnseen);
+  paintMenuDot();
   paintSideAgenda();
 }
 
@@ -5353,6 +5434,7 @@ function paintUs() {
   usView.querySelectorAll("[data-pane]").forEach((pane) => pane.classList.toggle("hidden", pane.dataset.pane !== us.section));
   paintTabs();
   ({ hoje: paintToday, agenda: paintAgenda, sonhos: paintGoals, cartinhas: paintLetters, jogos: paintGames })[us.section]();
+  if (us.section === "jogos") loadScore();
 }
 
 // Um item do menu (ou o "Joguinhos" do clipe de anexar): abre aquela parte.
@@ -7074,20 +7156,100 @@ function gameWaiting(game) {
   return game.players.includes(me) ? `Esperando ${otherPlayer()}…` : "Sua vez!";
 }
 
-// A seção de jogos: as partidas que ainda estão valendo (das mensagens já carregadas) e os jogos para começar.
+// A partida está esperando você? A sua vez no tabuleiro; no stop, a rodada com campos seus para preencher; nas
+// cartas, a sua escolha, o seu voto ou a sua resposta.
+function myTurn(game) {
+  if (!gameOpen(game)) return false;
+  if (game.type === "stop") return game.phase === "playing" && (game.filled[me] ?? 0) < game.categories.length;
+  if (BOARD_GAMES.includes(game.type)) return game.turn === me;
+  if (game.type === "vd") return game.for === me;
+  return !game.players.includes(me);
+}
+
+// A seção de jogos: o placar, só as partidas esperando você (das mensagens já carregadas) e os jogos para começar.
 function paintGames() {
   $('[data-game-hint="vd"]').textContent = `${peerName || "A outra pessoa"} escolhe: verdade ou desafio. Perguntas e desafios fofinhos.`;
-  const live = list.filter((message) => message.game && !message.deleted && gameOpen(message.game)).slice(-6).reverse();
-  $("#game-live-wrap").classList.toggle("hidden", !live.length);
-  $("#game-live").replaceChildren(...live.map((message) => {
+  const waiting = list.filter((message) => message.game && !message.deleted && myTurn(message.game)).reverse();
+  $("#game-live-wrap").classList.toggle("hidden", !waiting.length);
+  $("#game-live").replaceChildren(...waiting.map((message) => {
     const row = el("button", "event-row game-row");
     row.type = "button";
     row.dataset.openGame = message.id;
     const text = el("span", "event-text");
     text.append(el("strong", "", GAME_NAMES[message.game.type]), el("small", "", `${gameWaiting(message.game)} · ${message.sender === me ? "você começou" : `${message.sender} começou`}`));
-    row.append(iconBadge(GAME_ICONS[message.game.type], `event-emoji game-${message.game.type}`), text, el("span", "event-date", "Continuar"));
+    row.append(iconBadge(GAME_ICONS[message.game.type], `event-emoji game-${message.game.type}`), text, el("span", "event-date", "Jogar"));
     return row;
   }));
+  paintScore();
+}
+
+// Placar (contado no servidor, de todas as partidas de tabuleiro que já acabaram): chega ao abrir os jogos e quando
+// uma partida acaba. { velha: { wins: { nome: n }, ties: n }, … }
+let gameScore = null;
+let shownScore = "";
+
+function loadScore() {
+  if (!socket?.connected) return;
+  socket.timeout(15000).emit("game", { op: "score" }, (error, result) => {
+    if (error || !result?.ok) return;
+    gameScore = result.score;
+    if (tab === "us" && us.section === "jogos") paintScore();
+  });
+}
+
+const countOf = (count, one, many) => `${count} ${count === 1 ? one : many}`;
+
+// Você à esquerda, a outra pessoa à direita: as vitórias grandes no meio, as derrotas embaixo de cada um, quem está
+// na frente (com a coroa) e, no pé, os empates e jogo por jogo.
+function paintScore() {
+  const card = $("#game-score");
+  card.classList.toggle("hidden", !gameScore || !peerName);
+  if (!gameScore || !peerName) return;
+  const games = BOARD_GAMES.filter((type) => gameScore[type]);
+  const wins = (name, types = games) => types.reduce((sum, type) => sum + (gameScore[type].wins[name] || 0), 0);
+  const mine = wins(me);
+  const theirs = wins(peerName);
+  const ties = games.reduce((sum, type) => sum + gameScore[type].ties, 0);
+  const lead = mine > theirs ? me : theirs > mine ? peerName : null;
+
+  const head = el("div", "score-head");
+  head.append(el("strong", "", "Placar"), el("span", `score-lead${lead === me ? " mine" : ""}`,
+    !games.length ? "Nenhuma partida terminou ainda" : lead === me ? "Você está na frente!" : lead ? `${lead} está na frente` : "Empatados!"));
+  const side = (name, lost) => {
+    const box = el("div", `score-side${name === lead ? " lead" : ""}`);
+    const face = el("span", "avatar score-face");
+    paintAvatar(face, name);
+    if (name === lead) {
+      const crown = el("span", "score-crown");
+      crown.append(icon("crown"));
+      face.append(crown);
+    }
+    box.append(face, el("strong", "score-name", who(name)), el("small", "", countOf(lost, "derrota", "derrotas")));
+    return box;
+  };
+  const middle = el("div", "score-mid");
+  const numbers = el("div", "score-nums");
+  numbers.append(el("b", mine > theirs ? "ahead" : "", String(mine)), el("span", "score-x", "×"), el("b", theirs > mine ? "ahead" : "", String(theirs)));
+  middle.append(numbers, el("small", "", "vitórias"));
+  const main = el("div", "score-main");
+  main.append(side(me, theirs), middle, side(peerName, mine));
+  card.replaceChildren(head, main);
+
+  if (games.length) {
+    const foot = el("div", "score-games");
+    if (ties) foot.append(el("span", "score-game ties", countOf(ties, "empate", "empates")));
+    for (const type of games) {
+      const chip = el("span", "score-game");
+      chip.append(iconBadge(GAME_ICONS[type], `game-mark game-${type}`), el("span", "", GAME_NAMES[type]), el("b", "", `${wins(me, [type])} × ${wins(peerName, [type])}`));
+      if (gameScore[type].ties) chip.append(el("small", "", countOf(gameScore[type].ties, "empate", "empates")));
+      foot.append(chip);
+    }
+    card.append(foot);
+  }
+  // Mudou desde a última vez (uma partida acabou): os números pulam.
+  const key = JSON.stringify([mine, theirs, ties]);
+  if (shownScore && key !== shownScore) fx.pop(numbers);
+  shownScore = key;
 }
 
 usView.querySelector('[data-pane="jogos"]').addEventListener("click", (event) => {
@@ -7175,25 +7337,46 @@ function truthOrDare(message, box) {
   if (row.children.length) box.append(row);
 }
 
-// Quem é mais provável (um dos dois) e isso ou aquilo (uma das duas opções).
+// Quem é mais provável (um dos dois, cada um com a sua foto grande) e isso ou aquilo (uma das duas opções).
 function voteCard(message, box) {
   const game = message.game;
+  const quem = game.type === "quem";
   if (game.prompt) box.append(el("p", "game-prompt", game.prompt));
-  const values = game.type === "quem" ? game.names : [0, 1];
+  const values = quem ? game.names : [0, 1];
   const voted = game.players.includes(me);
   const mine = game.done ? game.votes[me] : gamePicks.get(message.id);
-  const row = el("div", "game-options");
+  const row = el("div", `game-options${quem ? " who" : ""}${voted && !game.done ? " voted" : ""}`);
   for (const value of values) {
-    const option = gameButton(game.type === "quem" ? who(value) : game.options[value], "vote", value, "game-ctl game-option");
-    if (game.type === "quem") {
-      const face = el("span", "avatar");
+    const picks = game.done ? Object.entries(game.votes).filter(([, vote]) => vote === value).map(([name]) => name) : [];
+    let option;
+    if (quem) {
+      // A foto (ou a inicial), com o visto em cima quando é o seu voto; no fim, quem votou nela, com as carinhas.
+      option = el("button", `game-ctl game-option who-pick${picks.length === 2 ? " agreed" : ""}`);
+      option.type = "button";
+      option.dataset.game = "vote";
+      option.dataset.value = JSON.stringify(value);
+      const face = el("span", "avatar who-face");
       paintAvatar(face, value);
-      option.prepend(face);
+      const mark = el("span", "who-check");
+      mark.append(icon("check"));
+      face.append(mark);
+      option.append(face, el("strong", "who-name", who(value)));
+      if (picks.length) {
+        const votes = el("small", "game-votes who-votes");
+        for (const name of picks) {
+          const voter = el("span", "avatar");
+          paintAvatar(voter, name);
+          votes.append(voter);
+        }
+        votes.append(picks.length === 2 ? "os dois" : who(picks[0]));
+        option.append(votes);
+      }
+    } else {
+      option = gameButton(game.options[value], "vote", value, "game-ctl game-option");
+      if (picks.length) option.append(el("small", "game-votes", picks.map(who).join(" e ")));
     }
     option.disabled = voted || game.done;
     option.classList.toggle("picked", mine === value);
-    const picks = game.done ? Object.entries(game.votes).filter(([, vote]) => vote === value).map(([name]) => who(name)) : [];
-    if (picks.length) option.append(el("small", "game-votes", picks.join(" e ")));
     row.append(option);
   }
   box.append(row);
@@ -7370,7 +7553,7 @@ function paintTable() {
   $("#table-title").textContent = GAME_NAMES[game.type];
   const status = $("#table-status");
   status.textContent = board ? boardStatus(game) : cardStatus(game);
-  status.classList.toggle("your-turn", gameOpen(game) && (board ? game.type !== "stop" && game.turn === me : gameWaiting(game).startsWith("Sua vez")));
+  status.classList.toggle("your-turn", myTurn(game));
   tableEl.querySelector(".table-card").dataset.type = game.type;
   if (board) {
     paintPlayers(game);

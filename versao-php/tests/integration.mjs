@@ -895,7 +895,8 @@ try {
     assert.ok(!(await us(us2, { op: "schedule", tz: 0 })).items.some((item) => item.kind === "event"));
     assert.equal((await us(us1, { op: "prompts", prompts: { lanche: "16:30", almoco: null, cafe: "25:00" } })).prompts.lanche, "16:30");
     assert.deepEqual((await us(us1, { op: "load" })).prompts, { acordar: "09:30", cafe: null, almoco: null, lanche: "16:30", jantar: "20:30", rotina: "22:00" });
-    const eventGone = until(us1, "us", (change) => change.kind === "event" && change.deleted);
+    // (O aviso do "Jantar" apagado lá em cima pode chegar atrasado: espera o do cinema.)
+    const eventGone = until(us1, "us", (change) => change.kind === "event" && change.deleted && change.title !== "Jantar");
     assert.equal((await us(us2, { op: "event:delete", id: event.item.id })).ok, true);
     assert.equal((await eventGone).title, "Cinema");
     // Repetições: todo mês (dia 31 cai no último dia dos meses curtos), toda semana e todo ano.
@@ -1074,6 +1075,8 @@ try {
     assert.deepEqual([second.message.game.round, second.message.game.phase, second.message.game.filled], [2, "playing", {}]);
     assert.notEqual(second.message.game.letter, stopLetter);
     assert.equal((await game(us1, { op: "end", id: stop.message.id })).message.game.winner, "Pessoa 1");
+    // Placar: as partidas de tabuleiro que acabaram (a memória ainda não acabou), por jogo.
+    assert.deepEqual((await game(us2, { op: "score" })).score, { velha: { wins: { "Pessoa 1": 1 }, ties: 0 }, dama: { wins: { "Pessoa 2": 1 }, ties: 0 }, stop: { wins: { "Pessoa 1": 1 }, ties: 0 } });
     // Responder a uma carta cita o nome do jogo; o jogo não conta como mensagem no perfil; o histórico vem escondido.
     assert.equal((await withAck(us2, "message", { text: "Eu!", clientId: "cliente-jogo", replyTo: likely.message.id })).message.replyTo.text, "Quem é mais provável?");
     const reopenedGames = await connect(secondLogin.body.token);

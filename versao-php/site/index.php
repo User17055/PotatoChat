@@ -550,12 +550,21 @@ function asset(string $file): string
           </button>
           <button id="gif-button" class="gif-button" type="button" title="Enviar GIF" aria-label="Enviar GIF" aria-haspopup="dialog" aria-expanded="false" aria-controls="gif-panel">GIF</button>
           <textarea id="message-input" rows="1" maxlength="2000" placeholder="Escreva uma mensagem…" aria-label="Mensagem"></textarea>
-          <!-- Gravando um áudio: a faixa cobre o campo. Segurando o microfone, deslizar para a esquerda cancela. -->
+          <!-- Gravando um áudio. Segurando o microfone, a faixa cobre o campo e deslizar para a esquerda cancela. Sem
+               segurar (como no Instagram), a faixa colorida fica em cima (parar, a onda e o tempo) e, embaixo, o apagar e
+               o enviar; parado, o mesmo botão toca o áudio para ouvir antes de enviar. -->
           <div id="recorder" class="recorder hidden">
             <button id="rec-cancel" class="rec-cancel" type="button" title="Apagar o áudio" aria-label="Apagar o áudio"><svg class="icon"><use href="#i-trash" /></svg></button>
-            <span class="rec-clock" role="timer" aria-label="Tempo de gravação"><i class="rec-dot"></i><span id="rec-time">0:00</span></span>
-            <div id="rec-wave" class="rec-wave" aria-hidden="true"></div>
-            <span id="rec-slide" class="rec-slide"><svg class="icon"><use href="#i-chevron-left" /></svg>Deslize para cancelar</span>
+            <div class="rec-pill">
+              <button id="rec-stop" class="rec-stop" type="button" title="Parar para ouvir antes de enviar" aria-label="Parar a gravação">
+                <svg class="icon when-rec"><use href="#i-stop" /></svg>
+                <svg class="icon when-play"><use href="#i-play" /></svg>
+                <svg class="icon when-pause"><use href="#i-pause" /></svg>
+              </button>
+              <span class="rec-clock" role="timer" aria-label="Tempo de gravação"><i class="rec-dot"></i><span id="rec-time">0:00</span></span>
+              <div id="rec-wave" class="rec-wave" aria-hidden="true"></div>
+              <span id="rec-slide" class="rec-slide"><svg class="icon"><use href="#i-chevron-left" /></svg>Deslize para cancelar</span>
+            </div>
           </div>
           <!-- Segurando o microfone: arrastar para cima até o cadeado trava a gravação (dá para soltar o dedo). -->
           <span id="rec-lock" class="rec-lock" aria-hidden="true"><svg class="icon"><use href="#i-lock" /></svg><svg class="icon"><use href="#i-chevron-up" /></svg></span>
@@ -803,8 +812,10 @@ function asset(string $file): string
           <!-- Joguinhos: escolher um jogo abre a mesinha aqui mesmo; a outra pessoa recebe o convite na conversa. -->
           <section class="us-pane" data-pane="jogos">
             <p class="muted games-lead">Escolha um jogo e a mesinha abre aqui. A outra pessoa recebe o convite na conversa, e cada um joga do seu lado, na sua vez.</p>
+            <!-- O placar dos dois (todas as partidas de tabuleiro que já acabaram) e só as partidas esperando você. -->
+            <section id="game-score" class="score-card hidden" aria-label="Placar"></section>
             <section id="game-live-wrap" class="hidden" aria-labelledby="game-live-title">
-              <h3 id="game-live-title" class="us-subtitle">Partidas em andamento</h3>
+              <h3 id="game-live-title" class="us-subtitle">Esperando você</h3>
               <div id="game-live" class="event-list"></div>
             </section>
             <h3 class="us-subtitle">De tabuleiro</h3>
@@ -865,18 +876,7 @@ function asset(string $file): string
         </div>
       </section>
 
-      <!-- Abas do celular e do painel da extensão (como no Instagram). O Nosso cantinho fica no menu. -->
-      <nav class="tabbar" aria-label="Navegação">
-        <span class="tab-glow" aria-hidden="true"></span>
-        <button class="tab" type="button" data-tab-target="chat" aria-label="Conversa" title="Conversa">
-          <svg class="icon"><use href="#i-message" /></svg>
-          <span id="tab-unread" class="tab-badge unread-badge hidden">0</span>
-        </button>
-        <button class="tab" type="button" data-tab-target="profile" aria-label="Seu perfil" title="Seu perfil">
-          <span id="tab-avatar" class="avatar" aria-hidden="true">?</span>
-        </button>
-      </nav>
-      <!-- Fundo escuro da gaveta do menu (celular): tocar fecha. -->
+      <!-- Fundo escuro da gaveta do menu (celular): tocar fecha. A conversa e o perfil também ficam no menu. -->
       <div id="menu-backdrop" class="menu-backdrop" aria-hidden="true"></div>
     </main>
 

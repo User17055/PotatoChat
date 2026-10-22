@@ -97,8 +97,7 @@ export const fx = {
           .fromTo(".sidebar", { x: -60, opacity: 0 }, { x: 0, opacity: 1, duration: 0.6, ...clear })
           .fromTo(".peer", { y: -18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ...clear }, "-=0.4")
           .fromTo(".actions .icon-button", { scale: 0 }, { scale: 1, stagger: 0.05, duration: 0.45, ease: "back.out(2.5)", ...clear }, "-=0.35")
-          .fromTo(".composer", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ...clear }, "-=0.45")
-          .fromTo(".tabbar", { y: 70 }, { y: 0, duration: 0.6, ...clear }, "-=0.5");
+          .fromTo(".composer", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ...clear }, "-=0.45");
         if (items.length) timeline.fromTo(items, { y: 18, opacity: 0 }, { y: 0, opacity: 1, stagger: { each: 0.025, from: "end" }, duration: 0.4, ...clear }, "-=0.5");
       }
     });
