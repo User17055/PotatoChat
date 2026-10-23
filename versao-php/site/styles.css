@@ -288,6 +288,7 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .messages { position: relative; height: 100%; padding: 24px max(20px, calc((100% - 820px) / 2)) 12px; display: flex; flex-direction: column; gap: 3px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
 .load-more { align-self: center; margin-bottom: 10px; padding: 7px 14px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 12px; }
 .load-more:hover { border-color: var(--accent); color: var(--ink); }
+.load-newer { margin: 10px 0 0; }
 .empty { margin: auto; display: grid; justify-items: center; gap: 12px; max-width: 300px; color: var(--muted); font-size: 14px; font-weight: 500; line-height: 1.55; text-align: center; }
 .empty svg { width: 110px; height: 78px; }
 .day { align-self: center; margin: 14px 0 8px; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; background: color-mix(in srgb, var(--surface) 80%, transparent); backdrop-filter: blur(8px); color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .03em; }
@@ -475,9 +476,10 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .rec-locked .rec-cancel .icon { width: 22px; height: 22px; }
 .rec-locked .mic { grid-area: send; width: 72px; height: 44px; border-radius: 999px; }
 
-/* No balão, tudo numa grade só (para alinhar): o play na mesma linha da onda (centro com centro), a velocidade no
-   canto direito e, embaixo da onda, o tempo (com o "Transcrever") na mesma linha da hora. A transcrição vem por último. */
-.bubble.is-voice { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; grid-template-rows: auto 40px auto auto; grid-template-areas: "quote quote quote" "play wave speed" ". time foot" "text text text"; column-gap: 10px; align-items: center; width: 300px; max-width: 100%; padding: 8px 10px 6px 8px; white-space: normal; }
+/* No balão, tudo numa linha só, como no Discord: o play, a onda e, à direita, o tempo em cima e a hora embaixo (centro
+   com centro, sem sobrar espaço embaixo). O "Transcrever" (ou a barra do envio) só ganha uma linha quando aparece, e a
+   transcrição vem por último. */
+.bubble.is-voice { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; grid-template-rows: auto 40px auto auto; grid-template-areas: "quote quote quote" "play wave time" ". meta meta" "text text text"; column-gap: 10px; align-items: center; width: 300px; max-width: 100%; padding: 8px 12px 8px 8px; white-space: normal; }
 .bubble.is-voice .reply-quote { grid-area: quote; margin-bottom: 8px; }
 .voice { display: contents; }
 .voice-play { position: relative; grid-area: play; width: 40px; height: 40px; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--accent); color: var(--accent-ink); box-shadow: 0 4px 12px #0003; transition: filter .2s, scale .2s; }
@@ -499,10 +501,11 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .voice-thumb { position: absolute; top: 50%; left: calc(6px + var(--p, 0) * (100% - 12px)); width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--accent); box-shadow: 0 1px 4px #0006; pointer-events: none; transition: scale .15s; }
 .mine .voice-thumb { background: var(--accent-ink); }
 .voice-wave:hover .voice-thumb, .voice.is-playing .voice-thumb { scale: 1.15; }
-.voice-speed { grid-area: speed; justify-self: end; min-width: 36px; padding: 2px 8px; border: 0; border-radius: 999px; background: #0000002a; color: inherit; font-size: 11px; font-weight: 700; line-height: 1.6; font-variant-numeric: tabular-nums; }
-.mine .voice-speed { background: #00000018; }
-.voice-meta { grid-area: time; display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 20px; padding-left: 6px; font-size: 11.5px; font-variant-numeric: tabular-nums; }
-.voice-time { opacity: .75; }
+/* Parado no começo, sem a bolinha (a onda fica limpa); ela aparece ao tocar, ao passar o mouse ou pausado no meio. */
+.voice.at-start .voice-wave:not(:hover, :focus-visible) .voice-thumb { scale: 0; }
+.voice-time { grid-area: time; align-self: start; justify-self: end; min-width: 32px; margin-top: 2px; font-size: 12px; font-weight: 600; line-height: 16px; font-variant-numeric: tabular-nums; text-align: right; opacity: .85; }
+.voice-meta { grid-area: meta; display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 20px; margin-top: 2px; padding-left: 6px; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.voice-meta:empty { display: none; }
 .voice-transcribe { display: inline-flex; align-items: center; gap: 4px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font-size: 11.5px; font-weight: 600; white-space: nowrap; opacity: .8; transition: opacity .2s; }
 .voice-transcribe:hover { opacity: 1; }
 .voice-transcribe .icon { width: 14px; height: 14px; }
@@ -510,7 +513,7 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 .voice-meta .upload-bar { position: static; flex: 1; margin: 0; }
 .voice-text { grid-area: text; margin: 8px 0 2px; padding: 7px 4px 0; border-top: 1px solid color-mix(in srgb, currentColor 16%, transparent); font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .voice-text.empty { font-style: italic; opacity: .7; }
-.bubble.is-voice .foot { grid-area: foot; justify-self: end; float: none; margin: 0; }
+.bubble.is-voice .foot { grid-area: time; align-self: end; justify-self: end; float: none; margin: 0 0 1px; }
 /* "Gravando um áudio" no lugar das bolinhas do "digitando". */
 .typing-mic { display: none; width: 14px; height: 14px; color: var(--live); }
 .typing.audio .typing-bubble { padding: 5px 10px; }
@@ -1249,6 +1252,47 @@ button.person:hover .person-edit, button.person:focus-visible .person-edit { opa
 }
 
 /* =====================================================================
+   Pesquisa na conversa
+   ===================================================================== */
+/* No computador, uma coluna à direita (a conversa encolhe para dar lugar); no celular, a tela toda. */
+.search-panel { position: absolute; top: 0; right: 0; bottom: 0; z-index: 30; width: 380px; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--bg-2); box-shadow: -20px 0 60px #0005; }
+@media (min-width: 761px) { .conversation.searching { padding-right: 380px; } }
+.search-head { display: flex; flex: none; align-items: center; gap: 10px; min-height: 78px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.search-head .icon-button { flex: none; }
+.search-field { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 14px; border: 1px solid var(--field-line); border-radius: 999px; background: var(--field); transition: border-color .2s; }
+.search-field:focus-within { border-color: var(--accent); }
+.search-field .icon { flex: none; width: 17px; height: 17px; color: var(--muted); }
+.search-field input { flex: 1; min-width: 0; height: 42px; padding: 0; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 14.5px; outline: none; }
+.search-day { display: flex; flex: none; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 13px; font-weight: 600; }
+.search-day .icon { flex: none; width: 17px; height: 17px; color: var(--accent); }
+.search-day span { flex: 1; }
+.search-day input { padding: 6px 10px; border: 1px solid var(--field-line); border-radius: 10px; background: var(--field); color: var(--ink); font: inherit; font-size: 13px; outline: none; }
+.search-day input:focus { border-color: var(--accent); }
+.search-results { flex: 1 1 auto; min-height: 0; padding: 6px 8px 20px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.search-count { margin: 8px 12px 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.search-hit { width: 100%; display: grid; gap: 3px; padding: 10px 12px; border: 0; border-radius: 14px; background: transparent; color: var(--ink); text-align: left; transition: background .2s; }
+.search-hit:hover { background: var(--surface-2); }
+.search-hit.active { background: color-mix(in srgb, var(--accent) 16%, var(--surface-2)); }
+.hit-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.hit-top strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.hit-top time { flex: none; color: var(--faint); font-size: 11.5px; }
+.hit-text { display: -webkit-box; overflow: hidden; color: var(--muted); font-size: 13.5px; line-height: 1.45; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.hit-text .icon { width: 14px; height: 14px; margin-right: 5px; vertical-align: -2px; }
+/* O termo achado, como marca-texto (no resultado e no balão aberto pela pesquisa). No seu balão, que já é da cor do
+   tema, a marca vai invertida. */
+.search-hit mark, .message mark.hit { padding: 0 1px; border-radius: 3px; background: #ffd54a; color: #241a00; }
+.message.mine mark.hit { background: var(--accent-ink); color: var(--accent-2); }
+.search-note { display: grid; justify-items: center; gap: 10px; margin: 44px 24px; color: var(--muted); font-size: 13.5px; line-height: 1.5; text-align: center; }
+.search-note .icon { width: 26px; height: 26px; color: var(--faint); }
+.search-note.busy .icon { animation: spin 1s linear infinite; }
+.search-more { display: block; margin: 12px auto 0; }
+@media (max-width: 760px) {
+  .search-panel { left: 0; width: auto; border-left: 0; box-shadow: none; }
+  .search-head { min-height: 64px; padding: 10px 12px; }
+  .search-head .icon-button { border-color: transparent; background: transparent; }
+}
+
+/* =====================================================================
    Janelas (chamada recebida e confirmação)
    ===================================================================== */
 .modal { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 20px; background: var(--backdrop); backdrop-filter: blur(8px); }
@@ -1698,6 +1742,13 @@ button.day-note:hover { background: var(--surface-3); }
 .goal-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 
 /* ---------- cartinhas ---------- */
+/* Letras da cartinha: cada uma num tamanho que parece com o das outras (a altura da linha continua a do papel). */
+:root, .font-classica { --letter-font: Georgia, "Times New Roman", serif; --letter-scale: 1; }
+.font-mao { --letter-font: "Caveat", cursive; --letter-scale: 1.32; }
+.font-cursiva { --letter-font: "Dancing Script", cursive; --letter-scale: 1.2; }
+.font-bilhete { --letter-font: "Patrick Hand", cursive; --letter-scale: 1.12; }
+.font-maquina { --letter-font: "Special Elite", "Courier New", monospace; --letter-scale: .94; }
+.font-moderna { --letter-font: var(--font); --letter-scale: .92; }
 .paper-creme { --paper: #fff4df; --paper-ink: #4a3b2a; --paper-line: #ead6b0; }
 .paper-rosa { --paper: #ffe6ef; --paper-ink: #5a2a3d; --paper-line: #f4c0d3; }
 .paper-azul { --paper: #e5f1ff; --paper-ink: #22374f; --paper-line: #c3dbf5; }
@@ -1712,7 +1763,10 @@ button.day-note:hover { background: var(--surface-3); }
 .letter-card.fresh .letter-seal { background: #ff4f7b; color: #fff; }
 .letter-text { flex: 1; min-width: 0; display: grid; gap: 1px; }
 .letter-text small { opacity: .7; font-size: 11.5px; font-weight: 500; }
-.letter-text strong { overflow: hidden; font-family: Georgia, "Times New Roman", serif; font-size: 16px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.letter-text strong { overflow: hidden; font-family: var(--letter-font); font-size: calc(16px * var(--letter-scale)); font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.letter-media { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 3px; opacity: .7; font-size: 11.5px; font-weight: 600; }
+.letter-media > span { display: inline-flex; align-items: center; gap: 4px; }
+.letter-media .icon { width: 13px; height: 13px; }
 .letter-preview { overflow: hidden; opacity: .75; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
 .letter-flag { flex: none; align-self: flex-start; padding: 3px 9px; border-radius: 999px; background: #00000012; font-size: 11px; font-weight: 700; }
 .letter-flag.new { background: #ff4f7b; color: #fff; animation: seal-pulse 1.6s ease-in-out infinite; }
@@ -1721,10 +1775,30 @@ button.day-note:hover { background: var(--surface-3); }
 .letter-paper { position: relative; width: min(100%, 560px); max-height: calc(100vh - 40px); max-height: calc(100dvh - 40px); padding: 34px 30px 24px; overflow-y: auto; overscroll-behavior: contain; border-radius: 6px 26px 26px 26px; background-color: var(--paper); background-image: repeating-linear-gradient(transparent 0 31px, var(--paper-line) 31px 32px); background-attachment: local; color: var(--paper-ink); box-shadow: 0 30px 80px #000c; }
 .letter-paper .peer-close { background: #00000012; color: var(--paper-ink); }
 .letter-to { margin: 0 0 4px; opacity: .7; font-size: 13px; font-weight: 600; }
-.letter-paper h3 { margin: 0 0 14px; padding-right: 30px; font-family: Georgia, "Times New Roman", serif; font-size: 25px; line-height: 1.25; }
-.letter-body { font-family: Georgia, "Times New Roman", serif; font-size: 16.5px; line-height: 32px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.letter-paper h3 { margin: 0 0 14px; padding-right: 30px; font-family: var(--letter-font); font-size: calc(25px * var(--letter-scale)); line-height: 1.25; }
+.letter-body { font-family: var(--letter-font); font-size: calc(16.5px * var(--letter-scale)); line-height: 32px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .letter-body.loading { opacity: .6; font-style: italic; }
-.letter-sign { margin: 18px 0 0; font-family: Georgia, "Times New Roman", serif; font-size: 17px; font-style: italic; text-align: right; }
+.letter-body:empty, .letter-audios:empty, .letter-photos:empty { display: none; }
+.letter-sign { margin: 18px 0 0; font-family: var(--letter-font); font-size: calc(17px * var(--letter-scale)); font-style: italic; text-align: right; }
+.font-mao .letter-sign, .font-cursiva .letter-sign { font-style: normal; }
+/* Áudios da cartinha: o player das mensagens de voz, com o nome em cima. No papel, nas cores dele. */
+.letter-audios { display: grid; gap: 8px; margin: 0 0 18px; }
+.letter-voice { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; grid-template-areas: "name name name" "play wave time"; column-gap: 10px; row-gap: 4px; align-items: center; min-width: 0; padding: 8px 12px 10px 10px; border-radius: 18px; background: var(--surface-2); color: var(--ink); font-family: var(--font); }
+.letter-voice .voice-meta { display: none; }
+.letter-voice-name { grid-area: name; display: flex; align-items: center; gap: 6px; min-width: 0; padding-left: 2px; font-size: 12px; font-weight: 600; opacity: .75; }
+.letter-voice-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.letter-voice-name .icon { flex: none; width: 14px; height: 14px; }
+.letter-paper .letter-voice { background: #ffffff99; box-shadow: inset 0 0 0 1px var(--paper-line); color: var(--paper-ink); }
+.letter-paper .voice-play { background: var(--paper-ink); color: var(--paper); }
+.letter-paper .voice-play.loading::after { border-top-color: var(--paper-ink); }
+.letter-paper :is(.voice-bars.played i, .voice-thumb) { background: #e2457b; }
+/* Fotos da cartinha: polaroides tortinhas, que endireitam ao passar o mouse; tocar abre grande. */
+.letter-photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 18px 16px; margin: 20px 4px 4px; }
+.letter-photo { padding: 8px 8px 24px; border: 0; border-radius: 3px; background: #fff; box-shadow: 0 8px 22px #0003; rotate: -2deg; cursor: zoom-in; transition: rotate .2s, scale .2s; }
+.letter-photo:nth-child(even) { rotate: 2.5deg; }
+.letter-photo:nth-child(3n) { rotate: -1deg; }
+.letter-photo:hover { rotate: 0deg; scale: 1.03; }
+.letter-photo img { display: block; width: 100%; aspect-ratio: 1; border-radius: 1px; object-fit: cover; }
 .letter-state { margin: 8px 0 0; opacity: .6; font-size: 11.5px; text-align: right; }
 .letter-tools { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 14px; }
 .letter-tools .pill.ghost { background: #00000012; color: var(--paper-ink); }
@@ -1913,6 +1987,18 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
 .field-toggle.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--surface-2)); color: var(--ink); }
 .field-info { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
 .field-hint { color: var(--faint); font-size: 11.5px; }
+/* Dados da mensagem: a mensagem em cima e, embaixo, quando foi lida e quando foi enviada. */
+.facts-quote { display: -webkit-box; margin: 0; padding: 10px 12px; overflow: hidden; border-left: 3px solid var(--accent); border-radius: 4px 12px 12px 4px; background: var(--surface-2); font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
+.facts { display: grid; }
+.fact { display: flex; align-items: center; gap: 12px; padding: 10px 2px; }
+.fact + .fact { border-top: 1px solid var(--line); }
+.fact-icon { flex: none; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; background: var(--surface-2); color: var(--muted); }
+.fact-icon .icon { width: 18px; height: 18px; stroke-width: 2.4; }
+.fact.is-read .fact-icon { color: color-mix(in srgb, var(--read) 60%, var(--ink)); }
+.fact-text { min-width: 0; display: grid; gap: 2px; }
+.fact-text strong { font-size: 14px; }
+.fact-text small { color: var(--muted); font-size: 12.5px; }
+.fact.is-waiting small { font-style: italic; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip-option { padding: 8px 13px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2); color: var(--ink); font-size: 13px; font-weight: 600; transition: border-color .2s, background .2s; }
 .chip-option:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
@@ -1944,7 +2030,22 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
 .prompt-switch { flex: none; padding: 4px; border: 0; background: transparent; }
 .prompt-row:not(.is-off) .switch { background: var(--accent); box-shadow: none; }
 .prompt-row:not(.is-off) .switch::after { transform: translateX(16px); background: var(--accent-ink); }
-.field-input.letter-input { min-height: 240px; font-family: Georgia, "Times New Roman", serif; font-size: 16px; line-height: 1.7; }
+.field-input.letter-input { min-height: 240px; font-family: var(--letter-font); font-size: calc(16px * var(--letter-scale)); line-height: 1.7; }
+/* O campo da cartinha já no papel escolhido. */
+.field-input.letter-input[class*="paper-"] { border-color: var(--paper-line); background: var(--paper); color: var(--paper-ink); }
+.field-input.letter-input[class*="paper-"]::placeholder { color: var(--paper-ink); opacity: .45; }
+.font-chip { font-family: var(--letter-font); font-size: calc(14px * var(--letter-scale)); font-weight: 400; }
+/* Fotos e áudios do formulário da cartinha. */
+.photos-field { display: flex; flex-wrap: wrap; gap: 8px; }
+.photos-thumb { position: relative; width: 84px; height: 84px; margin: 0; }
+.photos-thumb img { width: 100%; height: 100%; border-radius: 12px; object-fit: cover; box-shadow: 0 6px 16px #0005; }
+.moment.add.photos-add { width: 84px; height: 84px; }
+.audios-field { display: grid; gap: 8px; }
+.letter-audio-row { display: flex; align-items: center; gap: 6px; }
+.letter-audio-row .letter-voice { flex: 1; }
+.audios-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.letter-rec { display: flex; align-items: center; gap: 12px; padding: 7px 8px 7px 16px; border-radius: 999px; background: color-mix(in srgb, var(--live) 14%, var(--surface-2)); }
+.letter-rec-time { flex: 1; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
 /* Lembrete com o site aberto: um cartão no canto, com o campo para responder. */
 .nudge { position: fixed; top: max(16px, var(--safe-top)); right: 16px; z-index: 45; width: min(calc(100vw - 32px), 360px); display: grid; gap: 6px; padding: 16px 16px 14px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: 22px; background: color-mix(in srgb, var(--surface) 96%, transparent); backdrop-filter: blur(14px); box-shadow: 0 24px 60px #000a; }
@@ -2201,7 +2302,8 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
   .icon-button { width: 33px; height: 33px; }
   .icon-button .icon { width: 15px; height: 15px; }
   .topbar { gap: 8px; padding: 10px 10px 10px 12px; }
-  .topbar .icon-button:not(.music-button) { width: 38px; height: 38px; }
+  /* Com a lupa, são cinco botões: um pouco mais estreitos, para o nome continuar cabendo. */
+  .topbar .icon-button:not(.music-button) { width: 34px; height: 38px; }
   .topbar .icon-button:not(.music-button) .icon { width: 20px; height: 20px; }
   .music-button.has-art { gap: 6px; padding: 0 9px 0 4px; }
   .mini-art { width: 23px; height: 23px; }

@@ -8,10 +8,12 @@ const DAY_MS = 86400000;
 const SESSION_DAYS = 365;
 const MAX_USERS = 2;
 const PAGE_SIZE = 60;
+// Pesquisa na conversa: quantos resultados vêm por vez.
+const SEARCH_PAGE = 30;
 const REACTIONS = ['❤️', '😂', '😮', '😢', '👍', '🔥'];
 const MAX_BODY = 1000000;
 const EVENT_KEEP_MS = 120000;
-const SCHEMA_VERSION = '7';
+const SCHEMA_VERSION = '8';
 const MIN_PASSWORD = 4;
 const AVATAR_MAX = 400000;
 // GIF animado vai sem recortar (o recorte tiraria a animação): limite maior, que ainda cabe numa requisição.
@@ -286,12 +288,22 @@ function user_columns(): array
     ];
 }
 
-// GIF da mensagem (JSON com endereço, largura, altura e título). Separada pelo mesmo motivo.
+// GIF ou arquivo da mensagem (JSON) e quando a outra pessoa leu (vazio = lida antes de o chat guardar a hora).
+// Separadas pelo mesmo motivo.
 function message_columns(): array
 {
     return [
         'media' => 'media TEXT NULL',
+        'read_at' => 'read_at VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL',
     ];
+}
+
+// Banco de antes da hora da leitura: o que cada um já tinha lido continua lido, só que sem a hora.
+function backfill_reads(PDO $pdo): void
+{
+    $marks = $pdo->query('SELECT s.name, m.n FROM ' . t('status') . ' s JOIN ' . t('messages') . ' m ON m.id = s.read_id')->fetchAll();
+    $update = $pdo->prepare('UPDATE ' . t('messages') . " SET read_at = '' WHERE n <= ? AND sender <> ? AND read_at IS NULL");
+    foreach ($marks as $mark) $update->execute([$mark['n'], $mark['name']]);
 }
 
 // Cria as tabelas que faltam e acrescenta as colunas novas. Uma requisição por vez.
@@ -315,6 +327,7 @@ function migrate(PDO $pdo): void
             $changes = array_map(fn($column) => "ADD COLUMN $column", array_values($missing));
             if (isset($missing['avatar_key'])) $changes[] = 'ADD KEY user_avatar (avatar_key)';
             $pdo->exec('ALTER TABLE ' . t($table) . ' ' . implode(', ', $changes));
+            if ($table === 'messages' && isset($missing['read_at'])) backfill_reads($pdo);
         }
         $pdo->prepare('INSERT INTO ' . t('settings') . ' (name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)')
             ->execute(['schema', SCHEMA_VERSION]);
@@ -1464,9 +1477,10 @@ function speech_to_text(string $audio, string $type): string
 //            humor, momentos (fotos com legenda) e como foi o dia. Só a própria pessoa muda o dia dela;
 //   event  → compromisso da agenda (day = a data). Os dois mudam e apagam qualquer um;
 //   goal   → sonho ou meta dos dois, com dinheiro guardado e/ou passos;
-//   letter → cartinha para a outra pessoa (só quem escreveu muda ou apaga);
+//   letter → cartinha para a outra pessoa, com fotos e áudios (só quem escreveu muda ou apaga);
 //   prefs  → de cada pessoa: os hábitos da rotina, os horários dos lembretes e os lembretes já mostrados.
-// As fotos ficam na tabela files, como as das mensagens, com o id do registro no lugar de message_id.
+// As fotos (e os áudios das cartinhas) ficam na tabela files, como as das mensagens, com o id do registro no lugar
+// de message_id.
 
 const MEALS = ['cafe', 'almoco', 'lanche', 'jantar'];
 // Lembretes da rotina e o horário padrão de cada um (null = desligado). "rotina" só aparece para quem tem hábitos.
@@ -1491,6 +1505,10 @@ const REPEATS = ['none', 'weekly', 'monthly', 'yearly'];
 // Minutos antes do compromisso (0 = na hora; 1440 = um dia antes).
 const REMINDERS = [0, 15, 30, 60, 120, 1440];
 const PAPERS = ['creme', 'rosa', 'azul', 'lilas', 'verde'];
+// Letras da cartinha (mesma lista do app.js; o primeiro é o padrão) e quantas fotos e áudios cabem nela.
+const LETTER_FONTS = ['classica', 'mao', 'cursiva', 'bilhete', 'maquina', 'moderna'];
+const LETTER_PHOTOS = 6;
+const LETTER_AUDIOS = 3;
 
 function clean_day($value): ?string
 {
@@ -1579,6 +1597,20 @@ function item_photo($photo, string $owner, string $itemId): ?array
     if (!preg_match('/^[0-9a-f]{32}$/', $key)) return null;
     $file = query('SELECT width, height FROM ' . t('files') . " WHERE file_key = ? AND kind = 'image' AND (message_id = ? OR (message_id IS NULL AND owner = ?))", [$key, $itemId, $owner])->fetch();
     return $file ? ['key' => $key, 'url' => file_url($key), 'width' => (int) $file['width'], 'height' => (int) $file['height']] : null;
+}
+
+// Áudio de uma cartinha: a chave de um áudio enviado por api.php?action=upload (solto, de quem está salvando, ou que já
+// é dela), com a duração e a forma de onda medidas no navegador. voice = gravado na hora (senão, um arquivo, que fica
+// com o nome dele). Devolve o que fica guardado, ou null.
+function item_audio($audio, string $owner, string $itemId): ?array
+{
+    $key = is_array($audio) ? str($audio['key'] ?? '') : '';
+    if (!preg_match('/^[0-9a-f]{32}$/', $key)) return null;
+    $file = query('SELECT name FROM ' . t('files') . " WHERE file_key = ? AND kind IN ('audio', 'video') AND (message_id = ? OR (message_id IS NULL AND owner = ?))", [$key, $itemId, $owner])->fetch();
+    $sound = clean_voice($audio);
+    if (!$file || !$sound) return null;
+    $voice = (bool) ($audio['voice'] ?? false);
+    return ['key' => $key, 'url' => file_url($key), 'name' => $voice ? 'Mensagem de voz' : $file['name'], 'voice' => $voice] + $sound;
 }
 
 // Prende as fotos ao registro (não são mais apagadas como envio abandonado) e apaga as que saíram dele.
@@ -1990,18 +2022,25 @@ function us_act(array $me, array $body): array
             $row = $id !== '' ? find_item('letter', $id) : null;
             if ($id !== '' && !$row) return ['ok' => false, 'error' => 'Essa cartinha foi apagada.'];
             if ($row && $row['owner'] !== $me['name']) return ['ok' => false, 'error' => 'Só quem escreveu muda a cartinha.'];
+            $itemId = $row['id'] ?? uuid();
             $text = clean_body($body['body'] ?? '', LETTER_MAX);
-            if ($text === '') return ['ok' => false, 'error' => 'Escreva alguma coisa na cartinha.'];
+            $photos = array_values(array_filter(array_map(fn($photo) => item_photo($photo, $me['name'], $itemId), array_slice((array) ($body['photos'] ?? []), 0, LETTER_PHOTOS))));
+            $audios = array_values(array_filter(array_map(fn($audio) => item_audio($audio, $me['name'], $itemId), array_slice((array) ($body['audios'] ?? []), 0, LETTER_AUDIOS))));
+            if ($text === '' && !$photos && !$audios) return ['ok' => false, 'error' => 'Escreva alguma coisa na cartinha.'];
             $old = $row ? item_data($row) : [];
             $letter = [
                 'title' => clean_line($body['title'] ?? '', 120) ?: 'Cartinha',
                 'body' => $text,
                 'paper' => in_array($body['paper'] ?? '', PAPERS, true) ? $body['paper'] : 'creme',
+                'font' => in_array($body['font'] ?? '', LETTER_FONTS, true) ? $body['font'] : LETTER_FONTS[0],
+                'photos' => $photos,
+                'audios' => $audios,
                 'to' => $old['to'] ?? peer_of($me['name']),
                 'readAt' => $old['readAt'] ?? null,
                 'edited' => (bool) $row,
             ];
-            $saved = save_item($row, $row['id'] ?? uuid(), 'letter', $me['name'], null, $letter);
+            $saved = save_item($row, $itemId, 'letter', $me['name'], null, $letter);
+            keep_photos($itemId, $me['name'], array_merge(array_column($photos, 'key'), array_column($audios, 'key')));
             emit('us', ['kind' => 'letter', 'by' => $me['name'], 'item' => letter_public($saved), 'action' => $row ? 'edit' : 'new']);
             return ['ok' => true, 'item' => letter_public($saved, true)];
 
@@ -2431,6 +2470,9 @@ function to_message(array $row): array
         'reactions' => (object) (is_array($reactions) ? $reactions : []),
         'deleted' => $deleted,
         'source' => $row['source'] ?: 'web',
+        // Lida pela outra pessoa, e quando (readAt null com read = lida antes de o chat guardar a hora).
+        'read' => ($row['read_at'] ?? null) !== null,
+        'readAt' => ($row['read_at'] ?? null) ?: null,
     ];
 }
 
@@ -2454,6 +2496,83 @@ function page(string $before = ''): array
     $hasMore = count($rows) > PAGE_SIZE;
     $rows = array_reverse(array_slice($rows, 0, PAGE_SIZE));
     return ['items' => array_map('to_message', $rows), 'hasMore' => $hasMore];
+}
+
+// Um trecho antigo da conversa (pesquisa ou "ir para o dia"): a mensagem pedida (id), ou a primeira desde from (hora
+// ISO do começo do dia, no fuso de quem pediu; depois da última, a última), com metade da página antes e o resto
+// depois. hasNewer = ainda tem mensagens depois do trecho.
+function around(string $id, string $from = ''): array
+{
+    if ($id !== '') {
+        $anchor = find_message($id);
+    } elseif (preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/', $from)) {
+        $anchor = query('SELECT * FROM ' . t('messages') . ' WHERE created_at >= ? ORDER BY n LIMIT 1', [$from])->fetch()
+            ?: query('SELECT * FROM ' . t('messages') . ' ORDER BY n DESC LIMIT 1')->fetch();
+    } else {
+        return ['ok' => false, 'error' => 'Dia inválido.'];
+    }
+    if (!$anchor) return ['ok' => false, 'error' => $id !== '' ? 'Essa mensagem não existe mais.' : 'A conversa ainda está vazia.'];
+    $before = intdiv(PAGE_SIZE, 2);
+    $after = PAGE_SIZE - $before - 1;
+    $older = query('SELECT * FROM ' . t('messages') . ' WHERE n < ? ORDER BY n DESC LIMIT ' . ($before + 1), [$anchor['n']])->fetchAll();
+    $newer = query('SELECT * FROM ' . t('messages') . ' WHERE n > ? ORDER BY n LIMIT ' . ($after + 1), [$anchor['n']])->fetchAll();
+    $rows = array_merge(array_reverse(array_slice($older, 0, $before)), [$anchor], array_slice($newer, 0, $after));
+    return ['ok' => true, 'items' => array_map('to_message', $rows), 'target' => $anchor['id'], 'hasMore' => count($older) > $before, 'hasNewer' => count($newer) > $after];
+}
+
+// Descendo num trecho antigo: a página depois de after, e hasNewer se ainda tem mais.
+function page_after(string $after): array
+{
+    $anchor = find_message($after);
+    if (!$anchor) return ['items' => [], 'hasNewer' => false];
+    $rows = query('SELECT * FROM ' . t('messages') . ' WHERE n > ? ORDER BY n LIMIT ' . (PAGE_SIZE + 1), [$anchor['n']])->fetchAll();
+    return ['items' => array_map('to_message', array_slice($rows, 0, PAGE_SIZE)), 'hasNewer' => count($rows) > PAGE_SIZE];
+}
+
+// Pesquisa na conversa: o texto (e a legenda das fotos), o nome dos arquivos, a transcrição dos áudios e as músicas
+// pedidas, sem diferença de maiúsculas nem acentos. Das mais novas para as mais antigas, SEARCH_PAGE por vez
+// (before = id da última que já veio). O LIKE do banco separa as candidatas e o fold confere onde o termo está (no
+// JSON da coluna media, o LIKE também acharia os nomes dos campos).
+function search_messages(string $query, string $before = ''): array
+{
+    $query = text_slice(text_trim(preg_replace('/\s+/u', ' ', $query) ?? ''), 100);
+    $needle = fold($query);
+    if (text_length($needle) < 2) return ['ok' => false, 'error' => 'Escreva pelo menos 2 letras.'];
+    $from = PHP_INT_MAX;
+    if ($before !== '') {
+        $anchor = find_message($before);
+        if (!$anchor) return ['ok' => true, 'items' => [], 'hasMore' => false];
+        $from = (int) $anchor['n'];
+    }
+    $like = '%' . strtr($query, ['!' => '!!', '%' => '!%', '_' => '!_']) . '%';
+    $found = [];
+    $more = false;
+    do {
+        $rows = query('SELECT * FROM ' . t('messages') . " WHERE deleted = 0 AND n < ? AND (text LIKE ? ESCAPE '!' OR media LIKE ? ESCAPE '!') ORDER BY n DESC LIMIT 200", [$from, $like, $like])->fetchAll();
+        foreach ($rows as $row) {
+            $from = (int) $row['n'];
+            if (!search_hit($row, $needle)) continue;
+            if (count($found) === SEARCH_PAGE) {
+                $more = true;
+                break 2;
+            }
+            $found[] = to_message($row);
+        }
+    } while (count($rows) === 200);
+    return ['ok' => true, 'items' => $found, 'hasMore' => $more];
+}
+
+function search_hit(array $row, string $needle): bool
+{
+    $media = empty($row['media']) ? [] : (json_decode((string) $row['media'], true) ?: []);
+    $file = is_array($media['file'] ?? null) ? $media['file'] : [];
+    $music = is_array($media['music'] ?? null) ? $media['music'] : [];
+    // O nome do áudio gravado ("Áudio 2026-10-19 14.03.12.m4a") não conta: só a transcrição.
+    $fields = [$row['text'], isset($file['voice']) ? '' : ($file['name'] ?? ''), $file['voice']['text'] ?? '', $music['title'] ?? '', $music['artist'] ?? ''];
+    foreach ($fields as $field) {
+        if (is_string($field) && $field !== '' && strpos(fold($field), $needle) !== false) return true;
+    }
+    return false;
 }
 
 function reads(): array
@@ -2485,6 +2604,20 @@ function history(string $me): array
 function set_read(string $name, string $id, string $at): void
 {
     query('INSERT INTO ' . t('status') . ' (name, read_id, read_at) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE read_id = VALUES(read_id), read_at = VALUES(read_at)', [$name, $id, $at]);
+}
+
+// name leu até a mensagem row (antes, até a de número from): as da outra pessoa nesse trecho ganham a hora da
+// leitura, que aparece nos dados da mensagem. Devolve quantas.
+function mark_read(string $name, array $row, string $at, int $from): int
+{
+    set_read($name, $row['id'], $at);
+    return query('UPDATE ' . t('messages') . ' SET read_at = ? WHERE n > ? AND n <= ? AND sender <> ? AND read_at IS NULL', [$at, $from, $row['n'], $name])->rowCount();
+}
+
+// Número da última mensagem que name leu (0 = nenhuma).
+function read_upto(string $name): int
+{
+    return (int) query('SELECT m.n FROM ' . t('status') . ' s JOIN ' . t('messages') . ' m ON m.id = s.read_id WHERE s.name = ?', [$name])->fetchColumn();
 }
 
 // ---------- conexões, presença e eventos ----------
@@ -2625,6 +2758,15 @@ function act(array $me, string $event, $data)
         case 'history:before':
             return page(str($body['before'] ?? ''));
 
+        case 'history:around':
+            return around(str($body['id'] ?? ''), str($body['from'] ?? ''));
+
+        case 'history:after':
+            return page_after(str($body['after'] ?? ''));
+
+        case 'search':
+            return search_messages(str($body['query'] ?? ''), str($body['before'] ?? ''));
+
         case 'avatar':
             return set_avatar($name, $body['image'] ?? null);
 
@@ -2683,10 +2825,10 @@ function act(array $me, string $event, $data)
 
         case 'seen':
             $row = find_message(str($body['id'] ?? ''));
-            $current = find_message((string) query('SELECT read_id FROM ' . t('status') . ' WHERE name = ?', [$name])->fetchColumn());
-            if (!$row || ($current && $row['n'] <= $current['n'])) return null;
+            $upto = read_upto($name);
+            if (!$row || $row['n'] <= $upto) return null;
             $at = iso();
-            set_read($name, $row['id'], $at);
+            mark_read($name, $row, $at, $upto);
             emit('seen', ['name' => $name, 'id' => $row['id'], 'at' => $at]);
             return null;
 
@@ -2823,9 +2965,12 @@ function send_message(array $me, array $body): array
         'INSERT INTO ' . t('messages') . ' (id, client_id, sender, text, created_at, reply_to, reactions, deleted, source, media) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         array_values($row)
     );
+    $n = (int) db()->lastInsertId();
     if ($file) query('UPDATE ' . t('files') . ' SET message_id = ? WHERE file_key = ?', [$row['id'], $file['key']]);
-    set_read($me['name'], $row['id'], $row['created_at']);
+    // Quem responde leu o que veio antes: as mensagens da outra pessoa ficam lidas (e ela vê na hora).
+    $read = mark_read($me['name'], ['n' => $n] + $row, $row['created_at'], read_upto($me['name']));
     $message = to_message($row);
     emit('message', $message);
+    if ($read) emit('seen', ['name' => $me['name'], 'id' => $row['id'], 'at' => $row['created_at']]);
     return ['ok' => true, 'message' => $message];
 }

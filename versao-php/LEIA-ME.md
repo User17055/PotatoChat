@@ -91,7 +91,7 @@ Com o campo de mensagem vazio, o botão de enviar vira um **microfone**:
 - **Qualidade:** o áudio vai como o microfone ouve, igual a um gravador de voz (64 kbps). Os filtros de chamada (cancelamento de eco e o filtro de ruído do navegador) ficam só para as chamadas: no celular, o cancelamento de eco grava no modo de telefonema, com a voz abafada.
 - No computador, `Enter` com o microfone em foco começa a gravar e `Esc` cancela.
 - Enquanto alguém grava, a outra pessoa vê **"gravando áudio…"** no lugar do "digitando".
-- No balão: play, a forma de onda (tocar ou arrastar nela pula para aquele ponto), a velocidade no canto direito (1×, 1,5× ou 2×, guardada no aparelho) e, embaixo, o tempo na mesma linha da hora. Áudios seguidos da mesma pessoa tocam em sequência, e a música do bot abaixa enquanto um áudio toca (só para quem está ouvindo).
+- No balão, como no Discord: play, a forma de onda (tocar ou arrastar nela pula para aquele ponto) e o tempo à direita dela, sem botão de velocidade. Embaixo, na linha da hora, fica o *Transcrever*. Áudios seguidos da mesma pessoa tocam em sequência, e a música do bot abaixa enquanto um áudio toca (só para quem está ouvindo).
 - **Transcrição:** com a chave configurada, cada áudio ganha o botão **Transcrever**. O texto aparece embaixo do player, para os dois, e fica guardado na mensagem (transcrever de novo não gasta nada). Para ativar:
   1. Crie uma chave grátis em [console.groq.com/keys](https://console.groq.com/keys) (o plano grátis dá para centenas de áudios por dia).
   2. Coloque a chave em `transcribe_key` no `config.php` e envie o `config.php` de novo.
@@ -101,6 +101,22 @@ Com o campo de mensagem vazio, o botão de enviar vira um **microfone**:
 - **Formato:** o navegador grava em MP4/AAC quando sabe (Chrome no computador, Safari), que toca em qualquer aparelho; senão, em WebM/Opus. Se um aparelho não conseguir tocar o formato (por exemplo, um iPhone antigo com um áudio WebM), o chat converte o áudio na hora e toca do mesmo jeito.
 - O áudio sobe como os outros arquivos (mesma tabela `potato_files` e o mesmo limite de tamanho); a duração e a forma de onda ficam na mensagem. A gravação para sozinha em 15 minutos, ou antes, se chegar ao tamanho máximo, e é enviada.
 - O microfone precisa de HTTPS e da permissão do navegador. No painel lateral da extensão o Chrome não libera o microfone: para gravar, abra o chat numa aba. Durante uma chamada a gravação fica desligada.
+
+## Pesquisar e reler a conversa
+
+A **lupa** no topo da conversa abre a pesquisa: no computador, numa coluna à direita (a conversa continua do lado); no celular, na tela toda.
+
+- **O que ela acha:** o texto das mensagens e das legendas, o nome dos arquivos, o que foi dito nos áudios já transcritos e as músicas pedidas no `/play`. Não faz diferença maiúscula, minúscula nem acento ("joao" acha "João"). Procura na conversa inteira, não só no que já está carregado na tela, das mais novas para as mais antigas (30 de cada vez; descendo a lista, vêm mais).
+- **Tocar num resultado** abre a conversa naquela mensagem, com o termo marcado em amarelo. Se ela for antiga, o chat abre só aquele trecho: dá para subir e descer à vontade (as mensagens vão chegando), e o **botão de descer** volta para o fim da conversa, contando as mensagens que chegaram enquanto você relia. Mandar uma mensagem também volta para o fim.
+- **Ir para um dia:** embaixo do campo, escolha uma data e a conversa abre na primeira mensagem daquele dia.
+- Tocar numa resposta antiga (o balãozinho citado) também abre o trecho dela, em vez de dizer que é antiga demais.
+
+## Dados da mensagem
+
+No menu de uma mensagem sua (botão direito, ou segurando no celular), o ícone **(i)** abre os *Dados da mensagem*: quando ela foi enviada e quando a outra pessoa leu ("hoje às 14:03"), ou se ainda não leu. Com a janela aberta, a leitura aparece na hora.
+
+- A hora da leitura fica guardada em cada mensagem (coluna `read_at` em `potato_messages`). Responder também conta como ler o que veio antes.
+- As mensagens lidas antes desta versão continuam lidas (os ✓✓ azuis), mas sem a hora: os dados mostram "Antes de o chat guardar a hora da leitura".
 
 ## Bot de música (/play)
 
@@ -191,7 +207,12 @@ Os sonhos dos dois, cada um com ícone, nome, anotação e, se quiser, **quanto 
 
 ### Cartinhas
 
-O blog de cartinhas: escreva quando quiser, num papel de cor (creme, rosa, azul, lilás ou verde). Para a outra pessoa, a cartinha nova aparece com o selo **Nova!** (e o número no menu) até ser aberta; ao abrir, um envelope chega e abre, e a carta sobe. Quem escreveu vê quando foi lida e pode editar ou apagar. O rascunho fica guardado no aparelho até ser enviado.
+O blog de cartinhas: escreva quando quiser, num papel de cor (creme, rosa, azul, lilás ou verde). Para a outra pessoa, a cartinha nova aparece com o selo **Nova!** (e o número no menu) até ser aberta; ao abrir, um envelope chega e abre, e a carta sobe. Quem escreveu vê quando foi lida e pode editar ou apagar. O rascunho (o título, o papel, a letra e o texto) fica guardado no aparelho até ser enviado.
+
+- **Letra:** *Clássica*, *À mão*, *Cursiva*, *Bilhetinho*, *Máquina* (de escrever) ou *Moderna*. O campo do texto já mostra a letra e o papel escolhidos, e a cartinha chega igual para a outra pessoa. As letras vêm do Google Fonts (Caveat, Dancing Script, Patrick Hand e Special Elite), junto com a do site.
+- **Fotos:** até 6 por cartinha. Elas sobem reduzidas, como as da conversa, e aparecem no fim da carta como polaroides; tocar abre grande.
+- **Áudios:** até 3, logo embaixo do título (dá para ouvir enquanto lê), com o mesmo player das mensagens de voz. *Gravar* grava ali mesmo (com a redução de ruído, se estiver ligada no Perfil); *Escolher áudio* pega um arquivo do aparelho (MP3, M4A, OGG ou WAV, como uma música de vocês), e a forma de onda é medida no próprio aparelho. Dá para ouvir antes de enviar.
+- Pode ir só com fotos ou só com áudio, sem texto. As fotos e os áudios ficam em `potato_files`, presos à cartinha: tirar um deles (ou apagar a cartinha) apaga o arquivo.
 
 ## Joguinhos
 
@@ -258,7 +279,7 @@ php -S localhost:8000 -t site
 
 Depois abra `http://localhost:8000`. O servidor embutido do PHP atende uma requisição por vez, então nele o chat usa consultas curtas automaticamente. Na hospedagem, ele usa *long polling*.
 
-Teste automático (Node 20+ e PHP no PATH): `npm test`. Ele também cobre o Nosso cantinho (o dia, os hábitos, as respostas aos lembretes, a agenda com repetições, os sonhos e as cartinhas) e as regras dos joguinhos. Por padrão ele usa o MySQL em `127.0.0.1:3399`, banco `potato_teste`, usuário `potato`, senha `senha-teste`. Para usar outro, defina `POTATO_TEST_DB_HOST`, `_PORT`, `_NAME`, `_USER` e `_PASS`. Ele cria tabelas com um prefixo próprio e as apaga no fim.
+Teste automático (Node 20+ e PHP no PATH): `npm test`. Ele também cobre a pesquisa, os trechos antigos, a hora da leitura, o Nosso cantinho (o dia, os hábitos, as respostas aos lembretes, a agenda com repetições, os sonhos e as cartinhas com fotos, áudios e letra) e as regras dos joguinhos. Por padrão ele usa o MySQL em `127.0.0.1:3399`, banco `potato_teste`, usuário `potato`, senha `senha-teste`. Para usar outro, defina `POTATO_TEST_DB_HOST`, `_PORT`, `_NAME`, `_USER` e `_PASS`. Ele cria tabelas com um prefixo próprio e as apaga no fim.
 
 ## Limites
 

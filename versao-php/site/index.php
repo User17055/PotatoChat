@@ -24,7 +24,7 @@ function asset(string $file): string
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 142 100'%3E%3Cdefs%3E%3CradialGradient id='g' cx='40%25' cy='30%25' r='78%25'%3E%3Cstop offset='0' stop-color='%23f4d496'/%3E%3Cstop offset='.4' stop-color='%23dcaa62'/%3E%3Cstop offset='.75' stop-color='%23b47c38'/%3E%3Cstop offset='1' stop-color='%236f4419'/%3E%3C/radialGradient%3E%3C/defs%3E%3Cpath fill='url%28%23g%29' d='M11 57C5 40 19 24 41 19c14-3 24 1 38-2 25-5 50 6 54 26 3 18-9 31-27 37-18 6-38 7-58 5-24-2-31-11-37-28Z'/%3E%3Cg fill='%235a3410'%3E%3Cellipse cx='46' cy='38' rx='4' ry='2.6'/%3E%3Cellipse cx='92' cy='27' rx='3.4' ry='2.2'/%3E%3Cellipse cx='106' cy='60' rx='3.8' ry='2.4'/%3E%3Cellipse cx='65' cy='72' rx='4.2' ry='2.7'/%3E%3C/g%3E%3C/svg%3E" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&family=Caveat:wght@400;700&family=Dancing+Script:wght@400;700&family=Patrick+Hand&family=Special+Elite&display=swap" />
     <link rel="stylesheet" href="<?= asset('styles.css') ?>" />
     <script>
       // Já logado: vai direto para o chat, sem piscar a tela de login.
@@ -303,6 +303,9 @@ function asset(string $file): string
             </div>
           </div>
           <div class="actions">
+            <button id="search-button" class="icon-button" type="button" title="Pesquisar na conversa" aria-label="Pesquisar na conversa" aria-expanded="false" aria-controls="search-panel">
+              <svg class="icon"><use href="#i-search" /></svg>
+            </button>
             <button id="audio-call" class="icon-button" type="button" title="Chamada de voz" data-title="Chamada de voz" aria-label="Iniciar chamada de voz">
               <svg class="icon"><use href="#i-phone" /></svg>
             </button>
@@ -496,6 +499,8 @@ function asset(string $file): string
         <div class="messages-wrap">
           <div id="messages" class="messages" aria-live="polite">
             <button id="load-more" class="load-more hidden" type="button">Carregar mensagens anteriores</button>
+            <!-- Lendo um trecho antigo (pesquisa ou "ir para um dia"): as mensagens seguintes chegam ao descer. -->
+            <button id="load-newer" class="load-more load-newer hidden" type="button">Carregar mensagens seguintes</button>
           </div>
           <div id="day-float" class="day day-float hidden" aria-hidden="true"></div>
           <!-- Arrastar arquivos para cima da conversa envia. -->
@@ -577,6 +582,24 @@ function asset(string $file): string
             <svg class="icon when-send"><use href="#i-send" /></svg>
           </button>
         </form>
+
+        <!-- Pesquisa na conversa: no computador, uma coluna à direita (a conversa encolhe); no celular, a tela toda.
+             Tocar num resultado abre a conversa naquela mensagem. -->
+        <aside id="search-panel" class="search-panel hidden" aria-label="Pesquisar na conversa">
+          <header class="search-head">
+            <button id="search-close" class="icon-button" type="button" title="Fechar a pesquisa" aria-label="Fechar a pesquisa"><svg class="icon"><use href="#i-arrow-left" /></svg></button>
+            <form id="search-form" class="search-field" role="search">
+              <svg class="icon"><use href="#i-search" /></svg>
+              <input id="search-input" type="search" maxlength="100" autocomplete="off" enterkeyhint="search" placeholder="Pesquisar na conversa" aria-label="Pesquisar na conversa" />
+            </form>
+          </header>
+          <label class="search-day">
+            <svg class="icon"><use href="#i-calendar" /></svg>
+            <span>Ir para um dia</span>
+            <input id="search-day" type="date" aria-label="Ir para um dia" />
+          </label>
+          <div id="search-results" class="search-results" aria-live="polite"></div>
+        </aside>
       </section>
 
       <!-- ===================== MÚSICA (bot do /play) ===================== -->
@@ -1016,7 +1039,7 @@ function asset(string $file): string
         <div id="sheet-body" class="sheet-body"></div>
         <div class="sheet-actions">
           <button id="sheet-delete" class="text-button hidden" type="button">Apagar</button>
-          <button class="pill ghost" type="button" data-sheet-close>Cancelar</button>
+          <button id="sheet-cancel" class="pill ghost" type="button" data-sheet-close>Cancelar</button>
           <button id="sheet-submit" class="pill gold" type="submit">Salvar</button>
         </div>
       </form>
@@ -1036,7 +1059,8 @@ function asset(string $file): string
       <ul id="pop-details" class="pop-details"></ul>
     </div>
 
-    <!-- Cartinha aberta, no papel que quem escreveu escolheu. Antes, o envelope chega e abre (fx.letter). -->
+    <!-- Cartinha aberta, no papel e na letra que quem escreveu escolheu, com os áudios e as fotos. Antes, o envelope chega
+         e abre (fx.letter). -->
     <div id="letter-view" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="letter-title">
       <div id="envelope" class="envelope hidden" aria-hidden="true">
         <span class="env-back"></span>
@@ -1049,7 +1073,9 @@ function asset(string $file): string
         <button id="letter-close" class="peer-close" type="button" title="Fechar" aria-label="Fechar"><svg class="icon"><use href="#i-x" /></svg></button>
         <p id="letter-to" class="letter-to"></p>
         <h3 id="letter-title"></h3>
+        <div id="letter-audios" class="letter-audios"></div>
         <div id="letter-body" class="letter-body"></div>
+        <div id="letter-photos" class="letter-photos"></div>
         <p id="letter-sign" class="letter-sign"></p>
         <p id="letter-state" class="letter-state"></p>
         <div id="letter-tools" class="letter-tools hidden">

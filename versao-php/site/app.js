@@ -19,6 +19,7 @@ const peopleEl = $("#people");
 const typingEl = $("#typing");
 const typingText = $("#typing-text");
 const loadMore = $("#load-more");
+const loadNewer = $("#load-newer");
 const jump = $("#jump");
 const jumpCount = $("#jump-count");
 const replyBar = $("#reply-bar");
@@ -57,6 +58,10 @@ let peerTyping = "";
 let replyTo = null;
 let hasMore = false;
 let loadingOlder = false;
+// Lendo um trecho antigo (pesquisa, "ir para um dia" ou resposta antiga): list tem só esse trecho, e a conversa de agora
+// fica guardada aqui ({ list, hasMore }), recebendo as mensagens novas. Descer até o fim (ou o botão de descer) volta.
+let latest = null;
+let loadingNewer = false;
 let unseenBelow = 0;
 let unreadTitle = 0;
 let typingActive = false;
@@ -429,12 +434,15 @@ function connect(token, animate) {
   });
 
   socket.on("history", (payload) => {
-    list = payload.items;
-    byId.clear();
-    list.forEach((message) => byId.set(message.id, message));
-    for (const clientId of pending.keys()) if (list.some((message) => message.clientId === clientId)) pending.delete(clientId);
+    // Reconectou lendo um trecho antigo: ele continua na tela, e a conversa de agora é trocada pela que chegou.
+    if (latest) latest = { list: payload.items, hasMore: payload.hasMore };
+    else {
+      list = payload.items;
+      hasMore = payload.hasMore;
+    }
+    indexMessages();
+    for (const clientId of pending.keys()) if (payload.items.some((message) => message.clientId === clientId)) pending.delete(clientId);
     reads = payload.reads || {};
-    hasMore = payload.hasMore;
     gifKey = payload.gifKey || "";
     fileMax = payload.fileMax || 0;
     transcribeOn = Boolean(payload.transcribe);
@@ -443,7 +451,8 @@ function connect(token, animate) {
     applyMusic(payload.music, true);
     applyWatch(payload.watch, true, false);
     renderAll();
-    scrollToLatest();
+    if (latest) fx.show(jump, { scale: 0.6 });
+    else scrollToLatest();
     markSeen();
     loadUs();
     if (table.id) paintTable();
@@ -451,7 +460,11 @@ function connect(token, animate) {
 
   socket.on("message", (message) => receive(message, true));
   socket.on("message:update", updateMessage);
-  socket.on("seen", ({ name, id, at }) => { reads[name] = { id, at }; refreshStatuses(); });
+  socket.on("seen", ({ name, id, at }) => {
+    reads[name] = { id, at };
+    if (name !== me) markRead(id, at);
+    refreshStatuses();
+  });
   socket.on("presence", updatePresence);
   socket.on("typing", ({ active, audio }) => setPeerTyping(active, audio));
   // Tema trocado em outra aba ou aparelho da mesma pessoa.
@@ -508,13 +521,16 @@ function connect(token, animate) {
 
 function receive(message, live) {
   if (byId.has(message.id)) return;
-  list.push(message);
   byId.set(message.id, message);
   const local = message.clientId && pending.get(message.clientId);
   const mine = message.sender === me;
-  messagesEl.querySelector(".empty")?.remove();
 
-  if (local) {
+  if (latest) {
+    // Lendo um trecho antigo: a mensagem fica na conversa de agora (o botão de descer conta quantas chegaram).
+    latest.list.push(message);
+    if (local) pending.delete(message.clientId);
+  } else if (local) {
+    list.push(message);
     pending.delete(message.clientId);
     // A foto continua vindo da cópia local: trocar pelo endereço do servidor faria a imagem piscar.
     if (local.file?.preview && message.file) message.file.preview = local.file.preview;
@@ -524,9 +540,11 @@ function receive(message, live) {
       fx.sent(node);
     } else appendNode(message, true);
   } else {
+    list.push(message);
+    messagesEl.querySelector(".empty")?.remove();
     appendNode(message, live);
   }
-  refreshStatuses();
+  if (!latest) refreshStatuses();
   if (message.game) paintUsBadge();
   if (message.game && tab === "us" && us.section === "jogos") paintGames();
   if (!live) return;
@@ -541,8 +559,8 @@ function receive(message, live) {
     sound.play("tap");
   }
 
-  if (mine || nearBottom()) scrollToLatest(true);
-  else {
+  if (!latest && (mine || nearBottom())) scrollToLatest(true);
+  else if (!mine) {
     unseenBelow += 1;
     jumpCount.textContent = unseenBelow;
     jumpCount.classList.remove("hidden");
@@ -559,9 +577,12 @@ function updateMessage(message) {
   const previous = byId.get(message.id);
   if (!previous) return;
   if (message.deleted && playback.key === voiceKey(previous)) stopVoice();
-  const index = list.indexOf(previous);
-  list[index] = message;
+  for (const items of [list, latest?.list]) {
+    const index = items ? items.findIndex((item) => item.id === message.id) : -1;
+    if (index >= 0) items[index] = message;
+  }
   byId.set(message.id, message);
+  paintInfo();
   // Jogos: avisos (sua vez, quem ganhou) e a mesinha aberta acompanha a jogada (e fecha se a partida for apagada).
   if (message.game) gameNotice(previous.game, message.game, message);
   // Uma partida acabou (ou uma que já tinha acabado foi apagada): o placar muda.
@@ -623,7 +644,8 @@ function renderAll() {
   messagesEl.querySelectorAll(".message, .day, .empty").forEach((node) => node.remove());
   const fragment = document.createDocumentFragment();
   let previous = null;
-  for (const message of [...list, ...pending.values()]) {
+  // As que estão saindo agora só aparecem na conversa de agora.
+  for (const message of [...list, ...(latest ? [] : pending.values())]) {
     if (needsDay(previous, message)) fragment.append(dayNode(message.createdAt));
     fragment.append(buildNode(message, previous));
     previous = message;
@@ -635,6 +657,8 @@ function renderAll() {
     messagesEl.append(empty);
   }
   loadMore.classList.toggle("hidden", !hasMore);
+  messagesEl.append(loadNewer);
+  loadNewer.classList.toggle("hidden", !latest);
   refreshStatuses();
 }
 
@@ -739,12 +763,17 @@ function fill(article, message) {
       tools.append(save);
     }
     if (mine) {
+      const info = el("button", "tool");
+      info.type = "button";
+      info.dataset.action = "info";
+      info.title = "Dados da mensagem";
+      info.append(icon("info"));
       const remove = el("button", "tool danger-tool");
       remove.type = "button";
       remove.dataset.action = "delete";
       remove.title = "Apagar para todos";
       remove.append(icon("trash"));
-      tools.append(remove);
+      tools.append(info, remove);
     }
     // Ordem de entrada da animação dos botões (styles.css).
     [...tools.children].forEach((button, index) => button.style.setProperty("--i", index));
@@ -777,13 +806,16 @@ function peerReadIndex() {
   return best;
 }
 
+// Lida: a mensagem diz (vem do servidor e muda com o "seen") ou, por garantia, está antes da última que a outra pessoa leu.
+const isRead = (message, readIndex = peerReadIndex()) => Boolean(message.read) || list.indexOf(message) <= readIndex;
+
 function paintStatus(article, readIndex = peerReadIndex()) {
   const holder = article.querySelector(".status");
   const message = article.msg;
   if (!holder || !message) return;
   let state = "sent";
   if (!message.id) state = message.status === "failed" ? "failed" : "pending";
-  else if (list.indexOf(message) <= readIndex) state = "read";
+  else if (isRead(message, readIndex)) state = "read";
   if (holder.dataset.state === state) return;
   const wasSent = holder.dataset.state === "sent";
   holder.dataset.state = state;
@@ -797,12 +829,64 @@ function refreshStatuses() {
   messagesEl.querySelectorAll(".message.mine").forEach((article) => paintStatus(article, readIndex));
 }
 
+// A outra pessoa leu até a mensagem id: as minhas até ali ficam lidas, com a hora (para os dados da mensagem).
+function markRead(id, at) {
+  const upTo = (items) => items.findIndex((message) => message.id === id);
+  for (const items of [list, latest?.list]) {
+    if (!items) continue;
+    let last = upTo(items);
+    // O trecho antigo aberto vem antes da conversa de agora: se ela leu algo de agora, leu o trecho inteiro.
+    if (last < 0 && items === list && latest && upTo(latest.list) >= 0) last = items.length - 1;
+    for (const message of items.slice(0, last + 1)) {
+      if (message.sender === me && !message.read) Object.assign(message, { read: true, readAt: at });
+    }
+  }
+  paintInfo();
+}
+
+// ---- dados da mensagem: quando foi enviada e quando a outra pessoa leu ----
+
+// "hoje às 14:03", "ontem às 9:10", "3 de outubro às 22:40".
+function whenLabel(iso) {
+  const day = dayLabel(iso);
+  return `${day === "Hoje" || day === "Ontem" ? day.toLowerCase() : day} às ${time(iso)}`;
+}
+
+function infoField(message) {
+  const read = isRead(message);
+  const reader = peerName || "a outra pessoa";
+  const readValue = !read ? "Ainda não leu" : message.readAt ? whenLabel(message.readAt) : "Antes de o chat guardar a hora da leitura";
+  return {
+    name: "info",
+    type: "facts",
+    info: message.id,
+    quote: message.deleted ? "Mensagem apagada" : previewText(message),
+    rows: [
+      ["check-check", `Lida por ${reader}`, readValue, read ? "is-read" : "is-waiting"],
+      ["check", "Enviada", whenLabel(message.createdAt), ""]
+    ]
+  };
+}
+
+function openInfo(message) {
+  openSheet({ title: "Dados da mensagem", icon: "info", submit: null, cancel: "Fechar", fields: [infoField(message)] });
+}
+
+// Com os dados abertos, a leitura (ou a mensagem apagada) aparece na hora.
+function paintInfo() {
+  const message = byId.get(sheetState?.fields[0]?.info);
+  if (!message) return;
+  sheetState.fields = [infoField(message)];
+  $("#sheet-body").replaceChildren(fieldNode(sheetState.fields[0]));
+}
+
 // Mensagem de texto, de GIF (gif = { url, width, height, title }, sem texto) ou com foto/arquivo
 // (upload = o arquivo escolhido, que sobe antes da mensagem; ver uploadFile). Áudio gravado no chat
 // leva upload.voice = { duration, peaks } (ver stopRecording).
 function send(text, gif = null, upload = null) {
   const clean = gif || upload ? "" : text.trim();
   if ((!clean && !gif && !upload) || !me) return;
+  backToLatest();
   const message = {
     id: null,
     clientId: uid(),
@@ -1352,6 +1436,7 @@ messagesEl.addEventListener("click", (event) => {
   const message = article?.msg;
 
   if (event.target.closest("#load-more")) return loadOlder();
+  if (event.target.closest("#load-newer")) return loadNewerPage();
   if (!message) return;
 
   const status = event.target.closest(".status");
@@ -1361,7 +1446,6 @@ messagesEl.addEventListener("click", (event) => {
   if (quote) return focusMessage(quote.dataset.target);
   const voiceAction = event.target.closest("[data-voice]")?.dataset.voice;
   if (voiceAction && message.file?.voice) {
-    if (voiceAction === "speed") return cycleSpeed();
     if (voiceAction === "text") return toggleTranscript(message);
     return voiceAction === "transcribe" ? transcribeVoice(message) : toggleVoice(message);
   }
@@ -1391,6 +1475,10 @@ messagesEl.addEventListener("click", (event) => {
   if (action === "download") {
     closeTools();
     return downloadFile(message.file);
+  }
+  if (action === "info") {
+    closeTools();
+    return openInfo(message);
   }
   if (action === "copy") {
     closeTools();
@@ -1548,13 +1636,95 @@ function clearReply() {
 
 $("#reply-cancel").addEventListener("click", clearReply);
 
-function focusMessage(id) {
+// Vai até a mensagem (e marca o termo pesquisado nela). Se ela não está carregada, abre o trecho em volta dela.
+function focusMessage(id, query = "", smooth = true) {
   const node = messagesEl.querySelector(`[data-id="${CSS.escape(id)}"]`);
-  if (!node) return toast("Essa mensagem é antiga demais para mostrar aqui.");
-  node.scrollIntoView({ behavior: "smooth", block: "center" });
+  if (!node) return openAt({ id, query });
+  showMessage(node, query, smooth);
+}
+
+function showMessage(node, query, smooth) {
+  messagesEl.querySelectorAll("mark.hit").forEach((mark) => mark.replaceWith(...mark.childNodes));
+  if (query) markHits(node, query);
+  node.scrollIntoView({ behavior: smooth && motion() ? "smooth" : "auto", block: "center" });
   node.classList.remove("flash");
   void node.offsetWidth;
   node.classList.add("flash");
+}
+
+function indexMessages() {
+  byId.clear();
+  for (const message of [...list, ...(latest?.list || [])]) byId.set(message.id, message);
+}
+
+// Tudo o que está carregado (o trecho antigo aberto e a conversa de agora).
+const loaded = () => (latest ? [...list, ...latest.list] : list);
+
+// Junta trechos da conversa sem repetir, na ordem em que as mensagens foram enviadas.
+function joinMessages(...parts) {
+  const seen = new Set();
+  return parts.flat().filter((message) => !seen.has(message.id) && seen.add(message.id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+// Abre a conversa na mensagem id ou na primeira desde from (começo de um dia, em ISO). Se o trecho encosta na conversa
+// de agora, vira uma conversa só; senão, ela espera no botão de descer.
+async function openAt({ id = "", from = "", query = "" }) {
+  if (id && latest?.list.some((message) => message.id === id)) {
+    backToLatest();
+    return focusMessage(id, query, false);
+  }
+  if (!socket?.connected) return toast("Sem conexão agora.");
+  const result = await new Promise((resolve) => socket.timeout(8000).emit("history:around", { id, from }, (error, value) => resolve(error ? null : value)));
+  if (!result?.ok) return toast(result?.error || "Não deu para abrir esse trecho agora.", "error");
+  const now = latest || { list, hasMore };
+  const known = new Set(now.list.map((message) => message.id));
+  const older = result.items.filter((message) => !known.has(message.id));
+  if (!result.hasNewer || older.length < result.items.length) {
+    list = joinMessages(result.items, now.list);
+    hasMore = older.length ? result.hasMore : now.hasMore;
+    latest = null;
+  } else {
+    latest = now;
+    list = result.items;
+    hasMore = result.hasMore;
+  }
+  indexMessages();
+  renderAll();
+  if (latest) fx.show(jump, { scale: 0.6 });
+  const node = messagesEl.querySelector(`[data-id="${CSS.escape(result.target)}"]`);
+  if (node) showMessage(node, query, false);
+}
+
+// Descendo num trecho antigo: a próxima página; quando ela chega na conversa de agora, as duas viram uma só.
+function loadNewerPage() {
+  if (!latest || loadingNewer || !socket?.connected || !list.length) return;
+  loadingNewer = true;
+  loadNewer.textContent = "Carregando…";
+  socket.timeout(8000).emit("history:after", { after: list[list.length - 1].id }, (error, result) => {
+    loadingNewer = false;
+    loadNewer.textContent = "Carregar mensagens seguintes";
+    if (error || !result || !latest) return;
+    const top = messagesEl.scrollTop;
+    const meets = !result.hasNewer || result.items.some((message) => latest.list.some((item) => item.id === message.id));
+    list = joinMessages(list, result.items, meets ? latest.list : []);
+    if (meets) latest = null;
+    indexMessages();
+    renderAll();
+    messagesEl.scrollTop = top;
+  });
+}
+
+// Volta do trecho antigo para a conversa de agora, já no fim.
+function backToLatest() {
+  if (!latest) return;
+  ({ list, hasMore } = latest);
+  latest = null;
+  indexMessages();
+  renderAll();
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  unseenBelow = 0;
+  jumpCount.classList.add("hidden");
+  markSeen();
 }
 
 function loadOlder() {
@@ -1580,8 +1750,8 @@ function loadOlder() {
 // Gravar: com o campo vazio, o microfone fica no lugar do enviar. Um toque grava sem segurar (depois é só enviar
 // ou apagar, ou parar para ouvir antes); segurando, a pessoa fala e solta para enviar, e deslizar para a esquerda
 // cancela.
-// Ouvir: um áudio por vez, com forma de onda (tocar ou arrastar nela pula), velocidade e, no fim, o próximo
-// áudio seguido da mesma pessoa.
+// Ouvir: um áudio por vez, com forma de onda (tocar ou arrastar nela pula) e, no fim, o próximo áudio seguido da
+// mesma pessoa. Sem escolha de velocidade, como no Discord.
 const micButton = $("#mic-button");
 const recorderEl = $("#recorder");
 const recTime = $("#rec-time");
@@ -1597,8 +1767,6 @@ const VOICE_MAX = 15 * 60;
 const VOICE_PEAKS = 40;
 // 64 kbps: voz limpa no AAC e no Opus (15 minutos dão uns 7 MB).
 const VOICE_BITRATE = 64000;
-const VOICE_SPEEDS = [1, 1.5, 2];
-const VOICE_SPEED_KEY = "potato.voiceSpeed";
 // Segurar o microfone menos que isso é um toque (grava sem segurar). Segurando, deslizar CANCEL_SLIDE px para a
 // esquerda cancela e LOCK_SLIDE px para cima trava (continua gravando sem o dedo).
 const HOLD_MS = 350;
@@ -2044,14 +2212,13 @@ window.addEventListener("keydown", (event) => {
 
 addEventListener("pagehide", () => stopRecording(false));
 
-// Áudio tocando agora (um por vez, num só <audio>). key = clientId ou id da mensagem, que não muda depois de enviada.
-const savedSpeed = store.get("localStorage", VOICE_SPEED_KEY);
-const playback = { key: "", message: null, audio: null, frame: 0, loading: false, drag: null, speed: VOICE_SPEEDS.includes(savedSpeed) ? savedSpeed : 1, converted: new Map() };
+// Áudio tocando agora (um por vez, num só <audio>). key = clientId ou id da mensagem, que não muda depois de enviada
+// (nos áudios das cartinhas, "letter:" ou "draft:" e a chave do arquivo).
+const playback = { key: "", message: null, audio: null, frame: 0, loading: false, drag: null, converted: new Map() };
 const voiceKey = (message) => message.clientId || message.id;
-const voiceNode = (key) => (key ? messagesEl.querySelector(`.voice[data-voice-key="${CSS.escape(key)}"]`) : null);
+const voiceNode = (key) => (key ? document.querySelector(`.voice[data-voice-key="${CSS.escape(key)}"]`) : null);
 const voiceSource = (message) => message.file.preview || new URL(message.file.url, document.baseURI).href;
 const voicePlaying = () => Boolean(playback.key && !playback.audio.paused);
-const speedLabel = (speed) => `${String(speed).replace(".", ",")}×`;
 
 // Duração: a do arquivo, quando o navegador sabe (o WebM gravado no Chrome não diz); senão, a medida ao gravar.
 function voiceTotal(message) {
@@ -2064,12 +2231,13 @@ function voiceState(message) {
   return { playing: current && voicePlaying(), loading: current && playback.loading, position: current ? playback.audio.currentTime : 0, total: voiceTotal(message) };
 }
 
-// Player dentro do balão. As peças vão direto para a grade do balão (styles.css): play à esquerda, a onda com a
-// velocidade no canto direito e, embaixo, o tempo (com o "Transcrever") alinhado com a hora; a transcrição por último.
+// Player dentro do balão, como no Discord. As peças vão direto para a grade do balão (styles.css): play à esquerda, a
+// onda e o tempo à direita dela e, embaixo, o "Transcrever" alinhado com a hora; a transcrição por último.
 function voiceView(message) {
   const { voice } = message.file;
   const node = el("div", "voice");
   node.dataset.voiceKey = voiceKey(message);
+  node.msg = message;
   const play = el("button", "voice-play voice-ctl swap");
   play.type = "button";
   play.dataset.voice = "play";
@@ -2090,12 +2258,7 @@ function voiceView(message) {
   const played = bars.cloneNode(true);
   played.classList.add("played");
   wave.append(bars, played, el("span", "voice-thumb"));
-  const speed = el("button", "voice-speed voice-ctl", speedLabel(playback.speed));
-  speed.type = "button";
-  speed.dataset.voice = "speed";
-  speed.title = "Mudar a velocidade";
   const meta = el("div", "voice-meta");
-  meta.append(el("span", "voice-time"));
   if (message.upload && !message.id) {
     const bar = el("span", "upload-bar");
     bar.style.setProperty("--p", message.upload.progress);
@@ -2120,7 +2283,7 @@ function voiceView(message) {
     toggle.append(icon("captions"), hidden ? "Ver texto" : "Ocultar texto");
     meta.append(toggle);
   }
-  node.append(play, wave, speed, meta);
+  node.append(play, wave, el("span", "voice-time"), meta);
   if (voice.text !== undefined && !hidden) node.append(el("p", `voice-text${voice.text ? "" : " empty"}`, voice.text || "Não deu para entender a fala desse áudio."));
   paintVoiceNode(node, voiceState(message));
   return node;
@@ -2183,13 +2346,14 @@ function paintVoiceNode(node, { playing, loading, position, total }) {
   button.classList.toggle("loading", loading);
   button.setAttribute("aria-label", playing ? "Pausar o áudio" : "Ouvir o áudio");
   node.classList.toggle("is-playing", playing);
+  node.classList.toggle("at-start", !playing && position <= 0);
 }
 
 // Repinta o player de uma mensagem (o que está sendo arrastado fica como o dedo deixou).
 function paintVoice(key = playback.key) {
   const node = voiceNode(key);
   if (!node || (playback.drag?.moved && playback.drag.wave.closest(".voice") === node)) return;
-  paintVoiceNode(node, voiceState(node.closest(".message").msg));
+  paintVoiceNode(node, voiceState(node.msg));
 }
 
 function voiceAudio() {
@@ -2236,7 +2400,6 @@ function openVoice(message, at = 0) {
   const key = playback.key = voiceKey(message);
   playback.message = message;
   audio.src = playback.converted.get(key) || voiceSource(message);
-  audio.defaultPlaybackRate = audio.playbackRate = playback.speed;
   if (at > 0) audio.addEventListener("loadedmetadata", () => { if (playback.key === key) audio.currentTime = at; }, { once: true });
   playVoice();
 }
@@ -2308,7 +2471,6 @@ async function voiceFailed() {
     playback.converted.set(key, url);
     if (playback.key !== key) return;
     audio.src = url;
-    audio.defaultPlaybackRate = audio.playbackRate = playback.speed;
     playVoice();
   } catch {
     if (playback.key !== key) return;
@@ -2352,31 +2514,23 @@ function wavBlob(samples, rate) {
   return new Blob([view.buffer], { type: "audio/wav" });
 }
 
-function cycleSpeed() {
-  playback.speed = VOICE_SPEEDS[(VOICE_SPEEDS.indexOf(playback.speed) + 1) % VOICE_SPEEDS.length];
-  store.set("localStorage", VOICE_SPEED_KEY, playback.speed);
-  if (playback.audio) playback.audio.defaultPlaybackRate = playback.audio.playbackRate = playback.speed;
-  messagesEl.querySelectorAll(".voice-speed").forEach((button) => { button.textContent = speedLabel(playback.speed); });
-  sound.play("tap");
-}
-
 // Tocar na forma de onda pula para aquele ponto; arrastar na horizontal mostra onde vai parar e pula ao soltar.
-// Arrastar na vertical continua rolando a conversa (touch-action: pan-y no styles.css).
+// Arrastar na vertical continua rolando a conversa (touch-action: pan-y no styles.css). Vale na conversa e nas cartinhas.
 // A onda fica 6 px para dentro dos lados da área (styles.css).
 const waveFraction = (wave, x) => {
   const box = wave.getBoundingClientRect();
   return Math.min(1, Math.max(0, (x - box.left - 6) / (box.width - 12)));
 };
 
-messagesEl.addEventListener("pointerdown", (event) => {
-  const wave = event.target.closest(".voice-wave");
-  const message = wave?.closest(".message")?.msg;
+document.addEventListener("pointerdown", (event) => {
+  const wave = event.target.closest?.(".voice-wave");
+  const message = wave?.closest(".voice")?.msg;
   if (!message?.file?.voice || event.button !== 0) return;
   wave.setPointerCapture?.(event.pointerId);
   playback.drag = { wave, message, id: event.pointerId, x: event.clientX, moved: false };
 });
 
-messagesEl.addEventListener("pointermove", (event) => {
+document.addEventListener("pointermove", (event) => {
   const { drag } = playback;
   if (drag?.id !== event.pointerId || (!drag.moved && Math.abs(event.clientX - drag.x) < 6)) return;
   drag.moved = true;
@@ -2392,12 +2546,12 @@ function endWaveDrag(event) {
   else paintVoice(voiceKey(drag.message));
 }
 
-messagesEl.addEventListener("pointerup", endWaveDrag);
-messagesEl.addEventListener("pointercancel", endWaveDrag);
+document.addEventListener("pointerup", endWaveDrag);
+document.addEventListener("pointercancel", endWaveDrag);
 
 // Teclado: setas voltam e avançam 5 s.
-messagesEl.addEventListener("keydown", (event) => {
-  const message = event.target.closest?.(".voice-wave")?.closest(".message")?.msg;
+document.addEventListener("keydown", (event) => {
+  const message = event.target.closest?.(".voice-wave")?.closest(".voice")?.msg;
   if (!message?.file?.voice || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
   event.preventDefault();
   const { position, total } = voiceState(message);
@@ -2431,7 +2585,9 @@ function paintDayFloat() {
 messagesEl.addEventListener("scroll", () => { if (!dayFrame) dayFrame = requestAnimationFrame(paintDayFloat); }, { passive: true });
 
 messagesEl.addEventListener("scroll", () => {
-  if (nearBottom()) {
+  if (nearBottom() && latest) {
+    loadNewerPage();
+  } else if (nearBottom()) {
     unseenBelow = 0;
     jumpCount.classList.add("hidden");
     fx.hide(jump, { scale: 0.6 });
@@ -2442,11 +2598,15 @@ messagesEl.addEventListener("scroll", () => {
   if (messagesEl.scrollTop < 60) loadOlder();
 }, { passive: true });
 
-jump.addEventListener("click", () => scrollToLatest(true));
+jump.addEventListener("click", () => {
+  if (!latest) return scrollToLatest(true);
+  backToLatest();
+  fx.hide(jump, { scale: 0.6 });
+});
 
 function markSeen() {
-  // No perfil a conversa está escondida: nada foi lido ainda.
-  if (!socket?.connected || document.hidden || tab !== "chat" || !nearBottom()) return;
+  // No perfil a conversa está escondida, e num trecho antigo as novas ainda não apareceram: nada foi lido ainda.
+  if (!socket?.connected || document.hidden || tab !== "chat" || latest || !nearBottom()) return;
   const last = list[list.length - 1];
   if (last && reads[me]?.id !== last.id) {
     reads[me] = { id: last.id, at: new Date().toISOString() };
@@ -2534,6 +2694,236 @@ $("#toggle-noise").addEventListener("click", (event) => {
   sound.play("tap");
 });
 paintNoise();
+
+// ---------- pesquisa na conversa ----------
+
+// A lupa do topo abre a pesquisa: no computador, uma coluna à direita da conversa; no celular, a tela toda. O servidor
+// procura na conversa inteira (não só no que está carregado): no texto, nas legendas, nos nomes dos arquivos, nas
+// transcrições dos áudios e nas músicas pedidas, sem diferença de acentos. Tocar num resultado abre a conversa naquela
+// mensagem, com o termo marcado; "Ir para um dia" abre no começo do dia escolhido.
+const searchPanel = $("#search-panel");
+const searchInput = $("#search-input");
+const searchResults = $("#search-results");
+const searchButton = $("#search-button");
+const searchDay = $("#search-day");
+const SEARCH_WAIT = 350;
+// query = o que foi pesquisado; run = a pesquisa mais recente (as respostas atrasadas de outras são ignoradas).
+const search = { query: "", items: [], hasMore: false, loading: false, error: "", run: 0, timer: 0, active: "" };
+const phoneLayout = matchMedia("(max-width: 760px)");
+
+// Sem acentos e em minúsculas, como o fold do servidor.
+const foldText = (text) => text.normalize("NFD").replace(/\p{Mn}+/gu, "").toLowerCase();
+const cleanQuery = (text) => text.trim().replace(/\s+/g, " ");
+const searchOpen = () => !searchPanel.classList.contains("hidden");
+
+function openSearch() {
+  if (!searchOpen()) {
+    fx.show(searchPanel, { x: 24 });
+    $(".conversation").classList.add("searching");
+    searchButton.setAttribute("aria-expanded", "true");
+    searchDay.max = isoDay(new Date(Date.now() + musicClock));
+    paintSearch();
+  }
+  searchInput.focus();
+  searchInput.select();
+}
+
+function closeSearch() {
+  if (!searchOpen()) return;
+  clearTimeout(search.timer);
+  searchPanel.classList.add("hidden");
+  $(".conversation").classList.remove("searching");
+  searchButton.setAttribute("aria-expanded", "false");
+  messagesEl.querySelectorAll("mark.hit").forEach((mark) => mark.replaceWith(...mark.childNodes));
+}
+
+function runSearch(more = false) {
+  clearTimeout(search.timer);
+  const query = more ? search.query : cleanQuery(searchInput.value);
+  const run = ++search.run;
+  if (!more) Object.assign(search, { query, items: [], hasMore: false, error: "" });
+  if (foldText(query).length < 2 || !socket?.connected) {
+    search.loading = false;
+    search.error = query && !socket?.connected ? "Sem conexão agora." : "";
+    return paintSearch();
+  }
+  search.loading = true;
+  paintSearch();
+  socket.timeout(15000).emit("search", { query, before: more ? search.items[search.items.length - 1]?.id : "" }, (error, result) => {
+    if (run !== search.run) return;
+    search.loading = false;
+    if (error || !result?.ok) search.error = result?.error || "A pesquisa não respondeu. Tente de novo.";
+    else Object.assign(search, { items: [...search.items, ...result.items], hasMore: result.hasMore });
+    paintSearch();
+  });
+}
+
+function searchNote(iconName, text, className = "") {
+  const node = el("div", `search-note${className ? ` ${className}` : ""}`);
+  node.append(icon(iconName), el("span", "", text));
+  return node;
+}
+
+function paintSearch() {
+  const { query, items, hasMore, loading, error } = search;
+  const typed = foldText(query).length >= 2;
+  const nodes = [];
+  if (!typed && !error) {
+    nodes.push(searchNote("search", query ? "Escreva pelo menos 2 letras." : "Procure uma palavra, uma música, o nome de um arquivo ou o que foi dito num áudio transcrito."));
+  } else if (items.length) {
+    nodes.push(el("p", "search-count", `${items.length}${hasMore ? "+" : ""} ${items.length === 1 ? "mensagem" : "mensagens"}`), ...items.map(searchHit));
+  }
+  if (loading) nodes.push(searchNote("loader", "Procurando…", "busy"));
+  else if (error) nodes.push(searchNote("alert", error));
+  else if (typed && !items.length) nodes.push(searchNote("search", `Nada encontrado para “${query}”.`));
+  else if (hasMore) {
+    const more = el("button", "load-more search-more", "Mostrar mais antigas");
+    more.type = "button";
+    more.dataset.searchMore = "";
+    nodes.push(more);
+  }
+  searchResults.replaceChildren(...nodes);
+}
+
+// Data do resultado: a hora (hoje), "Ontem", "3 de out." (este ano) ou "03/10/2025".
+function hitDate(iso) {
+  const day = dayLabel(iso);
+  if (day === "Hoje") return time(iso);
+  if (day === "Ontem") return day;
+  const date = new Date(iso);
+  const thisYear = date.getFullYear() === new Date(Date.now() + musicClock).getFullYear();
+  return new Intl.DateTimeFormat("pt-BR", thisYear ? { day: "numeric", month: "short" } : { day: "2-digit", month: "2-digit", year: "numeric" }).format(date).replace(".", "");
+}
+
+function searchHit(message) {
+  const button = el("button", `search-hit${message.id === search.active ? " active" : ""}`);
+  button.type = "button";
+  button.dataset.hit = message.id;
+  const top = el("span", "hit-top");
+  const stamp = el("time", "", hitDate(message.createdAt));
+  stamp.dateTime = message.createdAt;
+  top.append(el("strong", "", message.sender === me ? "Você" : message.sender), stamp);
+  // Onde o termo apareceu: o texto, a transcrição do áudio, o nome do arquivo ou a música.
+  const needle = foldText(search.query);
+  const places = [
+    [message.text, ""],
+    [message.file?.voice?.text, "mic"],
+    [message.file && !message.file.voice ? message.file.name : "", "paperclip"],
+    [message.music ? [message.music.title, message.music.artist].filter(Boolean).join(" — ") : "", "music"]
+  ];
+  const [text, iconName] = places.find(([value]) => value && foldText(value).includes(needle)) || [previewText(message), ""];
+  const line = el("span", "hit-text");
+  if (iconName) line.append(icon(iconName));
+  line.append(snippet(text, search.query));
+  button.append(top, line);
+  return button;
+}
+
+// Onde o termo está no texto ([começo, fim]), sem diferença de maiúsculas nem acentos ("joao" acha "João").
+function findFolded(text, query) {
+  const needle = foldText(cleanQuery(query));
+  if (!needle) return null;
+  let folded = "";
+  const starts = [];
+  for (let index = 0; index < text.length;) {
+    const char = String.fromCodePoint(text.codePointAt(index));
+    const plain = foldText(char);
+    for (let count = 0; count < plain.length; count += 1) starts.push(index);
+    folded += plain;
+    index += char.length;
+  }
+  starts.push(text.length);
+  const at = folded.indexOf(needle);
+  return at < 0 ? null : [starts[at], starts[at + needle.length]];
+}
+
+// O trecho em volta do termo, com ele marcado.
+function snippet(text, query) {
+  const flat = text.replace(/\s+/g, " ").trim();
+  const fragment = document.createDocumentFragment();
+  const range = findFolded(flat, query);
+  if (!range) {
+    fragment.append(flat);
+    return fragment;
+  }
+  const [from, to] = range;
+  let start = 0;
+  if (from > 40) {
+    start = flat.lastIndexOf(" ", from - 30) + 1 || from - 30;
+    fragment.append("…");
+  }
+  fragment.append(flat.slice(start, from), el("mark", "", flat.slice(from, to)), flat.slice(to));
+  return fragment;
+}
+
+// Marca o termo no balão (as marcas somem quando ele é redesenhado ou a pesquisa fecha).
+function markHits(node, query) {
+  for (const box of node.querySelectorAll(".bubble .text, .voice-text")) {
+    const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+    const texts = [];
+    while (walker.nextNode()) texts.push(walker.currentNode);
+    for (let current of texts) {
+      for (let range = findFolded(current.data, query); range; range = findFolded(current.data, query)) {
+        const hit = current.splitText(range[0]);
+        current = hit.splitText(range[1] - range[0]);
+        const mark = el("mark", "hit");
+        hit.replaceWith(mark);
+        mark.append(hit);
+      }
+    }
+  }
+}
+
+searchButton.addEventListener("click", () => {
+  sound.play("tap");
+  if (searchOpen()) closeSearch();
+  else openSearch();
+});
+$("#search-close").addEventListener("click", closeSearch);
+searchInput.addEventListener("input", () => {
+  clearTimeout(search.timer);
+  search.timer = setTimeout(runSearch, SEARCH_WAIT);
+});
+$("#search-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  runSearch();
+  // No celular, o teclado sai da frente dos resultados.
+  if (phoneLayout.matches) searchInput.blur();
+});
+searchPanel.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  event.stopPropagation();
+  closeSearch();
+  searchButton.focus();
+});
+searchResults.addEventListener("click", (event) => {
+  if (event.target.closest("[data-search-more]")) return runSearch(true);
+  const hit = event.target.closest("[data-hit]");
+  if (!hit) return;
+  search.active = hit.dataset.hit;
+  searchResults.querySelectorAll(".search-hit.active").forEach((node) => node.classList.remove("active"));
+  hit.classList.add("active");
+  sound.play("tap");
+  // No celular a pesquisa cobre a conversa: fecha para mostrar a mensagem.
+  if (phoneLayout.matches) closeSearch();
+  focusMessage(hit.dataset.hit, search.query);
+});
+// Chegando no fim da lista, vêm as mais antigas.
+searchResults.addEventListener("scroll", () => {
+  if (search.hasMore && !search.loading && searchResults.scrollHeight - searchResults.scrollTop - searchResults.clientHeight < 80) runSearch(true);
+}, { passive: true });
+// No computador, o calendário abre ao clicar em qualquer parte da linha (não só no ícone do campo).
+searchDay.addEventListener("click", () => {
+  if (!matchMedia("(pointer: fine)").matches) return;
+  try {
+    searchDay.showPicker?.();
+  } catch {}
+});
+searchDay.addEventListener("change", () => {
+  if (!searchDay.value) return;
+  if (phoneLayout.matches) closeSearch();
+  openAt({ from: new Date(`${searchDay.value}T00:00:00`).toISOString() });
+});
 
 // ---------- abas: conversa e perfil ----------
 
@@ -5240,6 +5630,10 @@ const GOAL_ICONS = [["sparkles", "Sonho"], ["palmtree", "Praia"], ["plane", "Via
 const REPEAT_LABEL = { none: "Não repete", weekly: "Toda semana", monthly: "Todo mês", yearly: "Todo ano" };
 const REMIND_OPTIONS = [["", "Sem lembrete"], [0, "Na hora"], [15, "15 minutos antes"], [30, "30 minutos antes"], [60, "1 hora antes"], [120, "2 horas antes"], [1440, "1 dia antes"]];
 const PAPERS = [["creme", "Creme"], ["rosa", "Rosa"], ["azul", "Azul"], ["lilas", "Lilás"], ["verde", "Verde"]];
+// Letras da cartinha (mesma lista do servidor; a primeira é o padrão) e quantas fotos e áudios cabem nela.
+const LETTER_FONTS = [["classica", "Clássica"], ["mao", "À mão"], ["cursiva", "Cursiva"], ["bilhete", "Bilhetinho"], ["maquina", "Máquina"], ["moderna", "Moderna"]];
+const LETTER_PHOTOS = 6;
+const LETTER_AUDIOS = 3;
 const LETTER_DRAFT_KEY = "potato.letterDraft";
 const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const savedSection = store.get("localStorage", US_SECTION_KEY);
@@ -5431,7 +5825,7 @@ const US_TITLES = { hoje: ["sun", "Rotina do dia"], agenda: ["calendar", "Agenda
 // pontinho quando tem novidade lá dentro (também as da outra pessoa no dia, na agenda e nos sonhos).
 function paintUsBadge() {
   const letters = unreadLetters();
-  const turns = list.filter((message) => message.game && !message.deleted && myTurn(message.game)).length;
+  const turns = loaded().filter((message) => message.game && !message.deleted && myTurn(message.game)).length;
   for (const [selector, count] of [[".letters-new", letters], [".games-turn", turns]]) {
     document.querySelectorAll(selector).forEach((badge) => {
       badge.textContent = count > 99 ? "99+" : String(count);
@@ -5741,14 +6135,28 @@ async function uploadPhoto(file) {
   if (!socket) throw new Error("Sem conexão agora.");
   const { blob } = await preparePhoto(file);
   if (fileMax && blob.size > fileMax) throw new Error(`Foto grande demais (máximo de ${formatSize(fileMax)}).`);
+  const uploaded = await uploadBlob(blob, "foto.jpg", "A foto não subiu. Tente de novo.");
+  if (uploaded.kind !== "image") throw new Error("Escolha uma foto (JPG, PNG, WEBP ou GIF).");
+  return uploaded;
+}
+
+// Áudio de cartinha (gravado ou escolhido): sobe inteiro, pelo mesmo caminho.
+async function uploadAudio(blob) {
+  if (!socket) throw new Error("Sem conexão agora.");
+  if (fileMax && blob.size > fileMax) throw new Error(`Áudio grande demais (máximo de ${formatSize(fileMax)}).`);
+  const uploaded = await uploadBlob(blob, "audio", "O áudio não subiu. Tente de novo.");
+  if (uploaded.kind !== "audio" && uploaded.kind !== "video") throw new Error("Esse formato de áudio não deu. Use MP3, M4A, OGG ou WAV.");
+  return uploaded;
+}
+
+async function uploadBlob(blob, name, failure) {
   const response = await fetch(apiUrl("upload"), {
     method: "POST",
-    headers: { "Content-Type": blob.type || "application/octet-stream", "X-Potato-Token": socket.auth.token, "X-Potato-Name": encodeURIComponent(blob.name || "foto.jpg") },
+    headers: { "Content-Type": blob.type || "application/octet-stream", "X-Potato-Token": socket.auth.token, "X-Potato-Name": encodeURIComponent(blob.name || name) },
     body: blob
   }).catch(() => null);
   const result = await response?.json().catch(() => null);
-  if (!response?.ok || !result?.ok) throw new Error(result?.error || "A foto não subiu. Tente de novo.");
-  if (result.file.kind !== "image") throw new Error("Escolha uma foto (JPG, PNG, WEBP ou GIF).");
+  if (!response?.ok || !result?.ok) throw new Error(result?.error || failure);
   return result.file;
 }
 
@@ -6616,11 +7024,25 @@ function paintLetters() {
 function letterCard(letter) {
   const mine = letter.owner === me;
   const fresh = !mine && !letter.readAt;
-  const card = el("button", `letter-card paper-${letter.paper}${fresh ? " fresh" : ""}`);
+  const card = el("button", `letter-card paper-${letter.paper} font-${letter.font || LETTER_FONTS[0][0]}${fresh ? " fresh" : ""}`);
   card.type = "button";
   card.dataset.letter = letter.id;
   const text = el("span", "letter-text");
   text.append(el("small", "", `${mine ? `Para ${letter.to || "o seu amor"}` : `De ${letter.owner}`} · ${shortDate(isoDay(new Date(letter.createdAt)))}`), el("strong", "", letter.title), el("span", "letter-preview", letter.preview));
+  // Quantas fotos e áudios vão dentro.
+  const photos = letter.photos?.length || 0;
+  const audios = letter.audios?.length || 0;
+  if (photos || audios) {
+    const media = el("span", "letter-media");
+    const count = (iconName, text) => {
+      const node = el("span");
+      node.append(icon(iconName), text);
+      return node;
+    };
+    if (photos) media.append(count("image", `${photos} ${photos === 1 ? "foto" : "fotos"}`));
+    if (audios) media.append(count("audio-lines", `${audios} ${audios === 1 ? "áudio" : "áudios"}`));
+    text.append(media);
+  }
   card.append(iconBadge(fresh ? "mail" : mine ? "send" : "heart", "letter-seal"), text);
   const flag = fresh ? "Nova!" : mine ? (letter.readAt ? "Lida" : "Ainda não lida") : "";
   if (flag) card.append(el("span", `letter-flag${fresh ? " new" : ""}`, flag));
@@ -6656,7 +7078,23 @@ async function openLetter(id) {
 function paintLetter(letter) {
   letterOpen = letter;
   const mine = letter.owner === me;
-  $("#letter-paper").className = `letter-paper paper-${letter.paper}`;
+  $("#letter-paper").className = `letter-paper paper-${letter.paper} font-${letter.font || LETTER_FONTS[0][0]}`;
+  // Os áudios ficam logo embaixo do título (dá para ouvir enquanto lê) e as fotos, como polaroides, depois do texto.
+  const playing = playback.key;
+  $("#letter-audios").replaceChildren(...(letter.audios || []).map((audio) => letterVoice(audio, `letter:${audio.key}`)));
+  if (playing.startsWith("letter:")) paintVoice(playing);
+  $("#letter-photos").replaceChildren(...(letter.photos || []).map((photo) => {
+    const button = el("button", "letter-photo");
+    button.type = "button";
+    button.dataset.photo = photo.url;
+    button.title = "Ver a foto";
+    const image = el("img");
+    image.src = photo.url;
+    image.alt = "Foto da cartinha";
+    image.loading = "lazy";
+    button.append(image);
+    return button;
+  }));
   $("#letter-to").textContent = letter.to === me ? "Para você" : `Para ${letter.to || "o seu amor"}`;
   $("#letter-title").textContent = letter.title;
   $("#letter-body").textContent = letter.body ?? "Abrindo a cartinha…";
@@ -6668,6 +7106,7 @@ function paintLetter(letter) {
 }
 
 function closeLetter() {
+  if (playback.key.startsWith("letter:")) stopVoice();
   letterOpen = null;
   letterView.classList.add("hidden");
   document.removeEventListener("keydown", onLetterKey, true);
@@ -6675,6 +7114,10 @@ function closeLetter() {
 
 function writeLetter(letter = null) {
   const draft = letter ? null : store.get("localStorage", LETTER_DRAFT_KEY);
+  const paper = letter?.paper || draft?.paper || "creme";
+  const font = letter?.font || draft?.font || LETTER_FONTS[0][0];
+  // O campo do texto já mostra o papel e a letra escolhidos.
+  const restyle = (prefix) => (value) => swapClass(sheetForm.querySelector(".letter-input"), prefix, value);
   openSheet({
     title: letter ? "Editar cartinha" : `Cartinha para ${peerName || "o seu amor"}`,
     icon: "mail",
@@ -6682,14 +7125,35 @@ function writeLetter(letter = null) {
     submit: letter ? "Salvar" : "Enviar",
     fields: [
       { name: "title", type: "text", label: "Título", value: letter?.title ?? draft?.title, placeholder: "Para o meu amor", max: 120 },
-      { name: "paper", type: "chips", label: "Papel", value: letter?.paper || draft?.paper || "creme", options: PAPERS.map(([value, label]) => [value, label, `paper-${value}`]) },
-      { name: "body", type: "textarea", value: letter?.body ?? draft?.body, placeholder: "Escreva com o coração…", max: 20000, rows: 12, className: "letter-input" }
+      { name: "paper", type: "chips", label: "Papel", value: paper, options: PAPERS.map(([value, label]) => [value, label, `paper-${value}`]), onPick: restyle("paper-") },
+      { name: "font", type: "chips", label: "Letra", value: font, options: LETTER_FONTS.map(([value, label]) => [value, label, `font-chip font-${value}`]), onPick: restyle("font-") },
+      { name: "body", type: "textarea", value: letter?.body ?? draft?.body, placeholder: "Escreva com o coração…", max: 20000, rows: 12, className: `letter-input paper-${paper} font-${font}` },
+      { name: "photos", type: "photos", label: "Fotos", value: letter?.photos, limit: LETTER_PHOTOS },
+      { name: "audios", type: "audios", label: "Áudios", value: letter?.audios, limit: LETTER_AUDIOS, hint: "Uma mensagem de voz ou uma música (MP3, M4A, OGG ou WAV)." }
     ],
-    // O rascunho fica guardado neste aparelho até a cartinha ser enviada.
-    onChange: letter ? null : (values) => store.set("localStorage", LETTER_DRAFT_KEY, values),
-    onSubmit: async (values) => {
-      if (!values.body) throw new Error("Escreva alguma coisa na cartinha.");
-      const result = await usCall({ op: "letter:save", id: letter?.id, ...values });
+    // O rascunho (sem as fotos e os áudios, que ainda não subiram) fica guardado neste aparelho até a cartinha ser enviada.
+    onChange: letter ? null : ({ photos, audios, ...values }) => store.set("localStorage", LETTER_DRAFT_KEY, values),
+    onSubmit: async ({ photos, audios, ...values }) => {
+      if (sheetForm.querySelector('[data-field="audios"]')?.rec) throw new Error("Pare a gravação antes de enviar.");
+      if (!values.body && !photos.length && !audios.length) throw new Error("Escreva alguma coisa na cartinha.");
+      // As fotos e os áudios novos sobem antes, um de cada vez (se o envio falhar, o que já subiu não sobe de novo).
+      for (const photo of photos) {
+        if (!photo.file) continue;
+        photo.key = (await uploadPhoto(photo.file)).key;
+        delete photo.file;
+      }
+      for (const audio of audios) {
+        if (!audio.blob) continue;
+        audio.key = (await uploadAudio(audio.blob)).key;
+        delete audio.blob;
+      }
+      const result = await usCall({
+        op: "letter:save",
+        id: letter?.id,
+        ...values,
+        photos: photos.map(({ key }) => ({ key })),
+        audios: audios.map(({ key, duration, peaks, voice }) => ({ key, duration, peaks, voice }))
+      });
       if (!result) return false;
       if (!letter) store.remove("localStorage", LETTER_DRAFT_KEY);
       const { body, ...meta } = result.item;
@@ -6705,6 +7169,149 @@ function writeLetter(letter = null) {
   });
 }
 
+// Troca a classe de um prefixo (paper-…, font-…) por outra.
+function swapClass(node, prefix, value) {
+  if (!node) return;
+  node.classList.remove(...[...node.classList].filter((name) => name.startsWith(prefix)));
+  node.classList.add(prefix + value);
+}
+
+// Player de um áudio da cartinha: o mesmo das mensagens de voz, com o nome em cima (música: o nome do arquivo).
+function letterVoice(audio, key) {
+  const box = el("div", "letter-voice");
+  const name = el("span", "letter-voice-name");
+  name.append(icon(audio.voice ? "mic" : "music"), el("span", "", audio.voice ? "Mensagem de voz" : audio.name.replace(/\.[a-z0-9]{2,4}$/i, "")));
+  box.append(name, voiceView({ id: null, clientId: key, file: { url: audio.url, preview: audio.blob ? audio.url : null, voice: { duration: audio.duration, peaks: audio.peaks || [] } } }));
+  return box;
+}
+
+// Duração e forma de onda de um áudio escolhido no aparelho (como as dos gravados), medidas aqui mesmo. Sem conseguir
+// decodificar, vale só a duração (a onda fica lisa).
+async function measureAudio(blob) {
+  try {
+    const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    const data = await blob.arrayBuffer();
+    // Em 8 kHz e num canal só: basta para a onda, sem gastar memória com uma música inteira.
+    const decoded = await new Promise((resolve, reject) => new Offline(1, 1, 8000).decodeAudioData(data, resolve, reject));
+    const samples = decoded.getChannelData(0);
+    const step = Math.max(1, Math.floor(samples.length / 400));
+    const levels = [];
+    for (let start = 0; start < samples.length; start += step) {
+      const end = Math.min(samples.length, start + step);
+      let sum = 0;
+      for (let index = start; index < end; index += 1) sum += samples[index] ** 2;
+      levels.push(voiceLevel(Math.sqrt(sum / (end - start))));
+    }
+    return { duration: Math.round(decoded.duration * 10) / 10, peaks: voicePeaks(levels) };
+  } catch {
+    const url = URL.createObjectURL(blob);
+    const duration = await new Promise((resolve) => {
+      const probe = new Audio();
+      probe.preload = "metadata";
+      probe.addEventListener("loadedmetadata", () => resolve(probe.duration), { once: true });
+      probe.addEventListener("error", () => resolve(0), { once: true });
+      probe.src = url;
+    });
+    URL.revokeObjectURL(url);
+    if (!Number.isFinite(duration) || duration <= 0) throw new Error("Não deu para ler esse áudio.");
+    return { duration: Math.round(duration * 10) / 10, peaks: [] };
+  }
+}
+
+// Gravar um áudio para a cartinha: o mesmo formato, qualidade e redução de ruído das mensagens de voz, numa faixa dentro
+// do formulário. Parar guarda o áudio na lista; cancelar joga fora.
+async function startLetterRecording(wrap, field) {
+  if (wrap.rec || rec) return;
+  if (call) return toast("Durante a chamada não dá para gravar áudio.");
+  stopVoice();
+  const session = wrap.rec = { chunks: [], levels: [], peak: 0 };
+  paintAudiosField(wrap, field);
+  sound.play("record");
+  if (noiseOn() && window.AudioWorkletNode) {
+    session.context = new AudioContext({ sampleRate: 48000 });
+    loadNoiseKit().catch(() => {});
+  }
+  try {
+    session.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 } });
+  } catch (error) {
+    releaseMicStream(session);
+    if (wrap.rec === session) {
+      wrap.rec = null;
+      paintAudiosField(wrap, field);
+    }
+    toast(inExtension ? "O painel lateral não consegue usar o microfone. Abra nosso chat numa aba para gravar."
+      : error.name === "NotAllowedError" ? "Libere o microfone para o chat nas configurações do navegador."
+      : "Não deu para usar o microfone.", "error");
+    return sound.play("error");
+  }
+  let stream = session.stream;
+  if (session.context) {
+    try {
+      const clean = await cleanMic(stream, session.context);
+      stream = clean.stream;
+      session.denoise = clean.denoise;
+    } catch (error) {
+      console.warn("Redução de ruído indisponível; gravando sem ela.", error);
+      session.context.close().catch(() => {});
+      session.context = null;
+    }
+  }
+  // Cancelou (ou fechou a janela) enquanto o navegador pedia a permissão.
+  if (wrap.rec !== session) return releaseMicStream(session);
+  const type = VOICE_TYPES.find((candidate) => MediaRecorder.isTypeSupported(candidate));
+  try {
+    session.recorder = new MediaRecorder(stream, type ? { mimeType: type, audioBitsPerSecond: VOICE_BITRATE } : { audioBitsPerSecond: VOICE_BITRATE });
+  } catch {
+    wrap.rec = null;
+    releaseMicStream(session);
+    paintAudiosField(wrap, field);
+    return toast("Este navegador não conseguiu gravar o áudio.", "error");
+  }
+  session.meter = sound.meter(stream);
+  session.recorder.addEventListener("dataavailable", (event) => { if (event.data.size) session.chunks.push(event.data); });
+  session.recorder.start(1000);
+  session.started = session.lastBar = performance.now();
+  // Uma barra da onda a cada 100 ms (com o nível mais alto do trecho), como nas mensagens de voz.
+  session.timer = setInterval(() => {
+    const now = performance.now();
+    session.peak = Math.max(session.peak, voiceLevel(session.meter()));
+    if (now - session.lastBar >= 100) {
+      for (; now - session.lastBar >= 100; session.lastBar += 100) session.levels.push(session.peak);
+      session.peak = 0;
+    }
+    const seconds = (now - session.started) / 1000;
+    const clock = wrap.querySelector(".letter-rec-time");
+    if (clock) clock.textContent = clockTime(seconds);
+    if (seconds >= VOICE_MAX) stopLetterRecording(wrap, field, true);
+  }, 30);
+}
+
+// Para a gravação da cartinha. keep = guardar na lista (se tiver pelo menos VOICE_MIN segundos); field = null quando a
+// janela fechou (aí só solta o microfone).
+function stopLetterRecording(wrap, field, keep) {
+  const session = wrap.rec;
+  if (!session) return;
+  wrap.rec = null;
+  clearInterval(session.timer);
+  const recorder = session.recorder;
+  if (field) paintAudiosField(wrap, field);
+  // Ainda esperando a permissão: o startLetterRecording solta o microfone quando ela chegar.
+  if (!recorder) return;
+  const seconds = (performance.now() - session.started) / 1000;
+  recorder.addEventListener("stop", () => {
+    releaseMicStream(session);
+    if (!keep || !field) return;
+    if (seconds < VOICE_MIN) return toast("Áudio curto demais.");
+    const type = recorder.mimeType || session.chunks[0]?.type || "audio/webm";
+    const blob = new File(session.chunks, voiceFileName(type), { type });
+    wrap.audios.push({ blob, url: URL.createObjectURL(blob), name: blob.name, voice: true, duration: Math.round(seconds * 10) / 10, peaks: voicePeaks(session.levels) });
+    paintAudiosField(wrap, field);
+    sound.play("sparkle");
+  }, { once: true });
+  if (recorder.state === "inactive") recorder.dispatchEvent(new Event("stop"));
+  else recorder.stop();
+}
+
 usView.querySelector('[data-pane="cartinhas"]').addEventListener("click", (event) => {
   if (event.target.closest("#letter-add")) return writeLetter();
   const card = event.target.closest("[data-letter]");
@@ -6713,6 +7320,10 @@ usView.querySelector('[data-pane="cartinhas"]').addEventListener("click", (event
 
 letterView.addEventListener("click", async (event) => {
   if (event.target === letterView || event.target.closest("#letter-close")) return closeLetter();
+  const photo = event.target.closest("[data-photo]");
+  if (photo) return openViewer({ url: photo.dataset.photo, name: "foto.jpg" });
+  const play = event.target.closest('[data-voice="play"]')?.closest(".voice");
+  if (play?.msg) return toggleVoice(play.msg);
   const letter = letterOpen;
   if (!letter) return;
   if (event.target.closest("#letter-edit")) {
@@ -6731,20 +7342,22 @@ letterView.addEventListener("click", async (event) => {
 // ---- formulário (uma janela para tudo) ----
 // Cada campo: { name, type, label, value, … }. Tipos: text, money, date, time (optional = o rótulo do "sem hora"),
 // textarea, select (options [valor, rótulo]; numeric = valores numéricos), chips (options [valor, rótulo, classe,
-// ícone]; iconOnly = só o ícone; instant = escolher já salva), photo, list (itens com texto, e emoji com withEmoji), prompt
+// ícone]; iconOnly = só o ícone; instant = escolher já salva; onPick = avisa a escolha na hora), photo, photos (várias,
+// até limit), audios (gravados ou escolhidos, até limit), list (itens com texto, e emoji com withEmoji), prompt
 // (horário de cada lembrete, com liga/desliga) e info (um texto). onSubmit recebe os valores e fecha a janela, a
-// não ser que devolva false; um erro vira aviso. onDelete aparece como o botão Apagar.
+// não ser que devolva false; um erro vira aviso. onDelete aparece como o botão Apagar; cancel = o rótulo do botão de fechar.
 const sheet = $("#us-sheet");
 const sheetForm = $("#sheet-form");
 let sheetState = null;
 let sheetTimer = 0;
 
-function openSheet({ title, icon: iconName = "sparkles", fields, submit = "Salvar", onSubmit, onDelete = null, deleteLabel = "Apagar", wide = false, onChange = null }) {
+function openSheet({ title, icon: iconName = "sparkles", fields, submit = "Salvar", cancel = "Cancelar", onSubmit, onDelete = null, deleteLabel = "Apagar", wide = false, onChange = null }) {
   sheetState = { fields, onSubmit, onDelete, onChange, busy: false };
   $("#sheet-title").textContent = title;
   setIcon($("#sheet-icon use"), iconName);
   $("#sheet-submit").textContent = submit || "";
   $("#sheet-submit").classList.toggle("hidden", !submit);
+  $("#sheet-cancel").textContent = cancel;
   $("#sheet-delete").textContent = deleteLabel;
   $("#sheet-delete").classList.toggle("hidden", !onDelete);
   sheetForm.classList.toggle("wide", wide);
@@ -6761,6 +7374,9 @@ function openSheet({ title, icon: iconName = "sparkles", fields, submit = "Salva
 function closeSheet() {
   if (!sheetState) return;
   clearTimeout(sheetTimer);
+  // Gravando ou ouvindo um áudio da cartinha: o microfone é solto e o áudio para.
+  sheetForm.querySelectorAll(".type-audios").forEach((wrap) => stopLetterRecording(wrap, null, false));
+  if (playback.key.startsWith("draft:")) stopVoice();
   sheetState = null;
   sheet.classList.add("hidden");
   document.removeEventListener("keydown", onSheetKey, true);
@@ -6795,6 +7411,20 @@ function fieldNode(field) {
     case "info":
       wrap.append(el("p", "field-info", field.text));
       break;
+    // Linhas de leitura (ícone, rótulo e valor), com a mensagem em cima: os dados da mensagem.
+    case "facts": {
+      if (field.quote) wrap.append(el("p", "facts-quote", field.quote));
+      const rows = el("div", "facts");
+      for (const [iconName, label, value, className] of field.rows) {
+        const row = el("div", `fact${className ? ` ${className}` : ""}`);
+        const text = el("span", "fact-text");
+        text.append(el("strong", "", label), el("small", "", value));
+        row.append(iconBadge(iconName, "fact-icon"), text);
+        rows.append(row);
+      }
+      wrap.append(rows);
+      break;
+    }
     case "text":
     case "date": {
       const node = input("input", field.type);
@@ -6879,6 +7509,48 @@ function fieldNode(field) {
       paintPhotoField(wrap);
       // Abre a escolha da foto direto (o toque que abriu a janela ainda vale como gesto da pessoa).
       if (field.pickNow) queueMicrotask(() => file.click());
+      break;
+    }
+    case "photos": {
+      wrap.photos = [...(field.value || [])];
+      const file = el("input");
+      file.type = "file";
+      file.accept = "image/*";
+      file.multiple = true;
+      file.hidden = true;
+      file.addEventListener("change", () => {
+        const chosen = [...file.files].filter((item) => item.type.startsWith("image/"));
+        file.value = "";
+        const room = field.limit - wrap.photos.length;
+        if (chosen.length > room) toast(`Cabem até ${field.limit} fotos.`);
+        wrap.photos.push(...chosen.slice(0, Math.max(0, room)).map((item) => ({ file: item, url: URL.createObjectURL(item) })));
+        paintPhotosField(wrap, field);
+        sheetChanged();
+      });
+      wrap.append(el("div", "photos-field"), file);
+      paintPhotosField(wrap, field);
+      break;
+    }
+    case "audios": {
+      wrap.audios = [...(field.value || [])];
+      const file = el("input");
+      file.type = "file";
+      file.accept = "audio/*";
+      file.hidden = true;
+      file.addEventListener("change", async () => {
+        const [chosen] = file.files;
+        file.value = "";
+        if (!chosen) return;
+        if (fileMax && chosen.size > fileMax) return toast(`Áudio grande demais (máximo de ${formatSize(fileMax)}).`, "error");
+        try {
+          wrap.audios.push({ blob: chosen, url: URL.createObjectURL(chosen), name: chosen.name, voice: false, ...await measureAudio(chosen) });
+        } catch (error) {
+          return toast(error.message, "error");
+        }
+        if (wrap.isConnected) paintAudiosField(wrap, field);
+      });
+      wrap.append(el("div", "audios-field"), file);
+      paintAudiosField(wrap, field);
       break;
     }
     case "list": {
@@ -6971,6 +7643,76 @@ function paintPhotoField(wrap) {
   box.append(actions);
 }
 
+function paintPhotosField(wrap, field) {
+  const box = wrap.querySelector(".photos-field");
+  box.replaceChildren(...wrap.photos.map((photo, index) => {
+    const figure = el("figure", "photos-thumb");
+    const image = el("img");
+    image.src = photo.url;
+    image.alt = "";
+    const remove = el("button", "moment-remove");
+    remove.type = "button";
+    remove.dataset.photosRemove = String(index);
+    remove.title = "Tirar a foto";
+    remove.setAttribute("aria-label", "Tirar a foto");
+    remove.append(icon("x"));
+    figure.append(image, remove);
+    return figure;
+  }));
+  if (wrap.photos.length < field.limit) {
+    const add = el("button", "moment add photos-add");
+    add.type = "button";
+    add.dataset.photosAdd = "";
+    add.append(icon("camera"), el("span", "", "Foto"));
+    box.append(add);
+  }
+}
+
+// Os áudios da cartinha (cada um com o player e o tirar) e, embaixo, gravar ou escolher; gravando, a faixa da gravação.
+function paintAudiosField(wrap, field) {
+  const box = wrap.querySelector(".audios-field");
+  const playing = playback.key;
+  box.replaceChildren(...wrap.audios.map((audio, index) => {
+    const row = el("div", "letter-audio-row");
+    const remove = el("button", "list-remove");
+    remove.type = "button";
+    remove.dataset.audiosRemove = String(index);
+    remove.title = "Tirar o áudio";
+    remove.setAttribute("aria-label", "Tirar o áudio");
+    remove.append(icon("x"));
+    row.append(letterVoice(audio, `draft:${audio.key || audio.url}`), remove);
+    return row;
+  }));
+  if (playing.startsWith("draft:")) paintVoice(playing);
+  if (wrap.rec) {
+    const live = el("div", "letter-rec");
+    const stop = el("button", "pill gold small");
+    stop.type = "button";
+    stop.dataset.audiosStop = "";
+    stop.append(icon("stop"), "Parar");
+    const cancel = el("button", "text-button", "Cancelar");
+    cancel.type = "button";
+    cancel.dataset.audiosCancel = "";
+    live.append(el("i", "rec-dot"), el("span", "letter-rec-time", "0:00"), cancel, stop);
+    box.append(live);
+  } else if (wrap.audios.length < field.limit) {
+    const actions = el("div", "audios-actions");
+    if (canRecord) {
+      const record = el("button", "pill ghost small");
+      record.type = "button";
+      record.dataset.audiosRecord = "";
+      record.append(icon("mic"), "Gravar");
+      actions.append(record);
+    }
+    const pick = el("button", "pill ghost small");
+    pick.type = "button";
+    pick.dataset.audiosPick = "";
+    pick.append(icon("music"), "Escolher áudio");
+    actions.append(pick);
+    box.append(actions);
+  }
+}
+
 function readSheet() {
   const values = {};
   for (const field of sheetState.fields) {
@@ -7000,6 +7742,12 @@ function readSheet() {
       case "photo":
         values[field.name] = wrap.photo || null;
         break;
+      case "photos":
+        values[field.name] = wrap.photos;
+        break;
+      case "audios":
+        values[field.name] = wrap.audios;
+        break;
       case "list":
         values[field.name] = [...wrap.querySelectorAll(".list-row")].map((row) => ({
           ...row.item,
@@ -7024,7 +7772,9 @@ sheetForm.addEventListener("click", (event) => {
     wrap.querySelectorAll("[data-chip]").forEach((node) => node.setAttribute("aria-pressed", String(node === chip)));
     fx.press(chip);
     sound.play("tap");
-    if (sheetState.fields.find((field) => field.name === wrap.dataset.field)?.instant) sheetForm.requestSubmit();
+    const field = sheetState.fields.find((item) => item.name === wrap.dataset.field);
+    field?.onPick?.(JSON.parse(chip.dataset.chip));
+    if (field?.instant) sheetForm.requestSubmit();
     else sheetChanged();
     return;
   }
@@ -7057,6 +7807,28 @@ sheetForm.addEventListener("click", (event) => {
     wrap.photo = null;
     return paintPhotoField(wrap);
   }
+  const fieldOf = () => sheetState.fields.find((item) => item.name === wrap.dataset.field);
+  if (event.target.closest("[data-photos-add], [data-audios-pick]")) return wrap.querySelector("input[type=file]").click();
+  const photoOut = event.target.closest("[data-photos-remove]");
+  if (photoOut) {
+    wrap.photos.splice(Number(photoOut.dataset.photosRemove), 1);
+    return paintPhotosField(wrap, fieldOf());
+  }
+  const audioOut = event.target.closest("[data-audios-remove]");
+  if (audioOut) {
+    if (playback.key.startsWith("draft:")) stopVoice();
+    wrap.audios.splice(Number(audioOut.dataset.audiosRemove), 1);
+    return paintAudiosField(wrap, fieldOf());
+  }
+  if (event.target.closest("[data-audios-record]")) return startLetterRecording(wrap, fieldOf());
+  if (event.target.closest("[data-audios-stop]")) return stopLetterRecording(wrap, fieldOf(), true);
+  if (event.target.closest("[data-audios-cancel]")) {
+    sound.play("discard");
+    return stopLetterRecording(wrap, fieldOf(), false);
+  }
+  // Ouvir um áudio da cartinha antes de enviar.
+  const play = event.target.closest('[data-voice="play"]')?.closest(".voice");
+  if (play?.msg) return toggleVoice(play.msg);
   const promptSwitch = event.target.closest("[data-prompt-switch]");
   if (promptSwitch) {
     const row = promptSwitch.closest(".prompt-row");
@@ -7245,7 +8017,7 @@ function myTurn(game) {
 // A seção de jogos: o placar, só as partidas esperando você (das mensagens já carregadas) e os jogos para começar.
 function paintGames() {
   $('[data-game-hint="vd"]').textContent = `${peerName || "A outra pessoa"} escolhe: verdade ou desafio. Perguntas e desafios fofinhos.`;
-  const waiting = list.filter((message) => message.game && !message.deleted && myTurn(message.game)).reverse();
+  const waiting = loaded().filter((message) => message.game && !message.deleted && myTurn(message.game)).reverse();
   $("#game-live-wrap").classList.toggle("hidden", !waiting.length);
   $("#game-live").replaceChildren(...waiting.map((message) => {
     const row = el("button", "event-row game-row");
@@ -7743,7 +8515,7 @@ function paintVelha(message) {
 // Placar da série: as partidas de jogo da velha entre vocês que estão na conversa carregada.
 function velhaSeries(game) {
   const score = {};
-  for (const message of list) {
+  for (const message of loaded()) {
     const winner = message.game?.type === "velha" && !message.deleted ? message.game.winner : null;
     if (winner) score[winner] = (score[winner] || 0) + 1;
   }

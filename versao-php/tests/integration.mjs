@@ -202,7 +202,8 @@ try {
   const columns = sql("SHOW COLUMNS FROM {p}users").map((row) => row.Field);
   for (const column of ["pass_hash", "avatar", "avatar_type", "avatar_key", "theme", "wallpaper", "wallpaper_type", "wallpaper_key", "wallpaper_style"]) assert.ok(columns.includes(column), column);
   assert.ok(sql("SHOW COLUMNS FROM {p}messages").some((row) => row.Field === "media"), "media");
-  assert.equal(sql("SELECT value FROM {p}settings WHERE name = 'schema'")[0].value, "7");
+  assert.ok(sql("SHOW COLUMNS FROM {p}messages").some((row) => row.Field === "read_at"), "read_at");
+  assert.equal(sql("SELECT value FROM {p}settings WHERE name = 'schema'")[0].value, "8");
   assert.ok(sql("SHOW COLUMNS FROM {p}items").some((row) => row.Field === "data"), "tabela do nosso cantinho");
   assert.ok(sql("SHOW COLUMNS FROM {p}files").some((row) => row.Field === "data"), "tabela de arquivos");
   assert.deepEqual(await welcome(), { open: 2 });
@@ -260,20 +261,27 @@ try {
   assert.equal((await withAck(first, "message", { text: "   " })).error, "Mensagem vazia.");
 
   // Resposta, reação, leitura e apagar.
+  assert.deepEqual([message.read, message.readAt], [false, null]);
+  const replyRead = until(first, "seen", (receipt) => receipt.name === "Pessoa 2");
   const reply = await withAck(second, "message", { text: "Respondendo", clientId: "cliente-2", replyTo: message.id });
   assert.equal(reply.message.replyTo.id, message.id);
   assert.equal(reply.message.replyTo.text, "Mensagem de integração");
+  // Responder conta como ler: quem escreveu vê na hora, e a hora fica na mensagem (dados da mensagem).
+  assert.deepEqual(await replyRead, { name: "Pessoa 2", id: reply.message.id, at: reply.message.createdAt });
+  assert.equal(reply.message.read, false);
 
   const reacted = next(first, "message:update");
   second.emit("react", { id: message.id, emoji: "❤️" });
   assert.deepEqual((await reacted).reactions, { "❤️": ["Pessoa 2"] });
 
-  const seen = next(second, "seen");
+  const seen = until(second, "seen", (receipt) => receipt.name === "Pessoa 1");
   first.emit("seen", { id: message.id }); // já lida (foi quem enviou): ignorada
   first.emit("seen", { id: reply.message.id });
   const receipt = await seen;
-  assert.equal(receipt.name, "Pessoa 1");
   assert.equal(receipt.id, reply.message.id);
+  assert.deepEqual(sql("SELECT read_at FROM {p}messages ORDER BY n").map((row) => row.read_at), [reply.message.createdAt, receipt.at]);
+  const readHistory = await withAck(first, "history:around", { id: message.id });
+  assert.deepEqual(readHistory.items.map((item) => [item.read, item.readAt]), [[true, reply.message.createdAt], [true, receipt.at]]);
 
   const notMine = silent(first, "message:update");
   first.emit("delete", { id: reply.message.id });
@@ -570,6 +578,41 @@ try {
   assert.equal(before.items.length, 15);
   assert.equal(before.hasMore, false);
   assert.equal(before.items[0].text, "Mensagem de integração");
+
+  // Trecho antigo (pesquisa, resposta antiga ou "ir para um dia"): metade da página antes da mensagem e o resto depois;
+  // descendo, vem a próxima página até o fim.
+  const tenth = sql("SELECT id FROM {p}messages WHERE text = 'Mensagem 10'")[0].id;
+  const around = await withAck(again, "history:around", { id: tenth });
+  assert.deepEqual([around.ok, around.target, around.items.length, around.hasMore, around.hasNewer], [true, tenth, 50, false, true]);
+  assert.deepEqual([around.items[0].text, around.items[20].text, around.items.at(-1).text], ["Mensagem de integração", "Mensagem 10", "Mensagem 39"]);
+  const below = await withAck(again, "history:after", { after: around.items.at(-1).id });
+  assert.deepEqual([below.items.length, below.items[0].text, below.items.at(-1).text, below.hasNewer], [25, "Mensagem 40", "Mensagem 64", false]);
+  const firstDay = await withAck(again, "history:around", { from: "2000-01-01T00:00:00.000Z" });
+  assert.deepEqual([firstDay.target, firstDay.items.length, firstDay.hasMore, firstDay.hasNewer], [message.id, 30, false, true]);
+  const lastDay = await withAck(again, "history:around", { from: "2999-01-01T00:00:00.000Z" });
+  assert.deepEqual([lastDay.items.at(-1).text, lastDay.items.length, lastDay.hasMore, lastDay.hasNewer], ["Mensagem 64", 31, true, false]);
+  assert.equal((await withAck(again, "history:around", { from: "ontem" })).error, "Dia inválido.");
+  assert.equal((await withAck(again, "history:around", { id: "nao-existe" })).error, "Essa mensagem não existe mais.");
+
+  // Pesquisa: na conversa inteira, sem diferença de maiúsculas e acentos, 30 de cada vez, das mais novas para as mais
+  // antigas; apagadas não aparecem, e os nomes dos campos do JSON dos arquivos não contam.
+  const found = [];
+  let page = { hasMore: true, items: [] };
+  while (page.hasMore) {
+    page = await withAck(again, "search", { query: "  MENSAGEM  ", before: found.at(-1)?.id || "" });
+    assert.ok(page.ok && page.items.length <= 30);
+    found.push(...page.items);
+  }
+  assert.deepEqual([found[0].text, found[30].text, found.at(-1).text], ["Mensagem 64", "Mensagem 34", "Mensagem de integração"]);
+  assert.equal(new Set(found.map((item) => item.id)).size, found.length);
+  assert.deepEqual((await withAck(again, "search", { query: "integracao" })).items.map((item) => item.id), [message.id]);
+  assert.equal((await withAck(again, "search", { query: "pagina" })).items[0].file.name, "pagina.html");
+  for (const query of ["kind", "Respondendo", "a%", "m_ns"]) assert.deepEqual((await withAck(again, "search", { query })).items, [], query);
+  assert.equal((await withAck(again, "search", { query: " x " })).error, "Escreva pelo menos 2 letras.");
+  // Junto com outras ações, a pesquisa passa pelo caminho normal (com a trava) e dá o mesmo resultado.
+  const together = await api("ops", { token: secondLogin.body.token, conn: "pesquisa-junto", client: "web", ops: [{ event: "search", data: { query: "integração" } }, { event: "stats" }] });
+  assert.deepEqual(together.body.results[0].items.map((item) => item.id), [message.id]);
+  await api("disconnect", { token: secondLogin.body.token, conn: "pesquisa-junto" });
   again.disconnect();
 
   // Senha esquecida: apagar o pass_hash no phpMyAdmin derruba as sessões e libera escolher outra senha.
@@ -780,6 +823,9 @@ try {
   const reopenedAgain = await connect(firstLogin.body.token);
   assert.equal(reopenedAgain.history.items.find((message) => message.id === voiceSent.message.id).file.voice.text, "Oi, tudo bem? Chego às oito.");
   reopenedAgain.disconnect();
+  // A pesquisa acha o que foi dito no áudio transcrito (sem acento), mas não o nome do arquivo gravado.
+  assert.deepEqual((await withAck(dj1, "search", { query: "chego as OITO" })).items.map((item) => item.id), [voiceSent.message.id]);
+  assert.deepEqual((await withAck(dj1, "search", { query: "14.03.12" })).items, []);
   // Só mensagem de voz; sessão vale; o erro do serviço chega explicado.
   assert.equal((await transcribe(firstLogin.body.token, (await withAck(dj1, "message", { text: "texto", clientId: "cliente-texto-transcricao" })).message.id)).body.error, "Só dá para transcrever mensagens de voz.");
   assert.equal((await transcribe("sessao-falsa", voiceSent.message.id)).status, 401);
@@ -802,7 +848,7 @@ try {
     const us2 = await connect(secondLogin.body.token);
     const us = (socket, data) => withAck(socket, "us", data);
     const day = "2026-10-22";
-    assert.equal(sql("SELECT value FROM {p}settings WHERE name = 'schema'")[0].value, "7");
+    assert.equal(sql("SELECT value FROM {p}settings WHERE name = 'schema'")[0].value, "8");
     const loaded = await us(us1, { op: "load", day });
     assert.equal(loaded.ok, true);
     assert.deepEqual([loaded.events, loaded.goals, loaded.letters], [[], [], []]);
@@ -953,6 +999,36 @@ try {
     assert.equal(all.letters[0].body, undefined);
     assert.deepEqual(all.habits["Pessoa 1"], habits);
     assert.equal((await us(us1, { op: "letter:delete", id: letter.item.id })).ok, true);
+    // Fotos, áudios e letra: só arquivos de quem escreve (foto que é foto, áudio que toca); pode ir sem texto.
+    const letterPhoto = (await upload(firstLogin.body.token, "nos.png", makePng(4, 3))).body.file;
+    const letterSong = (await upload(firstLogin.body.token, "Nossa música.m4a", mp4("soun"))).body.file;
+    const letterVoice = (await upload(firstLogin.body.token, "voz.webm", webm("A_OPUS"))).body.file;
+    const peerLetterPhoto = (await upload(secondLogin.body.token, "dela.png", makePng(2, 2))).body.file;
+    const plainFile = (await upload(firstLogin.body.token, "nota.txt", Buffer.from("só texto"))).body.file;
+    const richSeen = until(us2, "us", (change) => change.kind === "letter" && change.action === "new");
+    const rich = await us(us1, {
+      op: "letter:save", title: "Com fotos", body: "", paper: "azul", font: "mao",
+      photos: [{ key: letterPhoto.key }, { key: peerLetterPhoto.key }, { key: letterSong.key }],
+      audios: [{ key: letterPhoto.key, duration: 3, peaks: [] }, { key: letterSong.key, duration: 61.26, peaks: [10, 200, -1] }, { key: letterVoice.key, duration: 4, peaks: [50], voice: true }]
+    });
+    assert.equal(rich.ok, true, JSON.stringify(rich));
+    assert.deepEqual([rich.item.font, rich.item.paper, rich.item.body], ["mao", "azul", ""]);
+    assert.deepEqual(rich.item.photos.map((photo) => [photo.key, photo.width, photo.height]), [[letterPhoto.key, 4, 3]]);
+    assert.deepEqual(rich.item.audios.map(({ key, name, voice, duration, peaks }) => [key, name, voice, duration, peaks]), [[letterSong.key, "Nossa música.m4a", false, 61.3, [10, 100, 0]], [letterVoice.key, "Mensagem de voz", true, 4, [50]]]);
+    // Na lista (sem o texto) as fotos e os áudios já vão, para o cartão contar e a carta abrir com eles.
+    const richListed = (await richSeen).item;
+    assert.deepEqual([richListed.photos.length, richListed.audios.length, richListed.font], [1, 2, "mao"]);
+    assert.equal((await fetch(`${baseUrl}/${rich.item.audios[1].url}`)).headers.get("content-type"), "audio/webm");
+    // Editar: letra desconhecida volta para a clássica; o que saiu da cartinha é apagado do banco.
+    const trimmed = await us(us1, { op: "letter:save", id: rich.item.id, title: "Com fotos", body: "Agora com texto", font: "comic", photos: [], audios: [{ key: plainFile.key, duration: 3, peaks: [] }, { key: letterVoice.key, duration: 0, peaks: [] }, { key: letterVoice.key, duration: 4, peaks: [50], voice: true }] });
+    assert.deepEqual([trimmed.item.font, trimmed.item.photos, trimmed.item.audios.length], ["classica", [], 1]);
+    assert.deepEqual(sql(`SELECT file_key FROM {p}files WHERE message_id = '${rich.item.id}'`).map((row) => row.file_key), [letterVoice.key]);
+    // A outra pessoa não consegue usar os arquivos da cartinha numa dela.
+    const stolen = await us(us2, { op: "letter:save", title: "Minha", body: "oi", audios: [{ key: letterVoice.key, duration: 4, peaks: [50] }], photos: [{ key: letterPhoto.key }] });
+    assert.deepEqual([stolen.item.audios, stolen.item.photos], [[], []]);
+    await us(us2, { op: "letter:delete", id: stolen.item.id });
+    assert.equal((await us(us1, { op: "letter:delete", id: rich.item.id })).ok, true);
+    assert.equal(sql(`SELECT COUNT(*) AS total FROM {p}files WHERE message_id = '${rich.item.id}'`)[0].total, 0);
     assert.equal((await us(us1, { op: "nada" })).error, "Ação desconhecida.");
 
     // ---------- Joguinhos ----------
@@ -1095,7 +1171,7 @@ try {
   for (let i = 0; i < 14; i += 1) if ((await login("Pessoa 1", "errada")).status === 429) blocked += 1;
   assert.ok(blocked >= 1);
 
-  console.log("Integração PHP + MySQL aprovada: atualização do banco antigo, página, contas com senha própria, sala de duas pessoas, GIFs, fotos e arquivos (envio, entrega protegida, faixas de bytes, limpeza), foto de perfil (também em GIF), perfil da outra pessoa, tema, papel de parede, bot de música, mensagens de voz (áudio do navegador em MP4 e WebM, duração, forma de onda e transcrição), nosso cantinho (o dia de cada um com fotos, hábitos, resposta aos lembretes, agenda com repetições, sonhos e metas, cartinhas), joguinhos (cartas, velha, dama, memória e stop), extensão, confirmação, deduplicação, respostas, reações, leitura, apagar, digitando (e gravando áudio), chamadas, long polling, sessões da versão Node, paginação, senha esquecida e persistência.");
+  console.log("Integração PHP + MySQL aprovada: atualização do banco antigo, página, contas com senha própria, sala de duas pessoas, GIFs, fotos e arquivos (envio, entrega protegida, faixas de bytes, limpeza), foto de perfil (também em GIF), perfil da outra pessoa, tema, papel de parede, bot de música, mensagens de voz (áudio do navegador em MP4 e WebM, duração, forma de onda e transcrição), pesquisa na conversa, trechos antigos e hora da leitura, nosso cantinho (o dia de cada um com fotos, hábitos, resposta aos lembretes, agenda com repetições, sonhos e metas, cartinhas com fotos, áudios e letra), joguinhos (cartas, velha, dama, memória e stop), extensão, confirmação, deduplicação, respostas, reações, leitura, apagar, digitando (e gravando áudio), chamadas, long polling, sessões da versão Node, paginação, senha esquecida e persistência.");
 } finally {
   servers.forEach((server) => server.kill());
   transcriberServer.close();

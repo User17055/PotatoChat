@@ -83,6 +83,11 @@ function ops(array $input): array
         authenticate($input);
         return ['results' => [watch_catalog($data)]];
     }
+    // A pesquisa na conversa só lê: também fica fora da trava.
+    if (count($list) === 1 && str($list[0]['event'] ?? '') === 'search' && is_array($data)) {
+        authenticate($input);
+        return ['results' => [search_messages(str($data['query'] ?? ''), str($data['before'] ?? ''))]];
+    }
     return transaction(function () use ($input, $list) {
         $session = authenticate($input);
         $conn = conn_id($input);
