@@ -143,9 +143,14 @@ function setAvatar(name, path) {
   else avatars.delete(name);
 }
 
+// Guarda de quem é (data-avatar) para a foto entrar depois: ao abrir, a conversa chega antes da lista com as fotos.
+// A letra fica num nó de texto próprio, o primeiro; o resto (o visto do voto, a coroa do placar) continua lá.
 function paintAvatar(node, name) {
   const photo = name ? avatars.get(name) : "";
-  node.textContent = photo ? "" : name ? name.trim()[0].toUpperCase() : "?";
+  node.dataset.avatar = name || "";
+  const letter = photo ? "" : name ? name.trim()[0].toUpperCase() : "?";
+  if (node.firstChild?.nodeType === Node.TEXT_NODE) node.firstChild.nodeValue = letter;
+  else node.prepend(letter);
   node.style.setProperty("--hue", name ? hue(name) : 40);
   node.style.backgroundImage = photo ? `url("${photo}")` : "";
   node.classList.toggle("has-photo", Boolean(photo));
@@ -154,6 +159,8 @@ function paintAvatar(node, name) {
 // Avatares fora da lista de pessoas (abas, barra lateral, perfil e chamada).
 function repaintAvatars() {
   for (const node of [$("#side-avatar"), $("#profile-face")]) paintAvatar(node, me);
+  // E as que já estavam na tela: cartões dos jogos, placar, jogadores da mesinha…
+  document.querySelectorAll("[data-avatar]").forEach((node) => paintAvatar(node, node.dataset.avatar));
   $("#side-name").textContent = me || "Você";
   if (!call) return;
   paintAvatar($("#me-face"), me);
@@ -1588,6 +1595,8 @@ const VOICE_EXTENSION = { mp4: "m4a", webm: "webm", ogg: "ogg" };
 const VOICE_MIN = 1;
 const VOICE_MAX = 15 * 60;
 const VOICE_PEAKS = 40;
+// 64 kbps: voz limpa no AAC e no Opus (15 minutos dão uns 7 MB).
+const VOICE_BITRATE = 64000;
 const VOICE_SPEEDS = [1, 1.5, 2];
 const VOICE_SPEED_KEY = "potato.voiceSpeed";
 // Segurar o microfone menos que isso é um toque (grava sem segurar). Segurando, deslizar CANCEL_SLIDE px para a
@@ -1641,13 +1650,15 @@ function paintRecorder() {
   recStop.setAttribute("aria-label", stopLabel);
   recStop.title = review ? stopLabel : "Parar para ouvir antes de enviar";
   recSlide.style.transform = recSlide.style.opacity = recLock.style.transform = "";
+  // A cor da onda muda com a faixa (segurando ou não): o canvas lê de novo no próximo quadro.
+  if (rec) rec.waveColor = "";
   recLock.classList.remove("ready");
 }
 
-// Redução de ruído (ligada no Perfil): o microfone passa por um corte dos graves (ronco abaixo de 80 Hz) e pelo
-// RNNoise, uma rede neural de voz que roda no próprio aparelho (vendor/noise), antes de ir para o gravador.
-// Sem AudioWorklet (ou se algo falhar), grava direto, só com o filtro de ruído do navegador.
-const noiseOn = () => store.get("localStorage", NOISE_KEY) !== false;
+// Redução de ruído (opcional, no Perfil; vem desligada): o microfone passa por um corte dos graves (ronco abaixo de
+// 80 Hz) e pelo RNNoise, uma rede neural de voz que roda no próprio aparelho (vendor/noise), antes de ir para o
+// gravador. Sem AudioWorklet (ou se algo falhar), grava direto.
+const noiseOn = () => store.get("localStorage", NOISE_KEY) === true;
 let noiseKit = null;
 
 function loadNoiseKit() {
@@ -1683,11 +1694,59 @@ function releaseMicStream(session) {
   session.context?.close().catch(() => {});
 }
 
-function addRecBar(level) {
-  const bar = el("i");
-  bar.style.setProperty("--h", level.toFixed(2));
-  recWave.append(bar);
-  if (recWave.childElementCount > 150) recWave.firstElementChild.remove();
+// A onda ao vivo, desenhada num canvas a cada quadro: as barras deslizam sem pulos, e a da ponta (a dos últimos
+// 100 ms) cresce com a voz na hora. Junto, o brilho em volta da faixa (e do microfone, segurando) segue a voz.
+const recCanvas = el("canvas", "rec-canvas");
+const recPill = $(".rec-pill");
+const REC_STEP = 5;
+const REC_BAR = 3;
+
+function animateRecording(session) {
+  if (rec !== session || session.mode === "review") return;
+  session.draw = requestAnimationFrame(() => animateRecording(session));
+  if (!session.started) return;
+  const now = performance.now();
+  const level = voiceLevel(session.meter());
+  session.live = Math.max(level, (session.live || 0) * 0.82);
+  const glow = session.live.toFixed(2);
+  recPill.style.setProperty("--level", glow);
+  micButton.style.setProperty("--level", glow);
+  const width = recWave.clientWidth;
+  const height = recWave.clientHeight;
+  // Segurando o microfone, a onda não aparece.
+  if (!width || !height) return;
+  const ratio = devicePixelRatio || 1;
+  if (recCanvas.width !== Math.round(width * ratio) || recCanvas.height !== Math.round(height * ratio)) {
+    recCanvas.width = Math.round(width * ratio);
+    recCanvas.height = Math.round(height * ratio);
+  }
+  const context = recCanvas.getContext("2d");
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = session.waveColor ||= getComputedStyle(recWave).color;
+  // A barra da ponta entra pela direita durante os seus 100 ms; quando vira barra de verdade, já está no lugar.
+  const progress = Math.min(1, (now - session.lastBar) / 100);
+  const bar = (x, value) => {
+    const size = Math.max(REC_BAR, value * height);
+    context.beginPath();
+    if (context.roundRect) context.roundRect(x, (height - size) / 2, REC_BAR, size, REC_BAR / 2);
+    else context.rect(x, (height - size) / 2, REC_BAR, size);
+    context.fill();
+  };
+  const edge = width - progress * REC_STEP;
+  bar(edge, Math.max(session.peak, level));
+  const levels = session.levels;
+  for (let index = 0; index < levels.length; index += 1) {
+    const x = edge - REC_STEP * (index + 1);
+    if (x < -REC_STEP) break;
+    bar(x, levels[levels.length - 1 - index]);
+  }
+}
+
+function stopRecordingGlow(session) {
+  cancelAnimationFrame(session.draw);
+  recPill.style.removeProperty("--level");
+  micButton.style.removeProperty("--level");
 }
 
 async function startRecording(mode) {
@@ -1699,7 +1758,8 @@ async function startRecording(mode) {
   stopVoice();
   const session = rec = { mode, chunks: [], size: 0, levels: [], peak: 0, lockedAt: performance.now() };
   recTime.textContent = "0:00";
-  recWave.replaceChildren();
+  recWave.replaceChildren(recCanvas);
+  recCanvas.getContext("2d").clearRect(0, 0, recCanvas.width, recCanvas.height);
   paintRecorder();
   fx.show(recorderEl, { x: 24 });
   if (mode === "locked") fx.recorder(messageForm);
@@ -1713,7 +1773,10 @@ async function startRecording(mode) {
     loadNoiseKit().catch(() => {});
   }
   try {
-    session.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: noiseOn(), autoGainControl: true } });
+    // O microfone como ele ouve, igual a um gravador de voz (e ao WhatsApp). Com o cancelamento de eco, o celular
+    // grava no modo de chamada (som abafado, de telefone), e os filtros do navegador picotam a voz; eles ficam só
+    // para as chamadas.
+    session.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 } });
   } catch (error) {
     releaseMicStream(session);
     if (rec === session) stopRecording(false);
@@ -1739,7 +1802,7 @@ async function startRecording(mode) {
   if (rec !== session) return releaseMicStream(session);
   const type = VOICE_TYPES.find((candidate) => MediaRecorder.isTypeSupported(candidate));
   try {
-    session.recorder = new MediaRecorder(stream, type ? { mimeType: type, audioBitsPerSecond: 48000 } : { audioBitsPerSecond: 48000 });
+    session.recorder = new MediaRecorder(stream, type ? { mimeType: type, audioBitsPerSecond: VOICE_BITRATE } : { audioBitsPerSecond: VOICE_BITRATE });
   } catch {
     releaseMicStream(session);
     stopRecording(false);
@@ -1759,6 +1822,7 @@ async function startRecording(mode) {
   session.recorder.start(1000);
   session.started = session.lastBar = performance.now();
   session.timer = setInterval(() => recordTick(session), 30);
+  animateRecording(session);
   // A outra pessoa vê "gravando áudio…" (o aviso some sozinho em 5 s, então vai de novo a cada 3 s).
   socket?.emit("typing", "audio");
   session.typing = setInterval(() => socket?.emit("typing", "audio"), 3000);
@@ -1766,17 +1830,11 @@ async function startRecording(mode) {
 
 function recordTick(session) {
   const now = performance.now();
-  const level = voiceLevel(session.meter());
-  session.peak = Math.max(session.peak, level);
-  // A faixa (e o microfone, segurando) ganha um brilho em volta que cresce com a voz.
-  session.glow = (session.glow || 0) * 0.75 + level * 0.25;
-  messageForm.style.setProperty("--level", session.glow.toFixed(2));
-  // Uma barra a cada 100 ms. Com a aba em segundo plano o timer atrasa: as barras que faltam repetem o nível.
+  session.peak = Math.max(session.peak, voiceLevel(session.meter()));
+  // Uma barra a cada 100 ms (a onda é desenhada em animateRecording). Com a aba em segundo plano o timer atrasa: as
+  // barras que faltam repetem o nível.
   if (now - session.lastBar >= 100) {
-    for (let drawn = 0; now - session.lastBar >= 100; session.lastBar += 100, drawn++) {
-      session.levels.push(session.peak);
-      if (drawn < 8) addRecBar(session.peak);
-    }
+    for (; now - session.lastBar >= 100; session.lastBar += 100) session.levels.push(session.peak);
     session.peak = 0;
   }
   const seconds = (now - session.started) / 1000;
@@ -1838,7 +1896,7 @@ function stopRecording(keep) {
     session.audio.pause();
     URL.revokeObjectURL(session.audio.src);
   }
-  messageForm.style.removeProperty("--level");
+  stopRecordingGlow(session);
   // A faixa sai animada (para o enviar ou para a lixeira) e só depois o campo volta (se não começou outra gravação).
   fx.recorderOut(messageForm, keep, () => {
     if (rec) return;
@@ -1856,7 +1914,7 @@ async function reviewRecording() {
   const session = rec;
   if (session?.mode !== "locked" || !session.recorder) return;
   session.mode = "review";
-  messageForm.style.removeProperty("--level");
+  stopRecordingGlow(session);
   paintRecorder();
   sound.play("tap");
   const take = await closeRecorder(session);
