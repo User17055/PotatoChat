@@ -8,7 +8,8 @@ import androidx.core.content.ContextCompat
 
 /**
  * O que foi escrito (ou tocado) numa notificação, mandado sem abrir o app: a resposta a uma mensagem da conversa
- * (ACTION_REPLY) ou a um lembrete da rotina (ACTION_ROUTINE: "O que você almoçou?", "Acordei agora", "Fiz tudo").
+ * (ACTION_REPLY, na conversa dela), a um lembrete da rotina (ACTION_ROUTINE: "O que você almoçou?", "Acordei agora",
+ * "Fiz tudo") ou o Recusar de uma chamada (ACTION_DECLINE_CALL).
  * Quem envia é o serviço (ChatNotificationService), que fica conectado ao chat.
  */
 class NotificationReplyReceiver : BroadcastReceiver() {
@@ -21,6 +22,7 @@ class NotificationReplyReceiver : BroadcastReceiver() {
             ACTION_REPLY -> {
                 if (text.isBlank()) return
                 service.setAction(ChatNotificationService.ACTION_SEND_REPLY).putExtra(ChatNotificationService.EXTRA_REPLY_TEXT, text)
+                    .putExtra(ChatNotifications.EXTRA_ROOM, intent.getStringExtra(ChatNotifications.EXTRA_ROOM).orEmpty())
             }
             ACTION_ROUTINE -> {
                 // "Acordei agora" e "Fiz tudo" vêm sem texto: o servidor usa a hora do aparelho ou marca todos os hábitos.
@@ -33,6 +35,11 @@ class NotificationReplyReceiver : BroadcastReceiver() {
                     .putExtra(CantinhoNotifications.EXTRA_NOTIFICATION, intent.getIntExtra(CantinhoNotifications.EXTRA_NOTIFICATION, 0))
                     .putExtra(ChatNotificationService.EXTRA_REPLY_TEXT, text)
             }
+            ACTION_DECLINE_CALL -> {
+                val id = intent.getStringExtra(CallNotifications.EXTRA_CALL_ID) ?: return
+                CallNotifications.cancelIncoming(context)
+                service.setAction(ChatNotificationService.ACTION_DECLINE_CALL).putExtra(CallNotifications.EXTRA_CALL_ID, id)
+            }
             else -> return
         }
         ContextCompat.startForegroundService(context, service)
@@ -41,5 +48,6 @@ class NotificationReplyReceiver : BroadcastReceiver() {
     companion object {
         const val ACTION_REPLY = "com.potatochat.android.REPLY"
         const val ACTION_ROUTINE = "com.potatochat.android.ROUTINE"
+        const val ACTION_DECLINE_CALL = "com.potatochat.android.DECLINE_CALL"
     }
 }

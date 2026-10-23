@@ -3131,7 +3131,8 @@ function act(array $me, string $event, $data)
 
         case 'delete':
             $row = member_message($name, str($body['id'] ?? ''));
-            if (!$row || $row['sender'] !== $name || $row['deleted']) return null;
+            // Cartões de música (os comandos), jogos e chamadas não se apagam.
+            if (!$row || $row['sender'] !== $name || $row['deleted'] || in_array($row['source'], ['music', 'game', 'call'], true)) return null;
             $row = array_merge($row, ['deleted' => 1, 'text' => '', 'media' => null, 'reactions' => '{}']);
             query('UPDATE ' . t('messages') . " SET deleted = 1, text = '', media = NULL, reactions = '{}' WHERE n = ?", [$row['n']]);
             // A foto ou o arquivo some junto (o endereço para de funcionar).

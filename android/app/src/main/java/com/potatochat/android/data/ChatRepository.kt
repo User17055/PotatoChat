@@ -26,7 +26,13 @@ import java.util.concurrent.TimeUnit
 
 sealed interface ChatEvent {
     data class Connected(val connected: Boolean, val error: String? = null) : ChatEvent
-    data class History(val messages: List<ChatMessage>, val reads: Map<String, ReadReceipt>, val me: String, val hasMore: Boolean) : ChatEvent
+    /** calls = as chamadas abertas com esta pessoa; serverNow = o relógio do servidor (até quando uma chamada toca vem nele). */
+    data class History(
+        val messages: List<ChatMessage>, val reads: Map<String, ReadReceipt>, val me: String, val hasMore: Boolean,
+        val calls: List<JSONObject> = emptyList(), val serverNow: Long = 0
+    ) : ChatEvent
+    /** Contato novo (um convite aceito). */
+    object Rooms : ChatEvent
     data class Older(val messages: List<ChatMessage>, val hasMore: Boolean) : ChatEvent
     data class Message(val message: ChatMessage) : ChatEvent
     data class MessageUpdate(val message: ChatMessage) : ChatEvent
@@ -167,23 +173,29 @@ class ChatRepository {
         }
     }
 
-    suspend fun send(text: String, clientId: String, replyTo: String?): Result<ChatMessage> = withContext(Dispatchers.IO) {
+    /** Ação de chamada (op "call" do site: recusar…). A resposta, se deu certo; senão, null. */
+    suspend fun call(data: JSONObject): JSONObject? = withContext(Dispatchers.IO) {
+        runCatching { sendOperation("call", data) as? JSONObject }.getOrNull()?.takeIf { it.optBoolean("ok") }
+    }
+
+    /** room = a conversa (vazio: a do casal, ou a mais recente). */
+    suspend fun send(text: String, clientId: String, replyTo: String?, room: String = ""): Result<ChatMessage> = withContext(Dispatchers.IO) {
         runCatching {
             val data = JSONObject().put("text", text).put("clientId", clientId).apply {
                 if (replyTo != null) put("replyTo", replyTo)
             }
-            val result = sendOperation("message", data) as? JSONObject
+            val result = sendOperation("message", data, room) as? JSONObject
                 ?: error("O servidor nao confirmou a mensagem.")
             if (!result.optBoolean("ok")) error(result.optString("error", "Falha ao enviar."))
             result.getJSONObject("message").toMessage()
         }
     }
 
-    private suspend fun sendOperation(event: String, data: Any?): Any? = sendMutex.withLock {
+    private suspend fun sendOperation(event: String, data: Any?, room: String = ""): Any? = sendMutex.withLock {
         val server = currentServer ?: error("Sem conexao.")
         val session = currentSession ?: error("Sem conexao.")
         val conn = connectionId ?: error("Sem conexao.")
-        val operation = JSONObject().put("event", event).put("data", data ?: JSONObject.NULL)
+        val operation = JSONObject().put("event", event).put("data", data ?: JSONObject.NULL).put("room", room)
         val response = request(server, "ops", basePayload(session, conn).put("ops", JSONArray().put(operation)))
         response.optJSONArray("results")?.opt(0).takeUnless { it == JSONObject.NULL }
     }
@@ -196,7 +208,8 @@ class ChatRepository {
                     ?: ReadReceipt("", null)
             }
         } ?: emptyMap()
-        _events.emit(ChatEvent.History(json.optJSONArray("items").toMessages(), reads, json.optString("me", fallbackName), json.optBoolean("hasMore")))
+        val calls = json.optJSONArray("calls")?.let { list -> (0 until list.length()).mapNotNull { list.optJSONObject(it) } }.orEmpty()
+        _events.emit(ChatEvent.History(json.optJSONArray("items").toMessages(), reads, json.optString("me", fallbackName), json.optBoolean("hasMore"), calls, json.optLong("serverNow")))
     }
 
     private suspend fun dispatch(type: String, raw: Any?) {
@@ -207,7 +220,8 @@ class ChatRepository {
             "seen" -> data?.let { _events.emit(ChatEvent.Seen(it.optString("name"), ReadReceipt(it.optString("id"), it.optString("at")))) }
             "typing" -> data?.let { _events.emit(ChatEvent.Typing(it.optBoolean("active"))) }
             "us" -> data?.let { _events.emit(ChatEvent.Us(it)) }
-            "webrtc-offer", "webrtc-answer", "webrtc-ice", "call-state", "call-declined", "call-ended", "call-handled", "peer-left" ->
+            "rooms" -> _events.emit(ChatEvent.Rooms)
+            "call-ring", "call-accepted", "webrtc-offer", "webrtc-answer", "webrtc-ice", "call-state", "call-ended", "call-handled" ->
                 _events.emit(ChatEvent.Signal(type, data ?: JSONObject()))
         }
     }

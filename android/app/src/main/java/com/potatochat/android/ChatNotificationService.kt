@@ -30,13 +30,23 @@ import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
 
-/** Mantem o long polling ativo quando a WebView esta em segundo plano. */
+/**
+ * Mantém o long polling ativo quando a WebView está em segundo plano (e depois de ligar o celular): as mensagens de
+ * cada conversa, o Nosso cantinho e as chamadas. Chamada para esta pessoa toca aqui, mesmo com o app fechado (veja
+ * CallNotifications); recusar vai daqui, sem abrir o app. É um serviço "specialUse": o "dataSync" do Android 15 só
+ * deixa 6 horas por dia, e depois disso ninguém conseguiria ligar.
+ */
 class ChatNotificationService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var repository: ChatRepository? = null
     private var myName = ""
     private var connected = false
-    private val pendingReplies = ArrayDeque<String>()
+    // Respostas dadas na notificação (conversa, texto) e chamadas recusadas nela, esperando a conexão.
+    private val pendingReplies = ArrayDeque<Pair<String, String>>()
+    private val pendingDeclines = ArrayDeque<String>()
+    // A chamada tocando aqui (null = nenhuma) e a troca dela para "está te esperando" depois de tocar.
+    private var ringing: CallNotifications.Incoming? = null
+    private var ringEnd: kotlinx.coroutines.Job? = null
     // Fotos de perfil (nome → endereço) e as últimas mensagens da conversa, que entram como contexto na notificação.
     private val avatars = mutableMapOf<String, String?>()
     private val recent = ArrayDeque<ChatMessage>()
@@ -54,12 +64,19 @@ class ChatNotificationService : Service() {
         super.onCreate()
         createChannels()
         CantinhoNotifications.createChannels(this)
-        startForeground(FOREGROUND_ID, foregroundNotification())
+        CallNotifications.createChannels(this)
+        // Reiniciado pelo Android com o app fora da tela, o primeiro plano pode não ser permitido: aí ele para.
+        if (runCatching { startForeground(FOREGROUND_ID, foregroundNotification()) }.isFailure) stopSelf()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_SEND_REPLY) {
-            intent.getStringExtra(EXTRA_REPLY_TEXT)?.trim()?.takeIf { it.isNotBlank() }?.let(pendingReplies::addLast)
+            val room = intent.getStringExtra(ChatNotifications.EXTRA_ROOM).orEmpty()
+            intent.getStringExtra(EXTRA_REPLY_TEXT)?.trim()?.takeIf { it.isNotBlank() }?.let { pendingReplies.addLast(room to it) }
+        }
+        if (intent?.action == ACTION_DECLINE_CALL) {
+            intent.getStringExtra(CallNotifications.EXTRA_CALL_ID)?.let(pendingDeclines::addLast)
+            stopRinging()
         }
         if (intent?.action == ACTION_ROUTINE_REPLY) {
             val field = intent.getStringExtra(CantinhoNotifications.EXTRA_FIELD)
@@ -72,6 +89,7 @@ class ChatNotificationService : Service() {
             if (connected) {
                 sendPendingReplies()
                 sendPendingAnswers()
+                sendPendingDeclines()
             }
             return START_STICKY
         }
@@ -93,6 +111,7 @@ class ChatNotificationService : Service() {
                         if (connected) {
                             sendPendingReplies()
                             sendPendingAnswers()
+                            sendPendingDeclines()
                             loadSchedule()
                         }
                     }
@@ -100,6 +119,11 @@ class ChatNotificationService : Service() {
                     is ChatEvent.History -> {
                         recent.clear()
                         recent.addAll(event.messages.filter { !it.deleted }.takeLast(RECENT))
+                        if (event.serverNow > 0) clockOffset = event.serverNow - System.currentTimeMillis()
+                        // As chamadas abertas: a que é para mim toca (ou espera); a que tocava aqui e acabou, some.
+                        val mine = event.calls.firstOrNull { it.optString("callee") == myName && !it.optBoolean("answered") }
+                        if (ringing != null && event.calls.none { it.optString("id") == ringing?.id }) stopRinging()
+                        if (mine != null) onRing(mine)
                     }
                     is ChatEvent.Presence -> {
                         val next = event.people.associate { it.name to it.avatar }
@@ -111,25 +135,18 @@ class ChatNotificationService : Service() {
                     }
                     is ChatEvent.Message -> {
                         val message = event.message
-                        val earlier = recent.filter { it.id != message.id }.map { line(it) }
+                        val earlier = recent.filter { it.id != message.id && it.room == message.room }.map { line(it) }
                         recent.addLast(message)
                         while (recent.size > RECENT) recent.removeFirst()
-                        if (!message.sender.equals(myName, ignoreCase = true)) {
+                        // A chamada tem a própria notificação (tocando, perdida).
+                        if (!message.sender.equals(myName, ignoreCase = true) && !message.call) {
                             val avatar = avatars[message.sender]
                             launch(Dispatchers.IO) {
-                                ChatNotifications.showIncoming(this@ChatNotificationService, message.sender, message.preview, avatar, earlier)
+                                ChatNotifications.showIncoming(this@ChatNotificationService, message.room, message.sender, message.preview, avatar, earlier)
                             }
                         }
                     }
-                    is ChatEvent.Signal -> if (event.event == "webrtc-offer") {
-                        val name = event.data.optString("name", "Potato Chat")
-                        val media = when (event.data.optString("media")) {
-                            "video" -> "Chamada de video"
-                            "screen" -> "Transmissao de tela"
-                            else -> "Chamada de voz"
-                        }
-                        notifyCall("$name esta ligando", media)
-                    }
+                    is ChatEvent.Signal -> onCallSignal(event.event, event.data)
                     else -> Unit
                 }
             }
@@ -285,27 +302,62 @@ class ChatNotificationService : Service() {
         if (!connected || pendingReplies.isEmpty()) return
         scope.launch {
             while (connected && pendingReplies.isNotEmpty()) {
-                val text = pendingReplies.removeFirst()
-                chat.send(text, "android-reply-${UUID.randomUUID()}", null)
-                    .onSuccess { scope.launch(Dispatchers.IO) { ChatNotifications.showOutgoing(this@ChatNotificationService, text) } }
+                val (room, text) = pendingReplies.removeFirst()
+                chat.send(text, "android-reply-${UUID.randomUUID()}", null, room)
+                    .onSuccess { sent -> scope.launch(Dispatchers.IO) { ChatNotifications.showOutgoing(this@ChatNotificationService, sent.room.ifBlank { room }, text) } }
             }
         }
     }
 
-    private fun notifyCall(title: String, body: String) {
-        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
-        val notification = NotificationCompat.Builder(this, MainActivity.CALL_CHANNEL)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(title)
-            .setContentText(body.take(180))
-            .setStyle(NotificationCompat.BigTextStyle().bigText(body.take(500)))
-            .setContentIntent(openAppIntent())
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setBadgeIconType(NotificationCompat.BADGE_ICON_NONE)
-            .setNumber(0)
-            .build()
-        getSystemService(NotificationManager::class.java).notify(ChatNotifications.CALL_ID, notification)
+    private fun sendPendingDeclines() {
+        val chat = repository ?: return
+        if (!connected || pendingDeclines.isEmpty()) return
+        scope.launch {
+            while (connected && pendingDeclines.isNotEmpty()) chat.call(JSONObject().put("op", "decline").put("id", pendingDeclines.removeFirst()))
+        }
+    }
+
+    // ---------- chamadas ----------
+
+    private fun onCallSignal(type: String, data: JSONObject) {
+        val id = data.optString("id")
+        when (type) {
+            "call-ring" -> onRing(data)
+            // Atendida (ou recusada) em outro aparelho: aqui para de tocar.
+            "call-handled" -> if (id.isEmpty() || id == ringing?.id) stopRinging()
+            "call-ended" -> {
+                if (id == ringing?.id) stopRinging()
+                val caller = data.optString("caller")
+                if (data.optString("result") == "missed" && caller.isNotBlank() && !caller.equals(myName, ignoreCase = true)) {
+                    val avatar = avatars[caller]
+                    scope.launch(Dispatchers.IO) {
+                        CallNotifications.showMissed(this@ChatNotificationService, caller, data.optString("media"), data.optString("room"), avatar)
+                    }
+                }
+            }
+        }
+    }
+
+    // Chamada para mim: toca até ringUntil (no relógio do servidor) e depois vira "está te esperando na chamada".
+    private fun onRing(data: JSONObject) {
+        if (data.optString("callee") != myName || data.optBoolean("answered")) return
+        val call = CallNotifications.Incoming(data.optString("id"), data.optString("room"), data.optString("caller"), data.optString("media"))
+        if (call.id.isBlank() || call.id == ringing?.id) return
+        ringing = call
+        ringEnd?.cancel()
+        val left = data.optLong("ringUntil") - (System.currentTimeMillis() + clockOffset)
+        val avatar = avatars[call.caller]
+        scope.launch(Dispatchers.IO) { CallNotifications.showIncoming(this@ChatNotificationService, call, avatar, left > 0, left) }
+        ringEnd = scope.launch {
+            delay(left.coerceAtLeast(0))
+            if (ringing?.id == call.id) launch(Dispatchers.IO) { CallNotifications.showIncoming(this@ChatNotificationService, call, avatar, false, 0) }
+        }
+    }
+
+    private fun stopRinging() {
+        ringing = null
+        ringEnd?.cancel()
+        CallNotifications.cancelIncoming(this)
     }
 
     private fun foregroundNotification() = NotificationCompat.Builder(this, BACKGROUND_CHANNEL)
@@ -347,6 +399,7 @@ class ChatNotificationService : Service() {
     companion object {
         const val ACTION_SEND_REPLY = "com.potatochat.android.SEND_REPLY"
         const val ACTION_ROUTINE_REPLY = "com.potatochat.android.ROUTINE_REPLY"
+        const val ACTION_DECLINE_CALL = "com.potatochat.android.SERVICE_DECLINE_CALL"
         const val EXTRA_REPLY_TEXT = "reply_text"
         private const val REMINDER_BASE = 1000
         private val MEALS = mapOf("cafe" to "Café da manhã", "almoco" to "Almoço", "lanche" to "Lanche", "jantar" to "Jantar")

@@ -1252,6 +1252,12 @@ try {
     assert.equal(php("call_label(['media' => 'audio', 'result' => 'missed'])"), "Chamada perdida");
     assert.equal(php("call_label(['media' => 'video', 'result' => 'answered'])"), "Chamada de vídeo");
     assert.equal(sql("SELECT COUNT(*) AS total FROM {p}settings WHERE name LIKE 'call:%'")[0].total, 0);
+    // Cartões (chamada, música, jogo) não se apagam, nem por quem mandou.
+    const cards = sql("SELECT id FROM {p}messages WHERE sender = 'Pessoa 1' AND source IN ('call', 'music', 'game')").map((row) => row.id);
+    assert.ok(cards.length >= 3);
+    for (const id of cards) waiting.emit("delete", { id });
+    await withAck(waiting, "stats", null);
+    assert.equal(sql("SELECT COUNT(*) AS total FROM {p}messages WHERE source IN ('call', 'music', 'game') AND deleted = 1")[0].total, 0);
     waiting.disconnect();
     phone.disconnect();
     laptop.disconnect();

@@ -220,11 +220,14 @@ html.has-session #chat-view.hidden { display: grid !important; }
 .app-shell { position: relative; z-index: 1; height: 100vh; height: 100dvh; display: grid; grid-template-columns: 280px minmax(0, 1fr); }
 
 /* ---------- barra lateral ---------- */
-.sidebar { display: flex; flex-direction: column; justify-content: space-between; gap: 20px; padding: 28px 18px 18px; overflow-y: auto; border-right: 1px solid var(--line); background: color-mix(in srgb, var(--bg-2) 90%, transparent); backdrop-filter: blur(14px); }
+/* A barra lateral rola sem barra de rolagem à vista (e nunca para o lado: o que não cabe termina em "…"). */
+.sidebar { display: flex; flex-direction: column; justify-content: space-between; gap: 20px; padding: 28px 18px 18px; overflow-x: hidden; overflow-y: auto; scrollbar-width: none; border-right: 1px solid var(--line); background: color-mix(in srgb, var(--bg-2) 90%, transparent); backdrop-filter: blur(14px); }
 .brand-row { display: flex; align-items: center; gap: 12px; padding: 0 6px; font-size: 19px; font-weight: 700; letter-spacing: -.02em; }
 .potato-mini { width: 44px; height: 31px; cursor: pointer; }
 .room-label { margin: 38px 8px 12px; color: var(--faint); font-size: 10px; font-weight: 600; letter-spacing: .18em; text-transform: uppercase; }
-.people { display: grid; gap: 4px; }
+.sidebar::-webkit-scrollbar { display: none; }
+.sidebar > div, .people, button.person { min-width: 0; }
+.people { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .person { display: flex; align-items: center; gap: 12px; padding: 8px 6px; border-radius: 12px; }
 .person strong, .person small { display: block; }
 .person strong { font-size: 13px; font-weight: 600; }
@@ -1882,24 +1885,19 @@ button.day-note:hover { background: var(--surface-3); }
 .invite-form { display: grid; gap: 8px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
 .invite-form label { color: var(--muted); font-size: 12.5px; font-weight: 600; }
 
-/* ---------- chamada na conversa (tocando, acontecendo, quanto durou, perdida) ---------- */
-.message.call-row { align-self: center; width: min(94%, 380px); max-width: none; margin-top: 6px; }
-.message.call-row .bubble { flex: 1; }
-.bubble.call-card, .mine .bubble.call-card { padding: 10px 12px 7px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface-2); color: var(--ink); white-space: normal; box-shadow: 0 8px 22px #0004; }
-.bubble.call-card .foot { float: none; display: flex; justify-content: flex-end; margin: 4px 0 0; }
-.call-note { display: flex; align-items: center; gap: 10px; }
-.call-note-icon { --tone: var(--speak); flex: none; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; background: color-mix(in srgb, var(--tone) 18%, transparent); color: var(--tone); }
-.call-note-icon .icon { width: 18px; height: 18px; }
-.call-note.lost .call-note-icon { --tone: var(--live); }
-.call-note.open .call-note-icon { animation: call-note-pulse 1.6s ease-in-out infinite; }
-.call-note-text { flex: 1; min-width: 0; display: grid; }
-.call-note-text strong { overflow: hidden; font-size: 13.5px; text-overflow: ellipsis; white-space: nowrap; }
-.call-note.missed .call-note-text strong { color: var(--live); }
-.call-note-text small { color: var(--muted); font-size: 12px; }
-.call-note-button { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border: 0; border-radius: 999px; background: var(--speak); color: #fff; font-size: 12.5px; font-weight: 600; transition: transform .15s; }
-.call-note-button:active { transform: scale(.96); }
-.call-note-button .icon { width: 15px; height: 15px; }
-@keyframes call-note-pulse { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--tone) 16%, transparent); } }
+/* ---------- chamada na conversa: uma linha, como no Discord (sem balão) ---------- */
+.message.call-row { align-self: stretch; max-width: none; margin-top: 4px; }
+.message.call-row .bubble-row { justify-content: flex-start; }
+.bubble.call-card, .mine .bubble.call-card { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 4px 6px; border: 0; background: none; box-shadow: none; color: var(--muted); white-space: normal; }
+.bubble.call-card .foot { float: none; margin: 0; }
+.bubble.call-card .foot .status { display: none; }
+.call-line { display: flex; align-items: center; gap: 12px; font-size: 14px; }
+.call-line > .icon { flex: none; width: 18px; height: 18px; color: var(--speak); }
+.call-line.lost > .icon { color: var(--muted); }
+.call-line-text strong { color: var(--ink); font-weight: 600; }
+.call-line-join { padding: 4px 12px; border: 0; border-radius: 999px; background: var(--speak); color: #fff; font-size: 12.5px; font-weight: 600; }
+.call-line.open > .icon { animation: call-line-ring 1.2s ease-in-out infinite; }
+@keyframes call-line-ring { 0%, 60%, 100% { transform: rotate(0); } 20% { transform: rotate(-14deg); } 40% { transform: rotate(14deg); } }
 
 /* ---------- cartão do jogo na conversa ---------- */
 .message.game-note { align-self: center; width: min(94%, 380px); max-width: none; margin-top: 8px; }

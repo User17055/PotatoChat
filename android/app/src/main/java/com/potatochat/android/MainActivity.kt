@@ -15,7 +15,9 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.webkit.CookieManager
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.DownloadListener
 import android.webkit.PermissionRequest
 import android.webkit.URLUtil
@@ -42,6 +44,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var webView: WebView
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var mediaRequest: PermissionRequest? = null
+    // A chamada aberta no site (null = nenhuma): enquanto ela existe, o CallService segura o microfone com o app fora da
+    // tela, e o WebView não é pausado.
+    private var callState: CallService.State? = null
 
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (::webView.isInitialized) {
@@ -56,6 +61,8 @@ class MainActivity : ComponentActivity() {
         if (result[Manifest.permission.RECORD_AUDIO] == true) resources += PermissionRequest.RESOURCE_AUDIO_CAPTURE
         if (result[Manifest.permission.CAMERA] == true) resources += PermissionRequest.RESOURCE_VIDEO_CAPTURE
         if (resources.isEmpty()) request.deny() else request.grant(resources.toTypedArray())
+        // A chamada começou antes da permissão do microfone: agora o serviço dela pode começar.
+        callState?.let(::startCallService)
     }
 
     private val filePicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -87,6 +94,7 @@ class MainActivity : ComponentActivity() {
         window.navigationBarColor = Color.rgb(18, 16, 13)
         createChannels()
         configureWebView()
+        CallBridge.page = { action -> webView.evaluateJavascript("window.potatoCall && window.potatoCall(${JSONObject.quote(action)})", null) }
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.rgb(18, 16, 13))
             addView(webView)
@@ -118,15 +126,53 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
-        // Aberto por uma notificação do Nosso cantinho: o site já começa na parte certa (#agenda, #cartinhas…).
-        webView.loadUrl(SITE_URL + section(intent)?.let { "#$it" }.orEmpty())
+        // Aberto por uma notificação: o site já começa na parte certa (#agenda, #cartinhas…), na conversa da mensagem
+        // (#conversa=), atendendo a chamada (#atender=) ou ligando de volta (#ligar=).
+        overLockForCall(intent)
+        val hash = section(intent) ?: callHash(intent)
+        webView.loadUrl(SITE_URL + hash?.let { "#$it" }.orEmpty())
     }
 
-    // Com o app já aberto, a notificação do Nosso cantinho só troca a parte que aparece.
+    // Com o app já aberto, a notificação só troca o que aparece (ou atende, liga, abre a conversa).
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        val section = section(intent) ?: return
-        webView.evaluateJavascript("window.potatoOpen && window.potatoOpen(${JSONObject.quote(section)})", null)
+        overLockForCall(intent)
+        section(intent)?.let { webView.evaluateJavascript("window.potatoOpen && window.potatoOpen(${JSONObject.quote(it)})", null) }
+        val action = intent.getStringExtra(CallNotifications.EXTRA_CALL_ACTION)
+        val room = intent.getStringExtra(ChatNotifications.EXTRA_ROOM).orEmpty()
+        when (action) {
+            "accept" -> js("window.potatoCall && window.potatoCall('accept', ${JSONObject.quote(intent.getStringExtra(CallNotifications.EXTRA_CALL_ID).orEmpty())})")
+            "dial" -> js("window.potatoCall && window.potatoCall('dial', ${JSONObject.quote(intent.getStringExtra(CallNotifications.EXTRA_MEDIA).orEmpty())}, ${JSONObject.quote(room)})")
+            null -> if (room.isNotBlank()) js("window.potatoRoom && window.potatoRoom(${JSONObject.quote(room)})")
+        }
+    }
+
+    private fun js(code: String) = webView.evaluateJavascript(code, null)
+
+    private fun callHash(intent: Intent?): String? {
+        val room = intent?.getStringExtra(ChatNotifications.EXTRA_ROOM).orEmpty()
+        return when (intent?.getStringExtra(CallNotifications.EXTRA_CALL_ACTION)) {
+            "accept" -> "atender=${intent.getStringExtra(CallNotifications.EXTRA_CALL_ID).orEmpty()}"
+            "dial" -> "ligar=${intent.getStringExtra(CallNotifications.EXTRA_MEDIA).orEmpty()}:$room"
+            else -> room.takeIf { it.isNotBlank() }?.let { "conversa=$it" }
+        }
+    }
+
+    // Chamada tocando com o celular bloqueado (a notificação em tela cheia): o app aparece por cima, sem desbloquear,
+    // até a chamada acabar.
+    private fun overLockForCall(intent: Intent?) {
+        if (intent?.getStringExtra(CallNotifications.EXTRA_CALL_ACTION) in setOf("show", "accept")) showOverLock(true)
+    }
+
+    private fun showOverLock(on: Boolean) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(on)
+            setTurnScreenOn(on)
+        } else {
+            @Suppress("DEPRECATION")
+            val flags = WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+            if (on) window.addFlags(flags) else window.clearFlags(flags)
+        }
     }
 
     private fun section(intent: Intent?): String? =
@@ -159,7 +205,18 @@ class MainActivity : ComponentActivity() {
                         true
                     }
                 }
+
+                // O processo do site caiu (pouca memória, com o app em segundo plano): sem isso o app fecharia. A chamada
+                // que estava nele acabou; o app abre de novo.
+                override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                    callState = null
+                    CallService.stop(this@MainActivity)
+                    recreate()
+                    return true
+                }
             }
+            // Com o app fora da tela no meio de uma chamada, o site continua com a mesma prioridade (não é encerrado antes).
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
             webChromeClient = object : WebChromeClient() {
                 override fun onPermissionRequest(request: PermissionRequest) {
                     runOnUiThread { handleMediaPermission(request) }
@@ -234,11 +291,39 @@ class MainActivity : ComponentActivity() {
             "notification" -> showNotification(
                 message.optString("title", "Potato Chat"),
                 message.optString("body"),
-                message.optString("tag") == "potato-call",
+                message.optString("tag"),
                 message.optString("icon").takeIf { it.startsWith(SITE_ORIGIN) }
             )
             "permission" -> requestNotificationPermission()
+            "call" -> onCallState(message)
+            // O convite (Adicionar pessoa): a janela de compartilhar do Android (WhatsApp, Instagram…).
+            "share" -> runCatching {
+                val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, message.optString("text"))
+                startActivity(Intent.createChooser(send, "Mandar o convite"))
+            }
         }
+    }
+
+    // O site avisa como está a chamada (active: começou, conectou, mudo; não: acabou). ringing = ainda tocando aqui.
+    private fun onCallState(message: JSONObject) {
+        if (!message.optBoolean("active")) {
+            callState = null
+            CallService.stop(this)
+            if (!message.optBoolean("ringing")) showOverLock(false)
+            return
+        }
+        val state = CallService.State(
+            message.optString("id"), message.optString("name"), message.optString("avatar").takeIf { it.isNotBlank() },
+            message.optString("media"), message.optBoolean("connected"), message.optLong("since"), message.optBoolean("mic", true)
+        )
+        callState = state
+        startCallService(state)
+    }
+
+    // O Android só deixa o microfone em segundo plano com a permissão dele já dada (senão o serviço nem começa).
+    private fun startCallService(state: CallService.State) {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
+        runCatching { CallService.update(this, state) }
     }
 
     private fun requestNotificationPermission() {
@@ -295,29 +380,16 @@ class MainActivity : ComponentActivity() {
         """.trimIndent()
     }
 
-    private fun showNotification(title: String, body: String, call: Boolean, icon: String?) {
+    // Mensagem que o site avisou com a página escondida (tag "potato-chat:<conversa>"). A chamada tem a notificação
+    // própria, do serviço em segundo plano.
+    private fun showNotification(title: String, body: String, tag: String, icon: String?) {
+        if (!tag.startsWith("potato-chat")) return
         if (!getSharedPreferences(PREFS, 0).getBoolean("notifications", true)) return
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
-        if (!call) {
-            // A foto de quem mandou pode precisar ser baixada: fora da thread principal.
-            val context = applicationContext
-            Thread { ChatNotifications.showIncoming(context, title, body, icon) }.start()
-            return
-        }
-        val intent = Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        val pending = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val notification = NotificationCompat.Builder(this, CALL_CHANNEL)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(title)
-            .setContentText(body.take(180))
-            .setStyle(NotificationCompat.BigTextStyle().bigText(body.take(500)))
-            .setContentIntent(pending)
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setBadgeIconType(NotificationCompat.BADGE_ICON_NONE)
-            .setNumber(0)
-            .build()
-        getSystemService(NotificationManager::class.java).notify(ChatNotifications.CALL_ID, notification)
+        // A foto de quem mandou pode precisar ser baixada: fora da thread principal.
+        val context = applicationContext
+        val room = tag.substringAfter(':', "")
+        Thread { ChatNotifications.showIncoming(context, room, title, body, icon) }.start()
     }
 
     private fun download(url: String, userAgent: String, disposition: String, mimeType: String) {
@@ -334,6 +406,7 @@ class MainActivity : ComponentActivity() {
 
     private fun createChannels() {
         CantinhoNotifications.createChannels(this)
+        CallNotifications.createChannels(this)
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(MESSAGE_CHANNEL, "Mensagens", NotificationManager.IMPORTANCE_HIGH).apply { setShowBadge(true) })
         manager.createNotificationChannel(NotificationChannel(CALL_CHANNEL, "Chamadas", NotificationManager.IMPORTANCE_HIGH).apply { setShowBadge(false) })
@@ -347,6 +420,14 @@ class MainActivity : ComponentActivity() {
         ChatNotifications.clear(this)
         // O One UI cria um resumo automatico; limpa novamente depois que o servico termina.
         webView.postDelayed({ notifications.cancelAll() }, 500)
+        // De volta à tela no meio de uma chamada: a câmera que desligou ao sair volta.
+        if (callState != null) js("window.potatoCall && window.potatoCall('foreground')")
+    }
+
+    // Saindo da tela no meio de uma chamada: o Android não deixa a câmera continuar (o microfone continua).
+    override fun onStop() {
+        if (callState != null) js("window.potatoCall && window.potatoCall('background')")
+        super.onStop()
     }
 
     private fun startBackgroundNotifications() {
@@ -357,9 +438,16 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onResume() { super.onResume(); webView.onResume() }
-    override fun onPause() { startBackgroundNotifications(); webView.onPause(); super.onPause() }
+    // Numa chamada o WebView não pausa: ela continua com o app em segundo plano.
+    override fun onPause() {
+        startBackgroundNotifications()
+        if (callState == null) webView.onPause()
+        super.onPause()
+    }
 
     override fun onDestroy() {
+        CallBridge.page = null
+        CallService.stop(this)
         fileCallback?.onReceiveValue(null)
         mediaRequest?.deny()
         webView.stopLoading()

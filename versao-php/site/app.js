@@ -380,12 +380,12 @@ loginForm.addEventListener("submit", async (event) => {
 
 function startSession({ token, name }, { animate }) {
   me = name;
+  callFromHash();
   room ||= store.get("localStorage", ROOM_KEY) || "";
   store.set("localStorage", SESSION_KEY, { token, name });
   tellParent({ type: "potato:session", token, name });
   connect(token, animate);
   openFromHash();
-  callFromHash();
   // Já com a conta, abriu o link de um convite: aceita assim que conectar.
   pendingInvite = inviteInHash();
   if (pendingInvite) history.replaceState(null, "", location.pathname + location.search);
@@ -761,7 +761,7 @@ function renderAll() {
   messagesEl.append(fragment);
   if (!list.length && !waiting.length) {
     const empty = el("div", "empty");
-    const text = !room ? "Você ainda não tem conversas: adicione alguém pelo menu (Adicionar pessoa)."
+    const text = !room ? "Mande o link para a outra pessoa criar a conta dela. A conversa começa aqui."
       : rooms.find((entry) => entry.id === room)?.couple ? "Nosso chat começa aqui. Manda um oi!" : `A conversa com ${peerName} começa aqui. Manda um oi!`;
     empty.append(potatoArt(), el("span", "", text));
     messagesEl.append(empty);
@@ -887,7 +887,9 @@ function fill(article, message) {
       remove.dataset.action = "delete";
       remove.title = "Apagar para todos";
       remove.append(icon("trash"));
-      tools.append(info, remove);
+      tools.append(info);
+      // Cartões de música (os comandos), jogos e chamadas ficam: só mensagem escrita, foto, arquivo e áudio se apagam.
+      if (!isCard(message)) tools.append(remove);
     }
     // Ordem de entrada da animação dos botões (styles.css).
     [...tools.children].forEach((button, index) => button.style.setProperty("--i", index));
@@ -5006,15 +5008,8 @@ function paintRooms() {
     row.append(avatar, text, badge);
     return row;
   });
-  const add = el("button", "person add-person");
-  add.type = "button";
-  add.dataset.addPerson = "";
-  const plus = el("span", "avatar add-avatar");
-  plus.append(icon("user-plus"));
-  const label = el("div", "person-text");
-  label.append(el("strong", "", "Adicionar pessoa"), el("small", "", "Mande um convite por link"));
-  add.append(plus, label);
-  peopleEl.replaceChildren(...rows, add);
+  // O Adicionar pessoa (convite) fica escondido: o chat é só do casal. Para mostrar, é só pôr o botão de volta aqui.
+  peopleEl.replaceChildren(...rows);
 }
 
 peopleEl.addEventListener("click", (event) => {
@@ -5145,7 +5140,7 @@ function acceptInvite(code) {
 // "digitando…", "online agora", "Visto por último hoje às 14:03"… (no topo e no perfil da outra pessoa).
 function peerStatusText(peer) {
   if (peerTyping) return peerTyping === "audio" ? "gravando áudio…" : "digitando…";
-  if (!peer) return room ? "" : "Adicione alguém pelo menu para conversar";
+  if (!peer) return room ? "" : "Mande o link para a outra pessoa criar a conta dela";
   if (peer.online) return peer.active ? "online agora" : "online";
   return lastSeenLabel(peer.lastSeen);
 }
@@ -5650,7 +5645,7 @@ async function startCall(media, share = {}) {
   }
   if (!peerName || !socket?.connected) {
     sound.play("error");
-    return toast(peerName ? "Sem conexão agora. Tente de novo em instantes." : "Abra uma conversa para ligar (ou adicione alguém pelo menu).", "error");
+    return toast(peerName ? "Sem conexão agora. Tente de novo em instantes." : "Dá para ligar quando a outra pessoa criar a conta dela.", "error");
   }
   const active = call = newCall({ media, role: "caller", name: peerName, room });
   // A tela é escolhida primeiro, enquanto o clique ainda vale para o navegador.
@@ -5850,51 +5845,44 @@ function syncCall(calls) {
   if (waiting) ring(waiting);
 }
 
-// Chamada na conversa (estilo Discord): tocando (com o Entrar para quem recebe), acontecendo, quanto durou, recusada
-// ou perdida (com o Ligar de volta).
+// Chamada na conversa, como no Discord: uma linha só, com o ícone do telefone, o que aconteceu e quanto durou
+// ("Ana iniciou uma chamada que durou 9 minutos.", "Você perdeu uma chamada de Ana que durou poucos segundos.").
+// Enquanto a chamada está aberta esperando você, tem o Entrar.
 function callCard(message) {
   const info = message.call;
   const mine = info.caller === me;
-  const other = mine ? info.callee : info.caller;
-  const label = mediaLabel[info.media] || "Chamada";
+  const name = (who) => el("strong", "", who === me ? "Você" : who);
   const open = info.status !== "ended";
-  const missed = info.result === "missed";
-  const declined = info.result === "declined";
-  // lost = não aconteceu (ícone vermelho); missed = a chamada que você perdeu (o título também).
-  const box = el("div", `call-note${open ? " open" : ""}${missed || declined ? " lost" : ""}${missed && !mine ? " missed" : ""}`);
-  const badge = el("span", "call-note-icon");
-  badge.append(icon(missed || declined ? "phone-missed" : { video: "video", screen: "monitor-up" }[info.media] || "phone"));
-  let title = label;
-  let detail;
-  if (open) {
-    if (!mine && info.status === "ringing") title = `${info.caller} está te ligando`;
-    detail = info.status === "live" ? "Acontecendo agora" : mine ? `Chamando ${other}…` : label;
-  } else if (missed) {
-    if (!mine) title = "Chamada perdida";
-    detail = mine ? `${other} não atendeu` : `${label} de ${info.caller}`;
-  } else if (declined) {
-    detail = mine ? `${other} recusou` : "Você recusou";
-  } else {
-    detail = `Durou ${clockTime((info.endedAt - info.answeredAt) / 1000)}`;
+  const lost = !mine && (info.result === "missed" || info.result === "declined");
+  const line = el("div", `call-line${lost ? " lost" : ""}${open ? " open" : ""}`);
+  line.append(icon(lost ? "phone-missed" : "phone"));
+  const text = el("span", "call-line-text");
+  const lasted = (ms) => ` que durou ${callDuration(ms)}.`;
+  if (open) text.append(name(info.caller), info.status === "live" ? " está numa chamada." : " iniciou uma chamada.");
+  else if (info.result === "declined") text.append(...(mine ? [name(info.callee), " recusou a sua chamada."] : ["Você recusou uma chamada de ", name(info.caller), "."]));
+  else if (lost) text.append("Você perdeu uma chamada de ", name(info.caller), lasted(info.endedAt - info.startedAt));
+  else text.append(name(info.caller), ` iniciou uma chamada${lasted(info.endedAt - (info.answeredAt || info.startedAt))}`);
+  line.append(text);
+  if (open && !mine && info.status === "ringing" && !call?.accepted) {
+    const join = el("button", "call-line-join", "Entrar");
+    join.type = "button";
+    join.dataset.callAction = "join";
+    line.append(join);
   }
-  const text = el("div", "call-note-text");
-  text.append(el("strong", "", title), el("small", "", detail));
-  box.append(badge, text);
-  if (open && !mine && info.status === "ringing" && !call?.accepted) box.append(callCardButton("Entrar", "join"));
-  else if (missed || declined) box.append(callCardButton(mine ? "Ligar de novo" : "Ligar de volta", "dial"));
-  return box;
+  return line;
 }
 
-function callCardButton(label, action) {
-  const button = el("button", "call-note-button");
-  button.type = "button";
-  button.dataset.callAction = action;
-  button.append(icon("phone"), label);
-  return button;
+// "poucos segundos", "um minuto", "9 minutos", "uma hora", "2 horas".
+function callDuration(ms) {
+  const minutes = Math.floor(Math.max(0, ms) / 60000);
+  if (minutes < 1) return "poucos segundos";
+  if (minutes < 60) return minutes === 1 ? "um minuto" : `${minutes} minutos`;
+  const hours = Math.floor(minutes / 60);
+  return hours === 1 ? "uma hora" : `${hours} horas`;
 }
 
 function callCardAction(action, info) {
-  if (action === "dial") return startCall(info.media === "video" ? "video" : "audio");
+  if (action !== "join") return;
   // Entrar: a janela de atender já está aberta para ela, ou o servidor diz se ela ainda está aberta.
   if (call?.id === info.id) return acceptCall();
   socket?.timeout(8000).emit("call", { op: "get", id: info.id }, (error, result) => {
@@ -5912,6 +5900,8 @@ function callCardAction(action, info) {
 let androidCall = "";
 let pendingAccept = "";
 let pendingDial = "";
+// A conversa em que o Ligar de volta liga (a da chamada perdida).
+let pendingDialRoom = "";
 
 function syncAndroidCall() {
   if (!inAndroid) return;
@@ -5936,7 +5926,7 @@ function pauseCamera(hidden) {
   }
 }
 
-window.potatoCall = (action, value = "") => {
+window.potatoCall = (action, value = "", where = "") => {
   if (action === "accept") {
     if (call?.id === value) acceptCall();
     else pendingAccept = value;
@@ -5949,6 +5939,7 @@ window.potatoCall = (action, value = "") => {
     toggleMic();
   } else if (action === "dial") {
     pendingDial = value || "audio";
+    pendingDialRoom = where;
     if (socket?.connected) runPendingDial();
   } else if (action === "background" || action === "foreground") {
     pauseCamera(action === "background");
@@ -5957,18 +5948,30 @@ window.potatoCall = (action, value = "") => {
 
 function runPendingDial() {
   if (!pendingDial || !peerName) return;
-  const media = pendingDial;
-  pendingDial = "";
-  startCall(media === "video" ? "video" : "audio");
+  const media = pendingDial === "video" ? "video" : "audio";
+  const where = pendingDialRoom;
+  pendingDial = pendingDialRoom = "";
+  openRoom(where || room).then((opened) => {
+    if (!opened) return;
+    showTab("chat");
+    startCall(media);
+  });
 }
 
-// Endereço com #atender=<id> (atender pela notificação do celular, com o app fechado) ou #ligar=audio (ligar de volta).
+// O app do Android abre uma conversa (tocou na notificação de uma mensagem).
+window.potatoRoom = (id) => {
+  if (me && id) openRoom(id).then((opened) => opened && showTab("chat"));
+};
+
+// Endereço vindo das notificações do celular (com o app fechado): #atender=<id> (atender), #ligar=audio:<conversa>
+// (ligar de volta) ou #conversa=<id> (abrir a conversa de uma mensagem).
 function callFromHash() {
   const [key, value = ""] = location.hash.slice(1).split("=");
-  if (key !== "atender" && key !== "ligar") return;
+  if (!["atender", "ligar", "conversa"].includes(key)) return;
   history.replaceState(null, "", location.pathname + location.search);
   if (key === "atender") pendingAccept = value;
-  else pendingDial = value || "audio";
+  else if (key === "conversa") room = value;
+  else [pendingDial, pendingDialRoom = ""] = value.split(":");
 }
 
 async function receiveAnswer({ description, from, state }) {
