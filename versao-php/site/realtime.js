@@ -68,7 +68,7 @@ class Connection extends Emitter {
       const response = await fetch(apiUrl(action), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: this.auth.token, client: this.auth.client || "web", conn: this.id, visible: !document.hidden, ...body }),
+        body: JSON.stringify({ token: this.auth.token, client: this.auth.client || "web", conn: this.id, visible: !document.hidden, room: this.auth.room || "", ...body }),
         cache: "no-store",
         keepalive,
         signal: controller.signal
@@ -94,11 +94,6 @@ class Connection extends Emitter {
     try {
       const data = await this.request("connect", {}, { timeout: 15000 });
       if (gen !== this.gen) return;
-      if (data.roomFull) {
-        this.active = false;
-        this.trigger("room-full");
-        return;
-      }
       this.attempt = 0;
       this.connected = true;
       this.cursor = data.cursor;
@@ -183,13 +178,16 @@ class Connection extends Emitter {
     return { emit: (event, data, ack) => { this.send(event, data, ack, ms); return this; } };
   }
 
+  // auth.room = a conversa aberta: cada ação leva a de quando foi feita (trocar de conversa com algo ainda na fila não
+  // manda para a outra).
   send(event, data = null, ack = null, timeout = 0) {
+    const room = this.auth.room || "";
     // Fim de chamada sai na hora, sem fila, e chega mesmo se a aba estiver fechando.
     if (event === "call-ended") {
-      if (this.active) this.request("ops", { attach: false, ops: [{ event, data }] }, { keepalive: true }).catch(() => {});
+      if (this.active) this.request("ops", { attach: false, ops: [{ event, data, room }] }, { keepalive: true }).catch(() => {});
       return;
     }
-    const op = { event, data: data === undefined ? null : data, ack: typeof ack === "function" ? ack : null, timeout };
+    const op = { event, data: data === undefined ? null : data, room, ack: typeof ack === "function" ? ack : null, timeout };
     if (!this.connected) {
       if (op.ack && timeout) op.ack(new Error("Sem conexão."));
       return;
@@ -214,7 +212,7 @@ class Connection extends Emitter {
     this.sending = true;
     const batch = this.queue.splice(0, 40);
     try {
-      const { results = [] } = await this.request("ops", { ops: batch.map(({ event, data }) => ({ event, data })) }, { timeout: 20000 });
+      const { results = [] } = await this.request("ops", { ops: batch.map(({ event, data, room }) => ({ event, data, room })) }, { timeout: 20000 });
       batch.forEach((op, index) => this.settle(op, null, results[index]));
     } catch (error) {
       batch.forEach((op) => this.settle(op, error));

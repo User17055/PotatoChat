@@ -33,6 +33,7 @@ const incoming = $("#incoming");
 const SESSION_KEY = "potato.session";
 const NAME_KEY = "potato.name";
 const NOTIFY_KEY = "potato.notify";
+const ROOM_KEY = "potato.room";
 const REACTIONS = ["❤️", "😂", "😮", "😢", "👍", "🔥"];
 const rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }] };
 
@@ -54,7 +55,13 @@ const games = new Map();
 const pending = new Map();
 let reads = {};
 let presenceList = [];
+// A pessoa da conversa aberta.
 let peerName = "";
+// A conversa aberta (id; fica guardada para a próxima vez), as conversas (os contatos: com quem, a última mensagem e
+// quantas não foram lidas) e se esta pessoa é do casal (o Nosso cantinho é só dele).
+let room = "";
+let rooms = [];
+let couple = false;
 let peerWasOnline = null;
 // "" (nada), "text" (digitando) ou "audio" (gravando um áudio).
 let peerTyping = "";
@@ -192,6 +199,7 @@ const FILE_LABEL = { image: "Foto", video: "Vídeo", audio: "Áudio" };
 const previewText = (message) => (message.gif ? "GIF"
   : message.music ? `Música: ${message.music.title}`
   : message.game ? GAME_NAMES[message.game.type] || "Joguinho"
+  : message.call ? callLabel(message.call)
   : message.file?.voice ? `Mensagem de voz (${clockTime(message.file.voice.duration)})`
   : message.file && !message.text ? FILE_LABEL[message.file.kind] || message.file.name
   : message.text);
@@ -281,14 +289,21 @@ for (const input of passwordInputs) {
   input.addEventListener("blur", () => $("#caps").classList.add("hidden"));
 }
 
-// Primeiro acesso: as duas primeiras pessoas escolhem nome e senha, que ficam valendo para sempre.
+// Primeiro acesso: as duas primeiras pessoas escolhem nome e senha, que ficam valendo para sempre. Depois, conta nova só
+// com um convite (o link #convite=código): quem abre cria a conta, ou entra na dela, e vira contato de quem convidou.
 const loginHint = $("#login-hint");
 let openSeats = 0;
 let creating = false;
+let inviteCode = "";
+let inviteFrom = "";
+
+const inviteInHash = () => location.hash.match(/^#convite=([a-z0-9]+)/i)?.[1] || "";
 
 function paintHint() {
   const text = creating
     ? `Primeiro acesso de ${creating}: repita a senha para criar sua conta. Depois disso, nome e senha não mudam mais.`
+    : inviteFrom ? `${inviteFrom} te convidou! Escolha seu nome e uma senha para criar sua conta (ou entre na sua, se já tiver).`
+    : inviteCode ? "Esse convite não vale mais (já foi usado ou passou de 7 dias). Peça outro para quem te convidou."
     : openSeats >= 2 ? "Primeiro acesso: escolha seu nome e uma senha. Eles ficam guardados e valem para sempre."
     : openSeats === 1 ? "Primeira vez aqui? Escolha seu nome e uma senha para criar sua conta."
     : "";
@@ -308,9 +323,14 @@ function setCreating(name) {
 $("#name").addEventListener("input", () => { if (creating) setCreating(""); });
 
 async function loadWelcome() {
+  inviteCode = inviteInHash();
   try {
-    const response = await fetch(apiUrl("welcome"), { cache: "no-store" });
-    if (response.ok) openSeats = (await response.json()).open || 0;
+    const response = await fetch(apiUrl("welcome") + (inviteCode ? `&convite=${encodeURIComponent(inviteCode)}` : ""), { cache: "no-store" });
+    if (response.ok) {
+      const result = await response.json();
+      openSeats = result.open || 0;
+      inviteFrom = result.invite?.from || "";
+    }
   } catch {}
   paintHint();
 }
@@ -324,6 +344,7 @@ loginForm.addEventListener("submit", async (event) => {
   try {
     const body = { name: $("#name").value, password: $("#password").value };
     if (creating) body.confirm = $("#password-again").value;
+    if (inviteFrom) body.invite = inviteCode;
     const response = await fetch(apiUrl("login"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -338,8 +359,14 @@ loginForm.addEventListener("submit", async (event) => {
     }
     store.set("localStorage", NAME_KEY, result.name);
     passwordInputs.forEach((input) => { input.value = ""; });
+    // Entrou pelo convite: já usado; a conversa com quem convidou é a que abre.
+    if (result.room) {
+      room = result.room;
+      history.replaceState(null, "", location.pathname + location.search);
+    }
     startSession(result, { animate: true });
     if (result.created) setTimeout(() => toast("Conta criada! Escolha sua foto e o tema no seu perfil.", "ok"), 900);
+    else if (result.room && inviteFrom) setTimeout(() => toast(`Pronto! Agora você e ${inviteFrom} podem conversar.`, "ok"), 900);
   } catch (error) {
     if (creating) $("#password-again").value = "";
     loginError.textContent = error.message === "Failed to fetch" ? "Servidor fora do ar. Tente de novo." : error.message;
@@ -353,10 +380,15 @@ loginForm.addEventListener("submit", async (event) => {
 
 function startSession({ token, name }, { animate }) {
   me = name;
+  room ||= store.get("localStorage", ROOM_KEY) || "";
   store.set("localStorage", SESSION_KEY, { token, name });
   tellParent({ type: "potato:session", token, name });
   connect(token, animate);
   openFromHash();
+  callFromHash();
+  // Já com a conta, abriu o link de um convite: aceita assim que conectar.
+  pendingInvite = inviteInHash();
+  if (pendingInvite) history.replaceState(null, "", location.pathname + location.search);
 }
 
 function logout() {
@@ -389,7 +421,7 @@ function showChat(animate) {
 
 function connect(token, animate) {
   socket?.disconnect();
-  socket = io({ auth: { token, client: "web" }, reconnectionDelayMax: 8000 });
+  socket = io({ auth: { token, client: "web", room }, reconnectionDelayMax: 8000 });
 
   socket.on("connect", () => {
     if (!chatShown) showChat(animate);
@@ -430,65 +462,35 @@ function connect(token, animate) {
     tellParent({ type: "potato:session", token, name });
   });
 
-  socket.on("room-full", () => {
-    toast("Nosso chat já está com as duas pessoas.", "error");
-    sound.play("error");
-    setTimeout(logout, 2200);
-  });
-
-  socket.on("history", (payload) => {
-    // Reconectou lendo um trecho antigo: ele continua na tela, e a conversa de agora é trocada pela que chegou.
-    if (latest) latest = { list: payload.items, hasMore: payload.hasMore };
-    else {
-      list = payload.items;
-      hasMore = payload.hasMore;
-    }
-    // As partidas: as que estão rolando (vêm com o histórico) e a aberta na mesinha, que não pode sumir no meio do jogo
-    // (se ela não veio, o servidor diz como ela está agora).
-    const open = table.id ? byId.get(table.id) : null;
-    games.clear();
-    for (const message of payload.games || []) games.set(message.id, message);
-    if (open && !games.has(open.id) && !payload.items.some((message) => message.id === open.id)) {
-      games.set(open.id, open);
-      refreshGame(open.id);
-    }
-    indexMessages();
-    for (const clientId of pending.keys()) if (payload.items.some((message) => message.clientId === clientId)) pending.delete(clientId);
-    reads = payload.reads || {};
-    gifKey = payload.gifKey || "";
-    fileMax = payload.fileMax || 0;
-    transcribeOn = Boolean(payload.transcribe);
-    syncTheme(payload.theme);
-    applyWallpaper(payload.wallpaper);
-    applyMusic(payload.music, true);
-    applyWatch(payload.watch, true, false);
-    renderAll();
-    if (latest) fx.show(jump, { scale: 0.6 });
-    else scrollToLatest();
-    markSeen();
-    loadUs();
-    if (table.id) paintTable();
-  });
+  socket.on("history", applyHistory);
 
   socket.on("message", (message) => receive(message, true));
   socket.on("message:update", updateMessage);
-  socket.on("seen", ({ name, id, at }) => {
+  socket.on("seen", ({ name, id, at, room: where }) => {
+    // Lida em outro aparelho seu: a conversa sai das não lidas.
+    if (name === me) markRoomRead(where);
+    if (where && where !== room) return;
     reads[name] = { id, at };
     if (name !== me) markRead(id, at);
     refreshStatuses();
   });
   socket.on("presence", updatePresence);
-  socket.on("typing", ({ active, audio }) => setPeerTyping(active, audio));
+  socket.on("typing", ({ active, audio, room: where }) => {
+    if (!where || where === room) setPeerTyping(active, audio);
+  });
+  // Contato novo (um convite aceito, aqui ou do outro lado).
+  socket.on("rooms", refreshRooms);
   // Tema trocado em outra aba ou aparelho da mesma pessoa.
   // Papel de parede trocado em outra aba ou aparelho da mesma pessoa.
   socket.on("wallpaper", ({ wallpaper: next }) => applyWallpaper(next));
-  // Bot de música: alguém deu um comando (aqui ou no outro aparelho).
-  socket.on("music", ({ state, action }) => {
+  // Bot de música e Watch Party: cada conversa tem os seus; o de outra conversa não mexe nesta.
+  socket.on("music", ({ state, action, room: where }) => {
+    if (where && where !== room) return;
     applyMusic(state);
     musicNotice(action);
   });
-  // Watch Party.
-  socket.on("watch", ({ state, action }) => {
+  socket.on("watch", ({ state, action, room: where }) => {
+    if (where && where !== room) return;
     applyWatch(state);
     watchNotice(action);
   });
@@ -500,38 +502,91 @@ function connect(token, animate) {
     applyTheme(theme);
   });
 
+  socket.on("call-ring", ring);
+  socket.on("call-accepted", sendOffer);
   socket.on("webrtc-offer", receiveOffer);
   socket.on("webrtc-answer", receiveAnswer);
   socket.on("webrtc-ice", receiveIce);
   socket.on("call-state", receiveCallState);
-  socket.on("call-declined", ({ name }) => {
-    if (call?.role !== "caller" || call.connected) return;
-    toast(`${name} recusou a chamada.`);
-    sound.play("hangup");
-    teardown(false);
+  socket.on("call-ended", callEnded);
+  // Atendida em outro aparelho seu: aqui para de tocar.
+  socket.on("call-handled", ({ id } = {}) => {
+    if (call?.role === "callee" && !call.accepted && (!id || id === call.id)) teardown(false);
   });
-  socket.on("call-ended", () => {
-    if (!call) return;
-    if (call.role === "callee" && !call.accepted) toast(`Chamada perdida de ${call.name}.`);
-    else toast("Chamada encerrada.");
-    sound.play("hangup");
-    teardown(false);
+}
+
+// O histórico que chega ao conectar (e a cada reconexão, ou ao abrir outra conversa): a conversa aberta (as mensagens,
+// as leituras, a música, a Watch Party e as partidas dela), a lista de conversas, as chamadas abertas e o resto.
+function applyHistory(payload) {
+  const switched = (payload.room || "") !== room;
+  room = payload.room || "";
+  if (socket) socket.auth.room = room;
+  store.set("localStorage", ROOM_KEY, room);
+  rooms = payload.rooms || [];
+  couple = Boolean(payload.couple);
+  peerName = payload.peer || "";
+  chatView.classList.toggle("no-couple", !couple);
+  if (switched) leaveRoom();
+  // Reconectou lendo um trecho antigo: ele continua na tela, e a conversa de agora é trocada pela que chegou.
+  if (latest) latest = { list: payload.items, hasMore: payload.hasMore };
+  else {
+    list = payload.items;
+    hasMore = payload.hasMore;
+  }
+  // As partidas: as que estão rolando (vêm com o histórico) e a aberta na mesinha, que não pode sumir no meio do jogo
+  // (se ela não veio, o servidor diz como ela está agora).
+  const open = table.id ? byId.get(table.id) : null;
+  games.clear();
+  for (const message of payload.games || []) games.set(message.id, message);
+  if (open && !games.has(open.id) && !payload.items.some((message) => message.id === open.id)) {
+    games.set(open.id, open);
+    refreshGame(open.id);
+  }
+  indexMessages();
+  for (const clientId of pending.keys()) if (payload.items.some((message) => message.clientId === clientId)) pending.delete(clientId);
+  reads = payload.reads || {};
+  gifKey = payload.gifKey || "";
+  fileMax = payload.fileMax || 0;
+  transcribeOn = Boolean(payload.transcribe);
+  syncTheme(payload.theme);
+  applyWallpaper(payload.wallpaper);
+  applyMusic(payload.music, true);
+  applyWatch(payload.watch, true, false);
+  renderAll();
+  if (latest) fx.show(jump, { scale: 0.6 });
+  else scrollToLatest();
+  markSeen();
+  if (couple) loadUs();
+  if (table.id) paintTable();
+  updatePresence(presenceList);
+  syncCall(payload.calls || []);
+  // Ligar de volta pela notificação (o app acabou de abrir) e o convite do link: a lista de quem está nas conversas
+  // chega logo depois.
+  setTimeout(() => {
+    runPendingDial();
+    if (pendingInvite) acceptInvite(pendingInvite);
+    pendingInvite = "";
   });
-  socket.on("call-handled", () => {
-    if (call?.role === "callee" && !call.accepted) teardown(false);
-  });
-  socket.on("peer-left", ({ id }) => {
-    if (call && (call.peerId === id || !call.peerId)) {
-      toast("A outra pessoa saiu da chamada.");
-      sound.play("hangup");
-      teardown(false);
-    }
-  });
+}
+
+// Saindo da conversa (para outra): o que era só dela fecha.
+function leaveRoom() {
+  latest = null;
+  clearReply();
+  closeSearch();
+  search.run += 1;
+  setPeerTyping(false);
+  unseenBelow = 0;
+  jumpCount.classList.add("hidden");
+  unreadAway = 0;
+  peerWasOnline = null;
+  if (table.id) closeTable();
 }
 
 // ---------- mensagens ----------
 
 function receive(message, live) {
+  if (message.room && message.room !== room) return otherRoom(message, live);
   if (byId.has(message.id)) return;
   byId.set(message.id, message);
   if (message.game) games.set(message.id, message);
@@ -558,14 +613,18 @@ function receive(message, live) {
     appendNode(message, live);
   }
   if (!latest) refreshStatuses();
+  noteInRooms(message, false);
   if (message.game) paintUsBadge();
   if (message.game && tab === "us" && us.section === "jogos") paintGames();
   if (!live) return;
 
   if (!mine) {
     setPeerTyping(false);
-    sound.play("receive");
-    notify(message);
+    // A chamada tem o próprio aviso: toca e abre a janela de atender.
+    if (!message.call) {
+      sound.play("receive");
+      notify(message);
+    }
     if (tab !== "chat") bumpUnread();
     if (message.game) toast(`${message.sender} te chamou para jogar: ${GAME_NAMES[message.game.type]}`, "info", "dice");
   } else if (!local) {
@@ -586,7 +645,38 @@ function receive(message, live) {
   if (effect) setTimeout(() => { effect.run(); sound.play("sparkle"); }, 180);
 }
 
+// A última mensagem de uma conversa (e as não lidas, unread) na lista de conversas, que fica na ordem das mais recentes.
+function noteInRooms(message, unread) {
+  const entry = rooms.find((item) => item.id === message.room);
+  if (!entry || entry.last?.id === message.id) return Boolean(entry);
+  entry.last = { id: message.id, sender: message.sender, text: previewText(message), at: message.createdAt, deleted: false };
+  if (unread) entry.unread += 1;
+  rooms.sort((a, b) => String(b.last?.at || b.since).localeCompare(String(a.last?.at || a.since)));
+  paintRooms();
+  return true;
+}
+
+// Mensagem de outra conversa: a lista de conversas mostra e, se for da outra pessoa, avisa (som e um aviso na tela,
+// ou a notificação com a página escondida).
+function otherRoom(message, live) {
+  const mine = message.sender === me;
+  if (!noteInRooms(message, !mine)) return refreshRooms();
+  paintMenuDot();
+  if (!live || mine || message.call) return;
+  sound.play("receive");
+  if (document.hidden) notify(message);
+  else toast(`${message.sender}: ${(previewText(message) || "Nova mensagem").slice(0, 90)}`, "info", "message");
+}
+
 function updateMessage(message) {
+  if (message.room && message.room !== room) {
+    const entry = rooms.find((item) => item.id === message.room);
+    if (entry?.last?.id === message.id) {
+      Object.assign(entry.last, { text: message.deleted ? "" : previewText(message), deleted: message.deleted });
+      paintRooms();
+    }
+    return;
+  }
   const previous = byId.get(message.id);
   // Partida fora do trecho carregado (a resposta da sua jogada, por exemplo): passa a valer aqui também.
   if (!previous && !message.game) return;
@@ -626,10 +716,11 @@ function needsDay(previous, message) {
   return !previous || dayKey(previous.createdAt) !== dayKey(message.createdAt);
 }
 
-// Mensagens seguidas da mesma pessoa ficam juntinhas. Os cartões de música e de jogo (no meio da conversa) não
-// entram: eles têm sempre o mesmo espaço em volta.
+// Mensagens seguidas da mesma pessoa ficam juntinhas. Os cartões de música, de jogo e de chamada (no meio da conversa)
+// não entram: eles têm sempre o mesmo espaço em volta.
+const isCard = (message) => Boolean(message.music || message.game || message.call);
 function isGrouped(previous, message) {
-  return Boolean(previous) && !previous.music && !message.music && !previous.game && !message.game && previous.sender === message.sender && !needsDay(previous, message)
+  return Boolean(previous) && !isCard(previous) && !isCard(message) && previous.sender === message.sender && !needsDay(previous, message)
     && new Date(message.createdAt) - new Date(previous.createdAt) < 5 * 60 * 1000;
 }
 
@@ -661,15 +752,18 @@ function renderAll() {
   const fragment = document.createDocumentFragment();
   let previous = null;
   // As que estão saindo agora só aparecem na conversa de agora.
-  for (const message of [...list, ...(latest ? [] : pending.values())]) {
+  const waiting = latest ? [] : [...pending.values()].filter((message) => message.room === room);
+  for (const message of [...list, ...waiting]) {
     if (needsDay(previous, message)) fragment.append(dayNode(message.createdAt));
     fragment.append(buildNode(message, previous));
     previous = message;
   }
   messagesEl.append(fragment);
-  if (!list.length && !pending.size) {
+  if (!list.length && !waiting.length) {
     const empty = el("div", "empty");
-    empty.append(potatoArt(), el("span", "", "Nosso chat começa aqui. Manda um oi!"));
+    const text = !room ? "Você ainda não tem conversas: adicione alguém pelo menu (Adicionar pessoa)."
+      : rooms.find((entry) => entry.id === room)?.couple ? "Nosso chat começa aqui. Manda um oi!" : `A conversa com ${peerName} começa aqui. Manda um oi!`;
+    empty.append(potatoArt(), el("span", "", text));
     messagesEl.append(empty);
   }
   loadMore.classList.toggle("hidden", !hasMore);
@@ -710,6 +804,10 @@ function fill(article, message) {
     article.classList.add("game-note");
     bubble.classList.add("game-card");
     bubble.append(gameCard(message));
+  } else if (message.call && !message.deleted) {
+    article.classList.add("call-row");
+    bubble.classList.add("call-card");
+    bubble.append(callCard(message));
   } else if (message.file?.voice && !message.deleted) {
     bubble.classList.add("attachment", "is-voice");
     bubble.append(voiceView(message));
@@ -916,7 +1014,8 @@ function send(text, gif = null, upload = null) {
     replyTo: replyTo ? { id: replyTo.id, sender: replyTo.sender, text: previewText(replyTo).slice(0, 160) } : null,
     reactions: {},
     deleted: false,
-    status: "pending"
+    status: "pending",
+    room
   };
   pending.set(message.clientId, message);
   messagesEl.querySelector(".empty")?.remove();
@@ -934,14 +1033,19 @@ function deliver(message) {
   const node = () => messagesEl.querySelector(`[data-client-id="${message.clientId}"]`);
   message.status = "pending";
   if (node()) paintStatus(node());
+  // Vai para a conversa em que foi escrita, mesmo que outra esteja aberta agora (o reenvio depois de cair a conexão).
+  const open = socket.auth.room;
+  socket.auth.room = message.room;
   socket.timeout(10000).emit("message", { text: message.text, gif: message.gif, file: message.upload?.key, voice: message.file?.voice, clientId: message.clientId, replyTo: message.replyTo?.id }, (error, result) => {
     if (!pending.has(message.clientId)) return;
+    if (!error && result?.ok && result.message.room !== room) pending.delete(message.clientId);
     if (!error && result?.ok) return receive(result.message, true);
     message.status = "failed";
     if (node()) paintStatus(node());
     if (result?.error) toast(result.error, "error");
     sound.play("error");
   });
+  socket.auth.room = open;
 }
 
 // Sobe o arquivo (a barra do balão mostra o progresso) e depois manda a mensagem com a chave dele.
@@ -1470,6 +1574,8 @@ messagesEl.addEventListener("click", (event) => {
   if (musicAction && message.music) return cardAction(musicAction.dataset.musicAction, message.music);
   const gameAction = event.target.closest("[data-game]");
   if (gameAction && message.game) return playGame(message, gameAction.dataset.game, gameAction.dataset.value, article);
+  const callAction = event.target.closest("[data-call-action]");
+  if (callAction && message.call) return callCardAction(callAction.dataset.callAction, message.call);
   if (event.target.closest("[data-open-music]")) return openMusic();
   if (event.target.closest("[data-download]")) return downloadFile(message.file);
 
@@ -1694,7 +1800,9 @@ async function openAt({ id = "", from = "", query = "" }) {
     return focusMessage(id, query, false);
   }
   if (!socket?.connected) return toast("Sem conexão agora.");
+  const at = room;
   const result = await new Promise((resolve) => socket.timeout(8000).emit("history:around", { id, from }, (error, value) => resolve(error ? null : value)));
+  if (room !== at) return;
   if (!result?.ok) return toast(result?.error || "Não deu para abrir esse trecho agora.", "error");
   const now = latest || { list, hasMore };
   const known = new Set(now.list.map((message) => message.id));
@@ -1720,10 +1828,11 @@ function loadNewerPage() {
   if (!latest || loadingNewer || !socket?.connected || !list.length) return;
   loadingNewer = true;
   loadNewer.textContent = "Carregando…";
+  const at = room;
   socket.timeout(8000).emit("history:after", { after: list[list.length - 1].id }, (error, result) => {
     loadingNewer = false;
     loadNewer.textContent = "Carregar mensagens seguintes";
-    if (error || !result || !latest) return;
+    if (error || !result || !latest || room !== at) return;
     const top = messagesEl.scrollTop;
     const meets = !result.hasNewer || result.items.some((message) => latest.list.some((item) => item.id === message.id));
     list = joinMessages(list, result.items, meets ? latest.list : []);
@@ -1751,10 +1860,11 @@ function loadOlder() {
   if (!hasMore || loadingOlder || !socket?.connected || !list.length) return;
   loadingOlder = true;
   loadMore.textContent = "Carregando…";
+  const at = room;
   socket.timeout(8000).emit("history:before", { before: list[0].id }, (error, result) => {
     loadingOlder = false;
     loadMore.textContent = "Carregar mensagens anteriores";
-    if (error || !result) return;
+    if (error || !result || room !== at) return;
     const previousHeight = messagesEl.scrollHeight;
     const known = new Set(list.map((message) => message.id));
     list = [...result.items.filter((message) => !known.has(message.id)), ...list];
@@ -2632,6 +2742,15 @@ function markSeen() {
     reads[me] = { id: last.id, at: new Date().toISOString() };
     socket.emit("seen", { id: last.id });
   }
+  markRoomRead(room);
+}
+
+function markRoomRead(id) {
+  const entry = rooms.find((item) => item.id === id);
+  if (!entry?.unread) return;
+  entry.unread = 0;
+  paintRooms();
+  paintMenuDot();
 }
 
 document.addEventListener("visibilitychange", () => {
@@ -2653,7 +2772,7 @@ function notify(message) {
   document.title = `(${unreadTitle}) Potato Chat`;
   if (!notificationsOn()) return;
   try {
-    const notification = new Notification(message.sender, { body: message.deleted ? "" : previewText(message).slice(0, 160), icon: avatars.get(message.sender), tag: "potato-chat", renotify: true, silent: true });
+    const notification = new Notification(message.sender, { body: message.deleted ? "" : previewText(message).slice(0, 160), icon: avatars.get(message.sender), tag: `potato-chat:${message.room}`, renotify: true, silent: true });
     notification.onclick = () => { window.focus(); notification.close(); };
   } catch {}
 }
@@ -2962,6 +3081,8 @@ function paintTabs() {
     if (active) button.setAttribute("aria-current", "page");
     else button.removeAttribute("aria-current");
   });
+  // A conversa aberta, na lista de conversas.
+  peopleEl.querySelectorAll("[data-room]").forEach((row) => row.classList.toggle("active", tab === "chat" && row.dataset.room === room));
   // As partes do Nosso cantinho, no menu.
   document.querySelectorAll(".side-link").forEach((link) => {
     const active = tab === "us" && link.dataset.usOpen === us.section;
@@ -2982,7 +3103,8 @@ function paintUnread() {
 // No celular, a conversa e o perfil ficam no menu: o pontinho do botão acende com mensagem nova fora da conversa e
 // com novidade no Nosso cantinho.
 function paintMenuDot() {
-  document.querySelectorAll(".menu-dot").forEach((dot) => dot.classList.toggle("hidden", !(unreadAway + usNews)));
+  const elsewhere = rooms.reduce((total, entry) => total + (entry.id === room ? 0 : entry.unread), 0);
+  document.querySelectorAll(".menu-dot").forEach((dot) => dot.classList.toggle("hidden", !(unreadAway + usNews + elsewhere)));
 }
 
 function bumpUnread() {
@@ -2996,6 +3118,12 @@ const TABS = ["chat", "us", "profile"];
 
 function showTab(name) {
   if (name === tab || !me) return;
+  // O Nosso cantinho é do casal, e da conversa dele: vindo de outra conversa, ela abre junto.
+  if (name === "us") {
+    if (!couple) return;
+    const home = rooms.find((entry) => entry.couple)?.id;
+    if (home && home !== room) return void openRoom(home).then((opened) => opened && showTab("us"));
+  }
   closeTools();
   closeGifs();
   if (tab === "chat") chatScroll = nearBottom() ? null : messagesEl.scrollTop;
@@ -4826,10 +4954,7 @@ function updatePresence(users) {
   avatars.clear();
   users.forEach((user) => setAvatar(user.name, user.avatar));
   repaintAvatars();
-  const others = users.filter((user) => user.name !== me);
-  const peer = others.find((user) => user.online)
-    || others.sort((a, b) => String(b.lastSeen).localeCompare(String(a.lastSeen)))[0];
-  peerName = peer?.name || "";
+  const peer = users.find((user) => user.name === peerName && user.name !== me) || null;
 
   if (peer && peerWasOnline !== null && peer.online !== peerWasOnline) {
     sound.play(peer.online ? "join" : "leave");
@@ -4838,7 +4963,7 @@ function updatePresence(users) {
   }
   peerWasOnline = peer ? peer.online : null;
 
-  roomTitle.textContent = peer ? peer.name : "Aguardando alguém";
+  roomTitle.textContent = peer ? peer.name : "Ninguém aqui ainda";
   peerOpen.classList.toggle("has-peer", Boolean(peer));
   peerOpen.tabIndex = peer ? 0 : -1;
   peerOpen.title = peer ? `Ver o perfil de ${peer.name}` : "";
@@ -4847,36 +4972,180 @@ function updatePresence(users) {
   peerAvatar.classList.toggle("online", Boolean(peer?.online));
   paintPeerStatus();
 
-  // Botões de chamada apagadinhos enquanto a outra pessoa está offline.
+  // Dá para ligar com a outra pessoa offline (a chamada fica esperando): o botão só avisa.
   for (const button of document.querySelectorAll("#audio-call, #video-call, #share-screen")) {
-    button.classList.toggle("unavailable", !peer?.online);
-    button.title = peer?.online ? button.dataset.title : `${peer?.name || "A outra pessoa"} está offline`;
+    button.title = peer?.online ? button.dataset.title : `${button.dataset.title} (${peer?.name || "a outra pessoa"} está offline: a chamada fica esperando)`;
   }
 
-  // A conversa com a outra pessoa (você fica embaixo, no seu perfil). Clicar volta para a conversa.
-  const row = el("button", `person${peer?.online ? " online" : ""}`);
-  row.type = "button";
-  row.dataset.tabTarget = "chat";
-  const avatar = el("div", "avatar");
-  paintAvatar(avatar, peerName);
-  avatar.classList.toggle("online", Boolean(peer?.online));
-  const text = el("div");
-  text.append(el("strong", "", peer ? peer.name : "Aguardando alguém"),
-    el("small", "", !peer ? "Ainda sem a outra pessoa" : peer.online ? (peer.active ? "Ativo agora" : "Online") : lastSeenLabel(peer.lastSeen)));
-  row.append(avatar, text, el("span", "tab-badge unread-badge hidden"));
-  peopleEl.replaceChildren(row);
+  paintRooms();
   paintTabs();
   paintUnread();
 }
 
-function peerOnline() {
-  return presenceList.some((user) => user.name === peerName && user.online);
+// ---------- conversas (os contatos) ----------
+// Na barra lateral, das mais recentes para as mais antigas: a foto (com o ponto de online), o nome, a última mensagem
+// (ou como a pessoa está) e quantas não foram lidas. Tocar abre a conversa; embaixo, o Adicionar pessoa.
+function paintRooms() {
+  const rows = rooms.map((entry) => {
+    const person = presenceList.find((user) => user.name === entry.peer);
+    const row = el("button", `person${person?.online ? " online" : ""}`);
+    row.type = "button";
+    row.dataset.room = entry.id;
+    row.classList.toggle("active", tab === "chat" && entry.id === room);
+    const avatar = el("div", "avatar");
+    paintAvatar(avatar, entry.peer);
+    avatar.classList.toggle("online", Boolean(person?.online));
+    const last = entry.last ? `${entry.last.sender === me ? "Você: " : ""}${entry.last.deleted ? "Mensagem apagada" : entry.last.text || "Mensagem"}` : "";
+    const status = person?.online ? (person.active ? "Ativo agora" : "Online") : last || lastSeenLabel(person?.lastSeen) || "Diga oi!";
+    const text = el("div", "person-text");
+    text.append(el("strong", "", entry.peer), el("small", "", person?.online && last ? last : status));
+    // A aberta conta as que chegaram com você fora dela (no perfil, no Nosso cantinho); as outras, as não lidas.
+    const count = entry.id === room ? unreadAway : entry.unread;
+    const badge = el("span", `tab-badge${entry.id === room ? " unread-badge" : ""}`, count > 99 ? "99+" : String(count));
+    badge.classList.toggle("hidden", !count);
+    row.append(avatar, text, badge);
+    return row;
+  });
+  const add = el("button", "person add-person");
+  add.type = "button";
+  add.dataset.addPerson = "";
+  const plus = el("span", "avatar add-avatar");
+  plus.append(icon("user-plus"));
+  const label = el("div", "person-text");
+  label.append(el("strong", "", "Adicionar pessoa"), el("small", "", "Mande um convite por link"));
+  add.append(plus, label);
+  peopleEl.replaceChildren(...rows, add);
+}
+
+peopleEl.addEventListener("click", (event) => {
+  if (event.target.closest("[data-add-person]")) return openAddPerson();
+  const row = event.target.closest("[data-room]");
+  if (!row) return;
+  setMenu(false);
+  openRoom(row.dataset.room).then((opened) => { if (opened) showTab("chat"); });
+});
+
+// Abre outra conversa: o servidor manda o histórico dela (como ao conectar). true = ela está aberta.
+function openRoom(id) {
+  return new Promise((resolve) => {
+    if (id === room) return resolve(true);
+    if (!socket?.connected) {
+      toast("Sem conexão agora. Tente de novo em instantes.", "error");
+      return resolve(false);
+    }
+    socket.timeout(15000).emit("room", { id }, (error, result) => {
+      if (error || !result?.ok) {
+        toast(result?.error || "Não deu para abrir a conversa agora.", "error");
+        return resolve(false);
+      }
+      applyHistory(result);
+      resolve(true);
+    });
+  });
+}
+
+// Contato novo (um convite aceito, aqui ou do outro lado): a lista de conversas vem de novo.
+function refreshRooms() {
+  socket?.timeout(10000).emit("rooms", null, (error, result) => {
+    if (error || !result?.ok) return;
+    const known = new Set(rooms.map((entry) => entry.id));
+    rooms = result.rooms;
+    paintRooms();
+    paintMenuDot();
+    for (const entry of rooms) if (!known.has(entry.id)) toast(`${entry.peer} agora está nas suas conversas`, "ok", "user-plus");
+    // Era a primeira conversa: ela abre.
+    if (!room && rooms[0]) openRoom(rooms[0].id);
+  });
+}
+
+// ---------- adicionar pessoa ----------
+// O convite é um link que vale uma vez, por 7 dias: quem abre cria a conta (ou entra na dela) e vocês ganham uma
+// conversa. Quem recebeu um convite também pode colar o link (ou o código) aqui, sem sair do app.
+const addSheet = $("#add-person");
+let pendingInvite = "";
+
+function openAddPerson() {
+  setMenu(false);
+  $("#invite-link").value = "";
+  $("#invite-code").value = "";
+  $("#invite-state").textContent = "Criando o link…";
+  addSheet.classList.remove("hidden");
+  fx.incoming(addSheet.querySelector(".modal-card"));
+  sound.play("tap");
+  document.addEventListener("keydown", onAddKey, true);
+  if (!socket?.connected) return void ($("#invite-state").textContent = "Sem conexão agora. Tente de novo em instantes.");
+  socket.timeout(10000).emit("invite", { op: "create" }, (error, result) => {
+    if (error || !result?.ok) return void ($("#invite-state").textContent = result?.error || "Não deu para criar o link agora.");
+    $("#invite-link").value = `${location.origin}${location.pathname}#convite=${result.code}`;
+    $("#invite-state").textContent = `Vale uma vez, por ${result.days} dias.`;
+  });
+}
+
+function closeAddPerson() {
+  addSheet.classList.add("hidden");
+  document.removeEventListener("keydown", onAddKey, true);
+}
+
+function onAddKey(event) {
+  if (event.key !== "Escape") return;
+  event.stopPropagation();
+  closeAddPerson();
+}
+
+function copyInvite() {
+  const link = $("#invite-link").value;
+  if (!link) return;
+  navigator.clipboard?.writeText(link)
+    .then(() => toast("Link copiado! Agora é só mandar.", "ok"))
+    .catch(() => {
+      $("#invite-link").select();
+      toast("Selecione o link e copie.", "info");
+    });
+}
+
+// Compartilhar: no app do Android, a janela de compartilhar dele (WhatsApp, Instagram…); no navegador, a do sistema.
+function shareInvite() {
+  const link = $("#invite-link").value;
+  if (!link) return;
+  const text = `Vem conversar comigo no Potato Chat! ${link}`;
+  if (inAndroid && window.PotatoAndroid) {
+    try { return window.PotatoAndroid.postMessage(JSON.stringify({ type: "share", text })); } catch {}
+  }
+  if (navigator.share) return void navigator.share({ title: "Potato Chat", text, url: link }).catch(() => {});
+  copyInvite();
+}
+
+addSheet.addEventListener("click", (event) => {
+  if (event.target === addSheet || event.target.closest("#add-close")) return closeAddPerson();
+  if (event.target.closest("#invite-copy")) return copyInvite();
+  if (event.target.closest("#invite-share")) return shareInvite();
+});
+
+$("#invite-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  acceptInvite($("#invite-code").value.trim());
+});
+
+function acceptInvite(code) {
+  if (!code) return;
+  if (!socket?.connected) return toast("Sem conexão agora. Tente de novo em instantes.", "error");
+  socket.timeout(10000).emit("invite", { op: "accept", code }, (error, result) => {
+    if (error || !result?.ok) {
+      sound.play("error");
+      return toast(result?.error || "Não deu para usar esse convite.", "error");
+    }
+    closeAddPerson();
+    openRoom(result.room).then((opened) => {
+      if (opened) showTab("chat");
+      toast(`Pronto! Agora você e ${result.peer} podem conversar.`, "ok", "user-plus");
+    });
+  });
 }
 
 // "digitando…", "online agora", "Visto por último hoje às 14:03"… (no topo e no perfil da outra pessoa).
 function peerStatusText(peer) {
   if (peerTyping) return peerTyping === "audio" ? "gravando áudio…" : "digitando…";
-  if (!peer) return "Mande o link para a outra pessoa criar a conta dela";
+  if (!peer) return room ? "" : "Adicione alguém pelo menu para conversar";
   if (peer.online) return peer.active ? "online agora" : "online";
   return lastSeenLabel(peer.lastSeen);
 }
@@ -4927,8 +5196,6 @@ function paintPeerProfile() {
   const status = $("#peer-profile-status");
   status.textContent = peerStatusText(peer);
   status.classList.toggle("live", Boolean(peerTyping || peer?.online));
-  // Ligar só com a pessoa online (como os botões do topo; tocar mesmo assim explica por quê).
-  peerProfile.querySelectorAll('[data-peer-action="audio"], [data-peer-action="video"]').forEach((button) => button.classList.toggle("unavailable", !peer?.online));
 }
 
 // Esc fecha o perfil (com a foto ampliada aberta, o Esc é dela).
@@ -5023,6 +5290,10 @@ setInterval(() => { if (chatShown) { paintPeerStatus(); updatePresence(presenceL
 // ---------- chamadas (estilo Discord: voz, câmera e transmissão de tela na mesma chamada) ----------
 
 const mediaLabel = { audio: "Chamada de voz", video: "Chamada de vídeo", screen: "Transmissão de tela" };
+// Como a chamada ficou (a mensagem dela na conversa; call_label em lib/potato.php).
+const callLabel = (info) => (info.result === "missed" ? "Chamada perdida" : info.result === "declined" ? "Chamada recusada" : mediaLabel[info.media] || "Chamada");
+// Agora, no relógio do servidor (até quando a chamada toca vem nele).
+const serverNow = () => Date.now() + musicClock;
 // Canais fixos da chamada, sempre nesta ordem. Ligar câmera ou tela no meio da chamada só troca a faixa, sem religar nada.
 const SLOTS = ["mic", "cam", "screen", "screenAudio"];
 const SLOT_KIND = { mic: "audio", cam: "video", screen: "video", screenAudio: "audio" };
@@ -5166,6 +5437,7 @@ function paintStage() {
   setToggle($("#toggle-mic"), micOn(), "Silenciar microfone", "Ativar microfone");
   setToggle($("#toggle-cam"), Boolean(local.cam), "Desligar câmera", "Ligar câmera");
   setToggle($("#toggle-live"), Boolean(local.screen), "Parar transmissão", "Transmitir tela");
+  syncAndroidCall();
 }
 
 function openCallPanel(status) {
@@ -5245,7 +5517,8 @@ function onConnected() {
   sound.play("connected");
   tilePeer.classList.remove("ringing");
   callInfo.classList.add("live");
-  const started = Date.now();
+  const started = call.since = Date.now();
+  syncAndroidCall();
   call.clock = setInterval(() => {
     const seconds = Math.floor((Date.now() - started) / 1000);
     callTimer.textContent = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
@@ -5375,11 +5648,11 @@ async function startCall(media, share = {}) {
     if (media === "screen" && !call.local.screen) return startLive(share.quality, share.audio);
     return toast("Você já está numa chamada.");
   }
-  if (!peerOnline()) {
+  if (!peerName || !socket?.connected) {
     sound.play("error");
-    return toast(`${peerName || "A outra pessoa"} não está online agora.`);
+    return toast(peerName ? "Sem conexão agora. Tente de novo em instantes." : "Abra uma conversa para ligar (ou adicione alguém pelo menu).", "error");
   }
-  const active = call = newCall({ media, role: "caller", name: peerName });
+  const active = call = newCall({ media, role: "caller", name: peerName, room });
   // A tela é escolhida primeiro, enquanto o clique ainda vale para o navegador.
   if (media === "screen" && !(await startLive(share.quality, share.audio))) return teardown(false);
   if (active !== call) return;
@@ -5388,75 +5661,149 @@ async function startCall(media, share = {}) {
   if (active !== call) return;
 
   openCallPanel(`Chamando ${active.name}…`);
+  sound.loop("ringback");
+  // A oferta WebRTC só sai quando alguém atender (sendOffer), direto para o aparelho que atendeu.
+  socket.timeout(10000).emit("call", { op: "start", media, state: myState() }, (error, result) => {
+    if (active !== call) return;
+    if (error || !result?.ok) {
+      sound.play("error");
+      toast(result?.error || "Não foi possível iniciar a chamada.", "error");
+      // Sem resposta, o servidor pode ter aberto a chamada mesmo assim: o desligar fecha ela lá.
+      return teardown(Boolean(error));
+    }
+    active.id = result.call.id;
+    if (!result.online) callStatus.textContent = `Chamando ${active.name}… (offline: a chamada fica esperando)`;
+    // Depois de tocar, para de chamar e continua esperando a pessoa entrar (o servidor fecha em 10 minutos).
+    active.timeout = setTimeout(() => {
+      if (call !== active || active.peerId) return;
+      sound.stopLoop();
+      callStatus.textContent = `${active.name} não atendeu · esperando entrar`;
+    }, Math.max(0, result.call.ringUntil - serverNow()));
+    syncAndroidCall();
+  });
+}
+
+// Atenderam (from = a conexão que atendeu): a oferta vai direto para ela.
+async function sendOffer({ id, from, state }) {
+  const active = call;
+  if (active?.role !== "caller" || active.id !== id || active.peerId) return;
+  active.peerId = from;
+  if (state) active.remoteState = state;
+  clearTimeout(active.timeout);
+  sound.stopLoop();
+  callStatus.textContent = "Conectando…";
   try {
     const peer = createPeer();
     active.slots = Object.fromEntries(SLOTS.map((slot) => [slot, peer.addTransceiver(SLOT_KIND[slot], { direction: "sendrecv" })]));
     await Promise.all(SLOTS.map(attach));
     await peer.setLocalDescription(await peer.createOffer());
-    socket.emit("webrtc-offer", { description: peer.localDescription, media, state: myState() });
+    if (active !== call) return;
+    socket.emit("webrtc-offer", { id, to: from, description: peer.localDescription, media: active.media, state: myState() });
+    paintStage();
   } catch {
+    if (active !== call) return;
     sound.play("error");
     toast("Não foi possível iniciar a chamada.", "error");
-    return teardown(false);
+    teardown(true);
   }
-  sound.loop("ringback");
-  active.timeout = setTimeout(() => {
-    if (call === active && !active.connected) {
-      toast("Sem resposta.");
-      sound.play("hangup");
-      teardown(true);
-    }
-  }, 45000);
 }
 
-function receiveOffer({ description, media, name, from, state }) {
-  if (call) {
-    socket.emit("call-declined", { to: from });
-    return;
-  }
-  call = newCall({ media, role: "callee", peerId: from, offer: description, name });
-  call.remoteState = state || { mic: true, cam: media === "video", screen: media === "screen" };
-  paintAvatar($("#incoming-face"), name);
-  $("#incoming-title").textContent = `${name} está ligando`;
-  $("#incoming-kind").textContent = mediaLabel[media] || "Chamada";
+// Chamada para você (o aviso call-ring, ou a aberta que veio com o histórico ao conectar): a janela de atender.
+// Toca até ringUntil; depois a chamada continua aberta e a janela fica sem tocar ("está te esperando").
+function ring(info) {
+  if (!info || info.callee !== me || info.answered || call?.id === info.id) return;
+  // A daqui ficou para trás (o servidor só tem uma chamada aberta por vez): vale a nova.
+  if (call) teardown(false);
+  const active = call = newCall({ id: info.id, media: info.media, role: "callee", peerId: info.from, name: info.caller, ringUntil: info.ringUntil, room: info.room });
+  active.remoteState = info.state || { mic: true, cam: info.media === "video", screen: info.media === "screen" };
+  paintAvatar($("#incoming-face"), info.caller);
+  $("#incoming-kind").textContent = mediaLabel[info.media] || "Chamada";
+  paintIncoming(active);
   incoming.classList.remove("hidden");
-  fx.incoming(incoming.querySelector(".incoming-card"));
-  sound.loop("ring");
-  if (document.hidden && notificationsOn()) {
-    try { new Notification(`${name} está ligando`, { body: mediaLabel[media], tag: "potato-call", requireInteraction: true }); } catch {}
+  // Atender pela notificação do celular (com o app fechado, ou ainda conectando): entra direto.
+  if (pendingAccept === info.id) {
+    pendingAccept = "";
+    return acceptCall();
   }
-  const active = call;
-  call.timeout = setTimeout(() => {
-    if (call === active && !active.accepted) {
-      toast(`Chamada perdida de ${name}.`);
-      socket.emit("call-declined", { to: from });
-      teardown(false);
-    }
-  }, 45000);
+  fx.incoming(incoming.querySelector(".incoming-card"));
+  syncAndroidCall();
+  if (!ringing(active)) return;
+  playRing(active);
+  // No celular quem avisa com a página escondida é a notificação de chamada do app.
+  if (document.hidden && !inAndroid && notificationsOn()) {
+    try { new Notification(`${info.caller} está ligando`, { body: mediaLabel[info.media], tag: "potato-call", requireInteraction: true }); } catch {}
+  }
+  active.timeout = setTimeout(() => {
+    if (call !== active || active.accepted) return;
+    sound.stopLoop();
+    paintIncoming(active);
+  }, Math.max(0, info.ringUntil - serverNow()));
+}
+
+const ringing = (active) => active.ringUntil > serverNow();
+
+// O app do Android com a página escondida não toca por ela: o toque é o da notificação de chamada.
+function playRing(active) {
+  if (call === active && !active.accepted && ringing(active) && !(inAndroid && document.hidden)) sound.loop("ring");
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (!inAndroid || call?.role !== "callee" || call.accepted) return;
+  if (document.hidden) sound.stopLoop();
+  else playRing(call);
+});
+
+function paintIncoming(active) {
+  const now = ringing(active);
+  $("#incoming .eyebrow").textContent = now ? "Chamada recebida" : "Chamada aberta";
+  $("#incoming-title").textContent = now ? `${active.name} está ligando` : `${active.name} está te esperando na chamada`;
+  $("#accept-label").textContent = now ? "Atender" : "Entrar";
+  $("#decline-label").textContent = now ? "Recusar" : "Agora não";
 }
 
 async function acceptCall() {
-  if (!call || call.role !== "callee") return;
+  if (!call || call.role !== "callee" || call.accepted) return;
   const active = call;
   active.accepted = true;
   clearTimeout(active.timeout);
   sound.stopLoop();
   incoming.classList.add("hidden");
+  // A chamada é de outra conversa: ela abre (o painel da chamada fica na conversa).
+  if (active.room && active.room !== room) await openRoom(active.room);
+  if (active !== call) return;
+  await acquireMic(active);
+  if (active.media === "video") await toggleCam();
+  if (active !== call) return;
+  openCallPanel("Conectando…");
+  // Quem ligou manda a oferta (receiveOffer) assim que o servidor confirmar que foi esta conexão que atendeu.
+  socket.timeout(10000).emit("call", { op: "accept", id: active.id, state: myState() }, (error, result) => {
+    if (active !== call || (!error && result?.ok)) return;
+    sound.play("error");
+    toast(result?.error || "Não foi possível entrar na chamada.", "error");
+    teardown(Boolean(error));
+  });
+}
+
+async function receiveOffer({ id, description, from, state }) {
+  const active = call;
+  if (active?.role !== "callee" || !active.accepted || active.id !== id || active.offered) return;
+  active.offered = true;
+  active.peerId = from;
+  if (state) active.remoteState = state;
   try {
-    await acquireMic(active);
-    if (active.media === "video") await toggleCam();
-    if (active !== call) return;
-    openCallPanel("Conectando…");
     const peer = createPeer();
-    await peer.setRemoteDescription(active.offer);
+    await peer.setRemoteDescription(description);
     const transceivers = peer.getTransceivers();
     active.slots = Object.fromEntries(SLOTS.map((slot, index) => [slot, transceivers[index]]).filter(([, transceiver]) => transceiver));
     transceivers.forEach((transceiver) => { transceiver.direction = "sendrecv"; });
     await Promise.all(SLOTS.map(attach));
     await flushCandidates();
     await peer.setLocalDescription(await peer.createAnswer());
-    socket.emit("webrtc-answer", { description: peer.localDescription, to: active.peerId, state: myState() });
+    if (active !== call) return;
+    socket.emit("webrtc-answer", { description: peer.localDescription, to: from, state: myState() });
+    paintStage();
   } catch {
+    if (active !== call) return;
     sound.play("error");
     toast(inExtension ? mediaDeniedText() : "Não foi possível entrar na chamada.", "error");
     teardown(true);
@@ -5464,10 +5811,164 @@ async function acceptCall() {
 }
 
 function declineCall() {
-  if (!call) return;
-  socket.emit("call-declined", { to: call.peerId });
+  if (!call || call.role !== "callee" || call.accepted) return;
+  socket?.emit("call", { op: "decline", id: call.id });
   sound.play("hangup");
   teardown(false);
+}
+
+// Fim da chamada (o servidor avisa todos os aparelhos). reason: hangup, declined, missed (ninguém entrou) ou dropped
+// (a conexão de alguém caiu).
+function callEnded({ id, reason, name } = {}) {
+  const active = call;
+  if (!active || (id && active.id !== id)) return;
+  if (active.role === "callee" && !active.accepted) {
+    // Recusada em outro aparelho seu: aqui só para de tocar.
+    if (reason !== "declined") toast(`Chamada perdida de ${active.name}.`);
+  } else if (active.role === "caller" && !active.peerId) {
+    toast(reason === "declined" ? `${name || active.name} recusou a chamada.` : reason === "missed" ? `${active.name} não entrou na chamada.` : "A chamada caiu.");
+  } else {
+    toast(reason === "dropped" ? "A chamada caiu." : "Chamada encerrada.");
+  }
+  sound.play("hangup");
+  teardown(false);
+}
+
+// As chamadas abertas com você segundo o servidor, ao conectar (e a cada reconexão, que pode ter perdido avisos): a
+// daqui que acabou nesse meio-tempo some; a que é para você toca (ou espera você entrar).
+function syncCall(calls) {
+  const info = calls.find((item) => item.id === call?.id);
+  if (call?.id && (!info || (call.role === "callee" && !call.accepted && info.answered))) {
+    if (call.role === "caller" || call.accepted) toast("A chamada caiu.");
+    teardown(false);
+  }
+  if (pendingAccept && !calls.some((item) => item.id === pendingAccept)) {
+    pendingAccept = "";
+    toast("Essa chamada já terminou.");
+  }
+  const waiting = calls.find((item) => item.callee === me && !item.answered);
+  if (waiting) ring(waiting);
+}
+
+// Chamada na conversa (estilo Discord): tocando (com o Entrar para quem recebe), acontecendo, quanto durou, recusada
+// ou perdida (com o Ligar de volta).
+function callCard(message) {
+  const info = message.call;
+  const mine = info.caller === me;
+  const other = mine ? info.callee : info.caller;
+  const label = mediaLabel[info.media] || "Chamada";
+  const open = info.status !== "ended";
+  const missed = info.result === "missed";
+  const declined = info.result === "declined";
+  // lost = não aconteceu (ícone vermelho); missed = a chamada que você perdeu (o título também).
+  const box = el("div", `call-note${open ? " open" : ""}${missed || declined ? " lost" : ""}${missed && !mine ? " missed" : ""}`);
+  const badge = el("span", "call-note-icon");
+  badge.append(icon(missed || declined ? "phone-missed" : { video: "video", screen: "monitor-up" }[info.media] || "phone"));
+  let title = label;
+  let detail;
+  if (open) {
+    if (!mine && info.status === "ringing") title = `${info.caller} está te ligando`;
+    detail = info.status === "live" ? "Acontecendo agora" : mine ? `Chamando ${other}…` : label;
+  } else if (missed) {
+    if (!mine) title = "Chamada perdida";
+    detail = mine ? `${other} não atendeu` : `${label} de ${info.caller}`;
+  } else if (declined) {
+    detail = mine ? `${other} recusou` : "Você recusou";
+  } else {
+    detail = `Durou ${clockTime((info.endedAt - info.answeredAt) / 1000)}`;
+  }
+  const text = el("div", "call-note-text");
+  text.append(el("strong", "", title), el("small", "", detail));
+  box.append(badge, text);
+  if (open && !mine && info.status === "ringing" && !call?.accepted) box.append(callCardButton("Entrar", "join"));
+  else if (missed || declined) box.append(callCardButton(mine ? "Ligar de novo" : "Ligar de volta", "dial"));
+  return box;
+}
+
+function callCardButton(label, action) {
+  const button = el("button", "call-note-button");
+  button.type = "button";
+  button.dataset.callAction = action;
+  button.append(icon("phone"), label);
+  return button;
+}
+
+function callCardAction(action, info) {
+  if (action === "dial") return startCall(info.media === "video" ? "video" : "audio");
+  // Entrar: a janela de atender já está aberta para ela, ou o servidor diz se ela ainda está aberta.
+  if (call?.id === info.id) return acceptCall();
+  socket?.timeout(8000).emit("call", { op: "get", id: info.id }, (error, result) => {
+    if (error || result?.call?.id !== info.id || result.call.answered) return toast("Essa chamada já terminou.");
+    pendingAccept = info.id;
+    ring(result.call);
+  });
+}
+
+// ---------- chamada no app do Android ----------
+// A chamada aberta vai para o app (CallService): ela continua com o app em segundo plano ou a tela desligada, com a
+// notificação de chamada (desligar, mudo; tocar volta para cá). O app chama window.potatoCall: atender e recusar (pela
+// notificação de chamada recebida), desligar e mudo, ligar de volta (pela de chamada perdida) e background/foreground
+// (com o app em segundo plano a câmera não continua: ela desliga e volta sozinha quando o app volta).
+let androidCall = "";
+let pendingAccept = "";
+let pendingDial = "";
+
+function syncAndroidCall() {
+  if (!inAndroid) return;
+  const active = call && (call.role === "caller" || call.accepted) ? call : null;
+  const state = active
+    ? { type: "call", active: true, id: active.id || "", name: active.name, avatar: avatars.get(active.name) || "", media: active.media, connected: active.connected, since: active.since || 0, mic: micOn() }
+    : { type: "call", active: false, ringing: Boolean(call) };
+  const json = JSON.stringify(state);
+  if (json === androidCall) return;
+  androidCall = json;
+  try { window.PotatoAndroid?.postMessage(json); } catch {}
+}
+
+function pauseCamera(hidden) {
+  if (!call) return;
+  if (hidden && call.local.cam) {
+    call.camPaused = true;
+    toggleCam();
+  } else if (!hidden && call.camPaused) {
+    call.camPaused = false;
+    toggleCam();
+  }
+}
+
+window.potatoCall = (action, value = "") => {
+  if (action === "accept") {
+    if (call?.id === value) acceptCall();
+    else pendingAccept = value;
+  } else if (action === "decline") {
+    if (call?.id === value) declineCall();
+  } else if (action === "hangup") {
+    if (call?.role === "callee" && !call.accepted) declineCall();
+    else if (call) teardown(true);
+  } else if (action === "mute") {
+    toggleMic();
+  } else if (action === "dial") {
+    pendingDial = value || "audio";
+    if (socket?.connected) runPendingDial();
+  } else if (action === "background" || action === "foreground") {
+    pauseCamera(action === "background");
+  }
+};
+
+function runPendingDial() {
+  if (!pendingDial || !peerName) return;
+  const media = pendingDial;
+  pendingDial = "";
+  startCall(media === "video" ? "video" : "audio");
+}
+
+// Endereço com #atender=<id> (atender pela notificação do celular, com o app fechado) ou #ligar=audio (ligar de volta).
+function callFromHash() {
+  const [key, value = ""] = location.hash.slice(1).split("=");
+  if (key !== "atender" && key !== "ligar") return;
+  history.replaceState(null, "", location.pathname + location.search);
+  if (key === "atender") pendingAccept = value;
+  else pendingDial = value || "audio";
 }
 
 async function receiveAnswer({ description, from, state }) {
@@ -5492,7 +5993,7 @@ async function flushCandidates() {
 }
 
 function teardown(notifyPeer) {
-  if (notifyPeer && call) socket?.emit("call-ended", { to: call.peerId });
+  if (notifyPeer && call) socket?.emit("call-ended", { to: call.peerId, id: call.id });
   if (notifyPeer && call?.connected) sound.play("hangup");
   if (call) {
     clearTimeout(call.timeout);
@@ -5525,6 +6026,7 @@ function teardown(notifyPeer) {
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   fx.hide(callPanel, { y: -20, scale: 0.97 });
   requestAnimationFrame(() => scrollToLatest());
+  syncAndroidCall();
 }
 
 function toggleFullscreen() {
@@ -5562,10 +6064,6 @@ function onShareKey(event) {
 
 function openShare() {
   if (!canStream) return explainNoShare();
-  if (!call && !peerOnline()) {
-    sound.play("error");
-    return toast(`${peerName || "A outra pessoa"} não está online agora.`);
-  }
   paintShare(currentQuality());
   shareSheet.classList.remove("hidden");
   fx.incoming(shareSheet.querySelector(".modal-card"));
@@ -5625,7 +6123,10 @@ $("#stream-volume").addEventListener("input", (event) => { streamVideo.volume = 
 $("#end-call").addEventListener("click", () => teardown(true));
 $("#accept-call").addEventListener("click", acceptCall);
 $("#decline-call").addEventListener("click", declineCall);
-window.addEventListener("beforeunload", () => { if (call) socket?.emit("call-ended", { to: call.peerId }); });
+// Fechando a aba no meio da chamada: ela acaba. A que só estava tocando aqui continua (pode tocar em outro aparelho).
+window.addEventListener("beforeunload", () => {
+  if (call && (call.role === "caller" || call.accepted)) socket?.emit("call-ended", { to: call.peerId, id: call.id });
+});
 
 // ---------- nosso cantinho ----------
 // Uma aba só nossa: o dia de cada um (hora em que acordou, refeições com foto, hábitos, humor, momentos e como foi o

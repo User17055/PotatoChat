@@ -80,6 +80,7 @@ function asset(string $file): string
 </symbol>
           <!-- Ícones (Lucide, licença ISC; "desligar" é o call_end do Material Icons, Apache 2.0) -->
       <symbol id="i-phone" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></symbol>
+      <symbol id="i-phone-missed" viewBox="0 0 24 24"><path d="m16 2 6 6"/><path d="m22 2-6 6"/><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></symbol>
       <symbol id="i-hangup" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.17-.29-.42-.29-.7 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28-.79-.74-1.69-1.36-2.67-1.85-.33-.16-.56-.5-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/></symbol>
       <symbol id="i-video" viewBox="0 0 24 24"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/></symbol>
       <symbol id="i-video-off" viewBox="0 0 24 24"><path d="M10.66 6H14a2 2 0 0 1 2 2v2.5l5.248-3.062A.5.5 0 0 1 22 7.87v8.196"/><path d="M16 16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/><path d="m2 2 20 20"/></symbol>
@@ -190,6 +191,8 @@ function asset(string $file): string
       <symbol id="i-crown" viewBox="0 0 24 24"><path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5 21h14"/></symbol>
       <symbol id="i-brain" viewBox="0 0 24 24"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/><path d="M3.477 10.896a4 4 0 0 1 .585-.396"/><path d="M19.938 10.5a4 4 0 0 1 .585.396"/><path d="M6 18a4 4 0 0 1-1.967-.516"/><path d="M19.967 17.484A4 4 0 0 1 18 18"/></symbol>
       <symbol id="i-hand" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"/><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></symbol>
+      <symbol id="i-user-plus" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6"/><path d="M22 11h-6"/></symbol>
+      <symbol id="i-share" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.59 13.51 6.83 3.98"/><path d="m15.41 6.51-6.82 3.98"/></symbol>
       <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
       <symbol id="i-split" viewBox="0 0 24 24"><path d="M16 3h5v5"/><path d="M8 3H3v5"/><path d="M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3"/><path d="m15 9 6-6"/></symbol>
       <symbol id="i-question" viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
@@ -264,14 +267,15 @@ function asset(string $file): string
 
     <!-- ===================== CHAT ===================== -->
     <main id="chat-view" class="app-shell hidden" data-tab="chat">
-      <!-- Barra lateral: a conversa, as partes do Nosso cantinho e o perfil. No celular, vira uma gaveta (botão de menu). -->
+      <!-- Barra lateral: as conversas (os contatos e o Adicionar pessoa), as partes do Nosso cantinho (só do casal) e o
+           perfil. No celular, vira uma gaveta (botão de menu). -->
       <aside id="sidebar" class="sidebar" aria-label="Menu">
         <div>
           <div class="brand-row"><svg class="potato-mini" viewBox="0 0 142 100" aria-hidden="true"><use href="#potato" /></svg><strong>Potato</strong></div>
-          <div class="room-label">No nosso chat</div>
+          <div class="room-label">Conversas</div>
           <div id="people" class="people"></div>
-          <div class="room-label">Nosso cantinho</div>
-          <nav class="side-nav" aria-label="Nosso cantinho">
+          <div class="room-label couple-only">Nosso cantinho</div>
+          <nav class="side-nav couple-only" aria-label="Nosso cantinho">
             <button class="side-link" type="button" data-us-open="hoje"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-sun" /></svg></span><span class="side-text"><strong>Rotina do dia</strong><small>Acordar, refeições e hábitos</small></span></button>
             <button class="side-link" type="button" data-us-open="agenda"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-calendar" /></svg></span><span class="side-text"><strong>Agenda</strong><small id="side-agenda">Os compromissos dos dois</small></span></button>
             <button class="side-link" type="button" data-us-open="sonhos"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-sparkles" /></svg></span><span class="side-text"><strong>Sonhos e metas</strong><small>O que vamos realizar juntos</small></span></button>
@@ -298,7 +302,7 @@ function asset(string $file): string
           <div id="peer-open" class="peer" role="button" tabindex="0" aria-haspopup="dialog" aria-controls="peer-profile">
             <div id="peer-avatar" class="avatar" aria-hidden="true">?</div>
             <div class="peer-text">
-              <h2 id="room-title">Aguardando alguém</h2>
+              <h2 id="room-title">Ninguém aqui ainda</h2>
               <p id="peer-status" class="peer-status">Conectando…</p>
             </div>
           </div>
@@ -912,9 +916,34 @@ function asset(string $file): string
         <h3 id="incoming-title">Alguém está ligando</h3>
         <p id="incoming-kind" class="muted">Chamada de voz</p>
         <div class="modal-actions">
-          <button id="decline-call" class="pill decline" type="button"><svg class="icon"><use href="#i-hangup" /></svg>Recusar</button>
-          <button id="accept-call" class="pill accept" type="button"><svg class="icon"><use href="#i-phone" /></svg>Atender</button>
+          <button id="decline-call" class="pill decline" type="button"><svg class="icon"><use href="#i-hangup" /></svg><span id="decline-label">Recusar</span></button>
+          <button id="accept-call" class="pill accept" type="button"><svg class="icon"><use href="#i-phone" /></svg><span id="accept-label">Atender</span></button>
         </div>
+      </div>
+    </div>
+
+    <!-- Adicionar pessoa: o link de convite (vale uma vez, por 7 dias) e, para quem recebeu um, colar o link ou o código. -->
+    <div id="add-person" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="add-title">
+      <div class="modal-card sheet-card add-card">
+        <header class="sheet-head">
+          <span class="sheet-icon" aria-hidden="true"><svg class="icon"><use href="#i-user-plus" /></svg></span>
+          <h3 id="add-title">Adicionar pessoa</h3>
+          <button id="add-close" class="peer-close" type="button" title="Fechar" aria-label="Fechar"><svg class="icon"><use href="#i-x" /></svg></button>
+        </header>
+        <p class="muted add-lead">Mande este link para quem você quer adicionar. Quem abrir cria a conta (ou entra na dela) e vocês ganham uma conversa só de vocês.</p>
+        <div class="invite-row">
+          <input id="invite-link" class="field-input" type="text" readonly aria-label="Link do convite" placeholder="Criando o link…" />
+          <button id="invite-copy" class="pill small" type="button"><svg class="icon"><use href="#i-copy" /></svg>Copiar</button>
+        </div>
+        <p id="invite-state" class="hint invite-state"></p>
+        <button id="invite-share" class="pill ghost invite-share" type="button"><svg class="icon"><use href="#i-share" /></svg>Compartilhar o link</button>
+        <form id="invite-form" class="invite-form">
+          <label for="invite-code">Recebeu um convite?</label>
+          <div class="invite-row">
+            <input id="invite-code" class="field-input" type="text" autocomplete="off" placeholder="Cole o link ou o código" />
+            <button class="pill small" type="submit">Entrar</button>
+          </div>
+        </form>
       </div>
     </div>
 

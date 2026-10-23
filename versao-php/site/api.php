@@ -1,7 +1,7 @@
 <?php
 // API do Potato Chat. No lugar do Socket.IO, o navegador usa HTTP:
-//   welcome → diz à tela de login se ainda dá para criar conta;
-//   login   → entra (ou cria a conta, nos dois primeiros acessos);
+//   welcome → diz à tela de login se ainda dá para criar conta (e, com ?convite=, quem convidou);
+//   login   → entra (ou cria a conta: nos dois primeiros acessos, ou com um convite);
 //   avatar  → foto de perfil;
 //   wallpaper → papel de parede da conversa;
 //   upload  → recebe a foto ou o arquivo de uma mensagem (a mensagem vai depois, pelo ops);
@@ -47,6 +47,12 @@ function health(): array
     });
 }
 
+// A conversa que o navegador está vendo (room), ou a padrão (veja pick_room).
+function input_room(string $name, array $input): ?array
+{
+    return pick_room($name, str($input['room'] ?? '')) ?? pick_room($name, '');
+}
+
 function connect(array $input): array
 {
     return transaction(function () use ($input) {
@@ -54,16 +60,13 @@ function connect(array $input): array
         $conn = conn_id($input);
         $name = $session['name'];
         sweep();
-        $others = array_filter(people(), fn($person) => $person !== $name);
-        if (count($others) > 1) return ['roomFull' => true];
-
         attach($conn, $name, $input);
         $result = [
             'me' => $name,
             'cursor' => last_seq(),
             'wait' => poll_wait(),
-            'history' => history($name),
-            'presence' => presence(),
+            'history' => history($name, input_room($name, $input)),
+            'presence' => presence($name),
         ];
         // Renova a sessão de quem usa sempre: ninguém precisa digitar a senha de novo.
         if ($session['expiresAt'] - now_ms() < (SESSION_DAYS - 30) * DAY_MS) {
@@ -85,8 +88,9 @@ function ops(array $input): array
     }
     // A pesquisa na conversa só lê: também fica fora da trava.
     if (count($list) === 1 && str($list[0]['event'] ?? '') === 'search' && is_array($data)) {
-        authenticate($input);
-        return ['results' => [search_messages(str($data['query'] ?? ''), str($data['before'] ?? ''))]];
+        $session = authenticate($input);
+        $room = pick_room($session['name'], str($list[0]['room'] ?? ''));
+        return ['results' => [search_messages($room['id'] ?? '', str($data['query'] ?? ''), str($data['before'] ?? ''))]];
     }
     return transaction(function () use ($input, $list) {
         $session = authenticate($input);
@@ -96,10 +100,11 @@ function ops(array $input): array
         $attached = $current || ($input['attach'] ?? true) !== false;
         if ($attached) attach($conn, $session['name'], $input);
         $client = $attached ? find_client($conn)['client'] : 'web';
-        $me = ['conn' => $conn, 'name' => $session['name'], 'client' => $client];
         $results = [];
         foreach ($list as $op) {
             $event = is_array($op) ? str($op['event'] ?? '') : '';
+            // Cada ação vale na conversa que estava aberta quando foi feita (o navegador manda junto).
+            $me = ['conn' => $conn, 'name' => $session['name'], 'client' => $client, 'room' => pick_room($session['name'], is_array($op) ? str($op['room'] ?? '') : '')];
             $results[] = $attached || $event === 'call-ended' ? act($me, $event, $op['data'] ?? null) : null;
         }
         return ['results' => $results];
@@ -126,22 +131,24 @@ function poll(array $input): array
         }
         return $events;
     };
-    $reply = function (array $events, ?array $history = null) use (&$cursor, $wait): array {
-        $result = ['events' => $events, 'cursor' => $cursor, 'presence' => presence(), 'wait' => $wait];
+    $name = '';
+    $reply = function (array $events, ?array $history = null) use (&$cursor, &$name, $wait): array {
+        $result = ['events' => $events, 'cursor' => $cursor, 'presence' => presence($name), 'wait' => $wait];
         return $history ? $result + ['history' => $history] : $result;
     };
 
     // Primeiro: sinal de vida, limpeza de conexões mortas e o que já estiver esperando.
-    $first = transaction(function () use ($input, $conn, &$cursor, $collect, $reply) {
+    $first = transaction(function () use ($input, $conn, &$cursor, &$name, $collect, $reply) {
         $session = authenticate($input);
+        $name = $session['name'];
         sweep();
-        $isNew = attach($conn, $session['name'], $input);
+        $isNew = attach($conn, $name, $input);
         $last = last_seq();
         $oldest = first_seq();
         // Conexão esquecida pelo servidor ou eventos perdidos: manda o histórico de novo.
         if ($isNew || $cursor > $last || ($cursor < $last && $oldest > $cursor + 1)) {
             $cursor = $last;
-            return $reply([], history($session['name']));
+            return $reply([], history($name, input_room($name, $input)));
         }
         $events = $collect();
         return $events ? $reply($events) : null;
@@ -197,8 +204,7 @@ function upload(): array
 function transcribe(array $input): array
 {
     @set_time_limit(120);
-    authenticate($input);
-    return transcribe_message(str($input['id'] ?? ''));
+    return transcribe_message(str($input['id'] ?? ''), authenticate($input)['name']);
 }
 
 // Entrega o arquivo. Imagem, vídeo e áudio abrem no chat; o resto sempre baixa.
@@ -268,7 +274,7 @@ try {
         case 'health':
             respond(200, health());
         case 'welcome':
-            respond(200, welcome());
+            respond(200, welcome(str($_GET['convite'] ?? '')));
         case 'avatar':
             avatar(str($_GET['k'] ?? ''));
         case 'wallpaper':

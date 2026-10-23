@@ -203,8 +203,10 @@ try {
   for (const column of ["pass_hash", "avatar", "avatar_type", "avatar_key", "theme", "wallpaper", "wallpaper_type", "wallpaper_key", "wallpaper_style"]) assert.ok(columns.includes(column), column);
   assert.ok(sql("SHOW COLUMNS FROM {p}messages").some((row) => row.Field === "media"), "media");
   assert.ok(sql("SHOW COLUMNS FROM {p}messages").some((row) => row.Field === "read_at"), "read_at");
-  assert.equal(sql("SELECT value FROM {p}settings WHERE name = 'schema'")[0].value, "8");
+  assert.equal(sql("SELECT value FROM {p}settings WHERE name = 'schema'")[0].value, "9");
   assert.ok(sql("SHOW COLUMNS FROM {p}items").some((row) => row.Field === "data"), "tabela do nosso cantinho");
+  for (const table of ["rooms", "reads", "invites"]) assert.ok(sql(`SHOW COLUMNS FROM {p}${table}`).length, `tabela ${table}`);
+  assert.ok(sql("SHOW COLUMNS FROM {p}messages").some((row) => row.Field === "room"), "conversa da mensagem");
   assert.ok(sql("SHOW COLUMNS FROM {p}files").some((row) => row.Field === "data"), "tabela de arquivos");
   assert.deepEqual(await welcome(), { open: 2 });
 
@@ -224,7 +226,7 @@ try {
   assert.equal((await login("Pessoa 1", "senha-2")).status, 401);
   const thirdLogin = await login("Intrusa", "qualquer", "qualquer");
   assert.equal(thirdLogin.status, 403);
-  assert.equal(thirdLogin.body.error, "Nosso chat é só de Pessoa 1 e Pessoa 2.");
+  assert.equal(thirdLogin.body.error, "Para criar uma conta, peça um convite para quem já usa o Potato Chat.");
   // A mesma pessoa entra com outra caixa de letra e sem acento.
   assert.equal((await login("pessoa 1", "senha-1")).body.name, "Pessoa 1");
   assert.equal((await login("PESSÔA 2", "senha-2")).body.name, "Pessoa 2");
@@ -267,7 +269,7 @@ try {
   assert.equal(reply.message.replyTo.id, message.id);
   assert.equal(reply.message.replyTo.text, "Mensagem de integração");
   // Responder conta como ler: quem escreveu vê na hora, e a hora fica na mensagem (dados da mensagem).
-  assert.deepEqual(await replyRead, { name: "Pessoa 2", id: reply.message.id, at: reply.message.createdAt });
+  assert.deepEqual(await replyRead, { name: "Pessoa 2", id: reply.message.id, at: reply.message.createdAt, room: first.history.room });
   assert.equal(reply.message.read, false);
 
   const reacted = next(first, "message:update");
@@ -473,27 +475,17 @@ try {
   assert.equal(sent.body.results[0].ok, true);
   assert.equal((await fromExtension).source, "extension");
 
-  // Digitando e sinalização de chamada vão só para a outra pessoa, nunca para as próprias conexões.
+  // Digitando vai só para a outra pessoa da conversa, nunca para as próprias conexões (a sinalização da chamada está no
+  // bloco das chamadas).
+  const cursor = (await api("poll", { ...extension, cursor: 0 })).body.cursor;
   const typing = next(second, "typing");
   first.emit("typing", true);
-  assert.deepEqual(await typing, { name: "Pessoa 1", active: true, audio: false });
-
-  const cursor = (await api("poll", { ...extension, cursor: 0 })).body.cursor;
-  const offer = next(second, "webrtc-offer");
-  first.emit("webrtc-offer", { media: "audio", description: { type: "offer", sdp: "x" } });
-  const incoming = await offer;
-  assert.equal(incoming.name, "Pessoa 1");
-  assert.equal(incoming.from, first.id);
-
-  // Resposta e candidatos chegam em ordem, só na aba que ligou.
-  const answer = next(first, "webrtc-answer");
-  const ice = next(first, "webrtc-ice");
-  second.emit("webrtc-answer", { description: { type: "answer", sdp: "y" }, to: incoming.from });
-  second.emit("webrtc-ice", { candidate: { candidate: "c1" }, to: incoming.from });
-  assert.equal((await answer).from, second.id);
-  assert.equal((await ice).candidate.candidate, "c1");
+  assert.deepEqual(await typing, { name: "Pessoa 1", active: true, audio: false, room: first.history.room });
+  // Sem chamada atendida entre as duas conexões, a sinalização não passa.
+  const stray = silent(second, "webrtc-offer", 1500);
+  first.emit("webrtc-offer", { to: second.id, media: "audio", description: { type: "offer", sdp: "x" } });
+  await stray;
   const extensionEvents = (await api("poll", { ...extension, cursor })).body.events.map((event) => event.type);
-  assert.ok(!extensionEvents.includes("webrtc-offer"), "a extensão não pode receber a chamada");
   assert.ok(!extensionEvents.includes("typing"));
 
   // Long polling: a consulta fica esperando e volta assim que chega algo.
@@ -837,7 +829,7 @@ try {
   // Gravando: a outra pessoa vê "gravando um áudio".
   const recording = next(dj2, "typing");
   dj1.emit("typing", "audio");
-  assert.deepEqual(await recording, { name: "Pessoa 1", active: true, audio: true });
+  assert.deepEqual(await recording, { name: "Pessoa 1", active: true, audio: true, room: dj1.history.room });
   dj1.disconnect();
   dj2.disconnect();
 
@@ -848,7 +840,6 @@ try {
     const us2 = await connect(secondLogin.body.token);
     const us = (socket, data) => withAck(socket, "us", data);
     const day = "2026-10-22";
-    assert.equal(sql("SELECT value FROM {p}settings WHERE name = 'schema'")[0].value, "8");
     const loaded = await us(us1, { op: "load", day });
     assert.equal(loaded.ok, true);
     assert.deepEqual([loaded.events, loaded.goals, loaded.letters], [[], [], []]);
@@ -1178,6 +1169,168 @@ try {
     assert.equal((await withAck(us1, "stats", null)).messages, before);
     us1.disconnect();
     us2.disconnect();
+  }
+
+  // Chamadas (estilo Discord): tocam mesmo com a outra pessoa offline, o primeiro aparelho que atende entra (a oferta vai
+  // só para ele) e a conversa guarda como a chamada ficou.
+  {
+    const caller = await connect(firstLogin.body.token);
+    const opened = await withAck(caller, "call", { op: "start", media: "audio", state: { mic: true } });
+    assert.deepEqual([opened.ok, opened.online], [true, false]);
+    assert.deepEqual([opened.call.caller, opened.call.callee, opened.call.media, opened.call.answered, opened.call.from], ["Pessoa 1", "Pessoa 2", "audio", false, caller.id]);
+    assert.equal(opened.call.ringUntil - opened.call.startedAt, 60000);
+    assert.equal((await withAck(caller, "call", { op: "start", media: "video" })).error, "Você já está ligando de outro aparelho.");
+
+    // Quem abre o chat depois vê a chamada tocando (e a mensagem dela na conversa).
+    const phone = await connect(secondLogin.body.token);
+    const laptop = await connect(secondLogin.body.token);
+    assert.deepEqual(phone.history.calls.map((item) => [item.id, item.room]), [[opened.call.id, phone.history.room]]);
+    const logged = phone.history.items.find((item) => item.call?.id === opened.call.id);
+    assert.deepEqual([logged.source, logged.sender, logged.call.status, logged.call.result], ["call", "Pessoa 1", "ringing", null]);
+    assert.equal((await withAck(caller, "call", { op: "accept", id: opened.call.id })).error, "Essa chamada não é para você.");
+    assert.equal((await withAck(phone, "call", { op: "start", media: "audio" })).error, "Pessoa 1 já está te ligando.");
+
+    // O primeiro aparelho que atende entra; o outro para de tocar.
+    const accepted = next(caller, "call-accepted");
+    const handled = next(laptop, "call-handled");
+    const live = until(caller, "message:update", (item) => item.call?.status === "live");
+    assert.equal((await withAck(phone, "call", { op: "accept", id: opened.call.id, state: { mic: false } })).ok, true);
+    const answer = await accepted;
+    assert.deepEqual([answer.from, answer.state.mic], [phone.id, false]);
+    assert.equal((await handled).id, opened.call.id);
+    await live;
+    assert.equal((await withAck(laptop, "call", { op: "accept", id: opened.call.id })).error, "Você já atendeu em outro aparelho.");
+    assert.equal((await withAck(caller, "call", { op: "start", media: "audio" })).error, "Já tem uma chamada acontecendo.");
+    const offer = next(phone, "webrtc-offer");
+    const notLaptop = silent(laptop, "webrtc-offer", 1500);
+    caller.emit("webrtc-offer", { id: opened.call.id, to: phone.id, description: { type: "offer", sdp: "x" }, media: "audio" });
+    assert.deepEqual([(await offer).from, (await offer).id], [caller.id, opened.call.id]);
+    await notLaptop;
+
+    // Desligar: todos os aparelhos ficam sabendo, e a mensagem mostra que foi atendida (e quanto durou).
+    const ended = next(laptop, "call-ended");
+    const finished = until(phone, "message:update", (item) => item.call?.status === "ended");
+    caller.emit("call-ended", { id: opened.call.id, to: phone.id });
+    const end = await ended;
+    assert.deepEqual([end.id, end.reason, end.result, end.name], [opened.call.id, "hangup", "answered", "Pessoa 1"]);
+    const log = (await finished).call;
+    assert.equal(log.result, "answered");
+    assert.ok(log.endedAt >= log.answeredAt && log.answeredAt >= log.startedAt);
+    assert.equal((await withAck(phone, "call", { op: "get", id: opened.call.id })).call, null);
+
+    // Recusar: quem ligou fica sabendo, e a mensagem diz que foi recusada.
+    const rang = next(phone, "call-ring");
+    const video = (await withAck(caller, "call", { op: "start", media: "video", state: { mic: true, cam: true } })).call;
+    const ring = await rang;
+    assert.deepEqual([ring.id, ring.caller, ring.media, ring.state.cam], [video.id, "Pessoa 1", "video", true]);
+    const refused = next(caller, "call-ended");
+    assert.equal((await withAck(phone, "call", { op: "decline", id: video.id })).ok, true);
+    const no = await refused;
+    assert.deepEqual([no.reason, no.result, no.name], ["declined", "declined", "Pessoa 2"]);
+
+    // Quem ligou saiu (fechou a aba): a chamada acaba, perdida.
+    const third = (await withAck(caller, "call", { op: "start", media: "audio" })).call;
+    const lost = until(phone, "call-ended", (item) => item.id === third.id);
+    caller.disconnect();
+    const gone = await lost;
+    assert.deepEqual([gone.id, gone.reason, gone.result], [third.id, "dropped", "missed"]);
+
+    // Ninguém entrou: a chamada continua aberta esperando (sem limite, como no Discord) até quem ligou desligar.
+    const waiting = await connect(firstLogin.body.token);
+    const fourth = (await withAck(waiting, "call", { op: "start", media: "audio" })).call;
+    php(`(function () { $call = find_call('${fourth.id}'); $call['startedAt'] -= 3 * 3600000; save_call($call); return true; })()`);
+    await fetch(`${baseUrl}/api.php?action=health`);
+    assert.equal((await withAck(phone, "call", { op: "get", id: fourth.id })).call.id, fourth.id);
+    const hungUp = until(phone, "call-ended", (item) => item.id === fourth.id);
+    waiting.emit("call-ended", { id: fourth.id });
+    const gaveUp = await hungUp;
+    assert.deepEqual([gaveUp.reason, gaveUp.result], ["hangup", "missed"]);
+
+    // A conversa guardou as quatro (a citação de uma resposta diz como ela ficou); chamada não conta no perfil.
+    const calls = sql("SELECT media FROM {p}messages WHERE source = 'call' ORDER BY n").map((row) => JSON.parse(row.media).call);
+    assert.deepEqual(calls.map((item) => [item.media, item.status, item.result]), [["audio", "ended", "answered"], ["video", "ended", "declined"], ["audio", "ended", "missed"], ["audio", "ended", "missed"]]);
+    assert.equal(php("call_label(['media' => 'audio', 'result' => 'missed'])"), "Chamada perdida");
+    assert.equal(php("call_label(['media' => 'video', 'result' => 'answered'])"), "Chamada de vídeo");
+    assert.equal(sql("SELECT COUNT(*) AS total FROM {p}settings WHERE name LIKE 'call:%'")[0].total, 0);
+    waiting.disconnect();
+    phone.disconnect();
+    laptop.disconnect();
+  }
+
+  // Contatos (como as DMs do Discord): quem já usa convida por um link que vale uma vez; cada par tem a sua conversa, e
+  // ninguém vê nem mexe na conversa dos outros.
+  {
+    const one = await connect(firstLogin.body.token);
+    const couple = one.history.room;
+    assert.deepEqual(one.history.rooms.map((room) => [room.id, room.peer, room.couple]), [[couple, "Pessoa 2", true]]);
+    assert.equal(one.history.couple, true);
+
+    // O convite: quem abre o link cria a conta (sem o convite, não dá) e os dois viram contatos.
+    const invite = await withAck(one, "invite", { op: "create" });
+    assert.match(invite.code, /^[a-z2-9]{10}$/);
+    assert.deepEqual(await (await fetch(`${baseUrl}/api.php?action=welcome&convite=${invite.code}`)).json(), { open: 0, invite: { from: "Pessoa 1" } });
+    assert.deepEqual(await (await fetch(`${baseUrl}/api.php?action=welcome&convite=naoexiste22`)).json(), { open: 0, invite: false });
+    const contact = until(one, "rooms", () => true);
+    assert.deepEqual((await login("Pessoa 3", "senha-3")).status, 403);
+    assert.deepEqual((await api("login", { name: "Pessoa 3", password: "senha-3", invite: invite.code })).body, { confirm: true, name: "Pessoa 3" });
+    const joined = await api("login", { name: "Pessoa 3", password: "senha-3", confirm: "senha-3", invite: `${baseUrl}/#convite=${invite.code}` });
+    assert.deepEqual([joined.status, joined.body.created, typeof joined.body.room], [200, true, "string"]);
+    const fresh = joined.body.room;
+    assert.equal((await contact).room, fresh);
+    assert.equal((await api("login", { name: "Pessoa 4", password: "senha-4", confirm: "senha-4", invite: invite.code })).body.error, "Esse convite não vale mais (já foi usado ou passou de 7 dias). Peça outro.");
+
+    // A Pessoa 3 só vê a conversa com quem convidou (e só essa pessoa na presença); o Nosso cantinho não é dela.
+    const three = await connect(joined.body.token);
+    assert.deepEqual([three.history.room, three.history.peer, three.history.couple, three.history.items], [fresh, "Pessoa 1", false, []]);
+    assert.deepEqual(three.history.rooms.map((room) => room.peer), ["Pessoa 1"]);
+    const seenBy3 = (await api("connect", { token: joined.body.token, conn: "presenca-pessoa-3", client: "web" })).body.presence.map((person) => person.name);
+    assert.deepEqual(seenBy3.sort(), ["Pessoa 1", "Pessoa 3"]);
+    await api("disconnect", { token: joined.body.token, conn: "presenca-pessoa-3" });
+    assert.equal((await withAck(three, "us", { op: "load", day: "2026-10-22" })).error, "O Nosso cantinho é só do casal.");
+
+    // Mensagem na conversa nova: só as duas pessoas dela recebem; a Pessoa 2 nem fica sabendo.
+    const two = await connect(secondLogin.body.token);
+    const outside = silent(two, "message", 2500);
+    const arrived = next(three, "message");
+    one.auth.room = fresh;
+    const hello = await withAck(one, "message", { text: "Oi, Pessoa 3!", clientId: "contato-1" });
+    assert.equal(hello.message.room, fresh);
+    assert.equal((await arrived).text, "Oi, Pessoa 3!");
+    await outside;
+    const listed = await withAck(three, "rooms", null);
+    assert.deepEqual([listed.rooms[0].unread, listed.rooms[0].last.text, listed.rooms[0].last.sender], [1, "Oi, Pessoa 3!", "Pessoa 1"]);
+    // Cada conversa tem a sua pesquisa e o seu histórico.
+    assert.deepEqual((await withAck(one, "search", { query: "Pessoa 3" })).items.map((item) => item.id), [hello.message.id]);
+    const back = await withAck(one, "room", { id: couple });
+    assert.deepEqual([back.ok, back.room, back.peer], [true, couple, "Pessoa 2"]);
+    assert.ok(back.items.length > 0 && back.items.every((item) => item.room === couple));
+    assert.equal((await withAck(three, "room", { id: couple })).error, "Essa conversa não existe.");
+
+    // Quem não é da conversa não reage, não apaga e não marca como lida.
+    const foreign = back.items[back.items.length - 1];
+    three.emit("react", { id: foreign.id, emoji: "🔥" });
+    three.emit("seen", { id: foreign.id });
+    await withAck(three, "stats", null);
+    assert.ok(!JSON.parse(sql(`SELECT reactions FROM {p}messages WHERE id = '${foreign.id}'`)[0].reactions)["🔥"]);
+    assert.equal(sql(`SELECT COUNT(*) AS total FROM {p}reads WHERE name = 'Pessoa 3' AND room = '${couple}'`)[0].total, 0);
+
+    // Quem já tem conta aceita o convite (pelo link colado) e ganha a conversa.
+    const code = (await withAck(three, "invite", { op: "create" })).code;
+    assert.equal((await withAck(three, "invite", { op: "accept", code })).error, "Esse convite é seu: mande para quem você quer adicionar.");
+    const accepted = await withAck(two, "invite", { op: "accept", code: `https://exemplo.com/#convite=${code}` });
+    assert.deepEqual([accepted.ok, accepted.peer], [true, "Pessoa 3"]);
+    assert.deepEqual((await withAck(two, "rooms", null)).rooms.map((room) => room.peer).sort(), ["Pessoa 1", "Pessoa 3"]);
+
+    // Cada um numa chamada por vez: quem já está numa não recebe outra.
+    const busy = await withAck(one, "call", { op: "start", media: "audio" });
+    assert.equal(busy.call.room, fresh);
+    two.auth.room = accepted.room;
+    assert.equal((await withAck(two, "call", { op: "start", media: "audio" })).error, "Pessoa 3 está em outra chamada agora.");
+    one.emit("call-ended", { id: busy.call.id });
+    await until(three, "call-ended", (item) => item.id === busy.call.id);
+    one.disconnect();
+    two.disconnect();
+    three.disconnect();
   }
 
   // Muitas tentativas de senha: bloqueia.

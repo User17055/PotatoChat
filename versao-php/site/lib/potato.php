@@ -6,14 +6,17 @@ declare(strict_types=1);
 
 const DAY_MS = 86400000;
 const SESSION_DAYS = 365;
-const MAX_USERS = 2;
+// Contas novas chegam por convite (as duas primeiras, o casal, não precisam): ele vale uma vez, por INVITE_DAYS.
+const INVITE_DAYS = 7;
+const INVITES_PER_DAY = 20;
+const INVITE_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';
 const PAGE_SIZE = 60;
 // Pesquisa na conversa: quantos resultados vêm por vez.
 const SEARCH_PAGE = 30;
 const REACTIONS = ['❤️', '😂', '😮', '😢', '👍', '🔥'];
 const MAX_BODY = 1000000;
 const EVENT_KEEP_MS = 120000;
-const SCHEMA_VERSION = '8';
+const SCHEMA_VERSION = '9';
 const MIN_PASSWORD = 4;
 const AVATAR_MAX = 400000;
 // GIF animado vai sem recortar (o recorte tiraria a animação): limite maior, que ainda cabe numa requisição.
@@ -27,6 +30,9 @@ const VOICE_PEAKS = 64;
 // Papel de parede: foto reduzida no navegador (lado maior até 1600 px). Cabe numa requisição mesmo em base64.
 const WALLPAPER_MAX = 650000;
 const MUSIC_QUEUE_MAX = 50;
+// Chamada: quanto tempo ela toca nos aparelhos da outra pessoa (depois, continua aberta esperando). Veja "chamadas".
+const CALL_RING_MS = 60000;
+const CALL_NAMES = ['audio' => 'Chamada de voz', 'video' => 'Chamada de vídeo', 'screen' => 'Transmissão de tela'];
 // Mesma lista do app.js (THEMES). O primeiro é o padrão.
 const THEMES = ['escuro', 'preto', 'rosa', 'roxo', 'azul', 'verde', 'claro'];
 
@@ -201,7 +207,8 @@ function schema(): array
   source VARCHAR(16) $ascii NOT NULL DEFAULT 'web',
   " . implode(",\n  ", message_columns()) . ",
   UNIQUE KEY message_id (id),
-  KEY message_client (sender, client_id)
+  KEY message_client (sender, client_id),
+  KEY message_room (room, n)
 ) $table",
         'CREATE TABLE IF NOT EXISTS ' . t('status') . " (
   name VARCHAR(64) $exact NOT NULL PRIMARY KEY,
@@ -226,7 +233,33 @@ function schema(): array
   from_conn VARCHAR(64) $ascii NULL,
   from_name VARCHAR(64) $exact NULL,
   to_conn VARCHAR(64) $ascii NULL,
+  " . implode(",\n  ", event_columns()) . ",
   KEY event_at (at)
+) $table",
+        // Conversas (de duas pessoas, a e b em ordem) e até onde cada um leu em cada uma.
+        'CREATE TABLE IF NOT EXISTS ' . t('rooms') . " (
+  id VARCHAR(16) $ascii NOT NULL PRIMARY KEY,
+  a VARCHAR(64) $exact NOT NULL,
+  b VARCHAR(64) $exact NOT NULL,
+  created_at VARCHAR(32) $ascii NOT NULL,
+  UNIQUE KEY room_pair (a, b),
+  KEY room_b (b)
+) $table",
+        'CREATE TABLE IF NOT EXISTS ' . t('reads') . " (
+  room VARCHAR(16) $ascii NOT NULL,
+  name VARCHAR(64) $exact NOT NULL,
+  read_id CHAR(36) $ascii NULL,
+  read_at VARCHAR(32) $ascii NULL,
+  PRIMARY KEY (room, name)
+) $table",
+        // Convites: o link que quem já usa manda para alguém (cria a conta, ou só a conversa, de quem abre).
+        'CREATE TABLE IF NOT EXISTS ' . t('invites') . " (
+  code VARCHAR(16) $ascii NOT NULL PRIMARY KEY,
+  owner VARCHAR(64) $exact NOT NULL,
+  created_at BIGINT NOT NULL,
+  used_by VARCHAR(64) $exact NULL,
+  used_at BIGINT NULL,
+  KEY invite_owner (owner, created_at)
 ) $table",
         'CREATE TABLE IF NOT EXISTS ' . t('gone') . " (
   conn VARCHAR(64) $ascii NOT NULL PRIMARY KEY,
@@ -288,14 +321,21 @@ function user_columns(): array
     ];
 }
 
-// GIF ou arquivo da mensagem (JSON) e quando a outra pessoa leu (vazio = lida antes de o chat guardar a hora).
-// Separadas pelo mesmo motivo.
+// GIF ou arquivo da mensagem (JSON), quando a outra pessoa leu (vazio = lida antes de o chat guardar a hora) e a
+// conversa dela. Separadas pelo mesmo motivo.
 function message_columns(): array
 {
     return [
         'media' => 'media TEXT NULL',
         'read_at' => 'read_at VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL',
+        'room' => "room VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT ''",
     ];
+}
+
+// A conversa do evento (vazio = de todos): só as duas pessoas dela recebem.
+function event_columns(): array
+{
+    return ['room' => 'room VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NULL'];
 }
 
 // Banco de antes da hora da leitura: o que cada um já tinha lido continua lido, só que sem a hora.
@@ -320,15 +360,17 @@ function migrate(PDO $pdo): void
             // Banco vazio: a tabela settings ainda não existe.
         }
         foreach (schema() as $sql) $pdo->exec($sql);
-        foreach (['users' => user_columns(), 'messages' => message_columns()] as $table => $wanted) {
+        foreach (['users' => user_columns(), 'messages' => message_columns(), 'events' => event_columns()] as $table => $wanted) {
             $columns = $pdo->query('SHOW COLUMNS FROM ' . t($table))->fetchAll(PDO::FETCH_COLUMN);
             $missing = array_diff_key($wanted, array_flip($columns));
             if (!$missing) continue;
             $changes = array_map(fn($column) => "ADD COLUMN $column", array_values($missing));
             if (isset($missing['avatar_key'])) $changes[] = 'ADD KEY user_avatar (avatar_key)';
+            if ($table === 'messages' && isset($missing['room'])) $changes[] = 'ADD KEY message_room (room, n)';
             $pdo->exec('ALTER TABLE ' . t($table) . ' ' . implode(', ', $changes));
             if ($table === 'messages' && isset($missing['read_at'])) backfill_reads($pdo);
         }
+        link_couple($pdo);
         $pdo->prepare('INSERT INTO ' . t('settings') . ' (name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)')
             ->execute(['schema', SCHEMA_VERSION]);
     } finally {
@@ -452,16 +494,17 @@ function issue_token(string $name): string
     return sign(['name' => $name, 'expiresAt' => now_ms() + SESSION_DAYS * DAY_MS, 'nonce' => uuid()]);
 }
 
-// Só duas contas: as duas primeiras pessoas que entram escolhem nome e senha, e eles valem para sempre.
-// (A foto não entra aqui: ela só é lida quando alguém abre a imagem.)
+// As contas: nome e senha valem para sempre. As duas primeiras pessoas entram sem convite (o casal); as outras chegam
+// por convite. (A foto não entra aqui: ela só é lida quando alguém abre a imagem.)
 function accounts(): array
 {
-    return query('SELECT position, name, pass_hash, avatar_key, theme, wallpaper_key, wallpaper_style FROM ' . t('users') . ' ORDER BY position LIMIT ' . MAX_USERS)->fetchAll();
+    return query('SELECT position, name, pass_hash, avatar_key, theme, wallpaper_key, wallpaper_style FROM ' . t('users') . ' ORDER BY position')->fetchAll();
 }
 
+// O casal (as duas primeiras contas): o Nosso cantinho é só deles.
 function users(): array
 {
-    return array_column(accounts(), 'name');
+    return array_column(array_slice(accounts(), 0, 2), 'name');
 }
 
 function find_account(string $name): ?array
@@ -479,11 +522,16 @@ function authenticate(array $input): array
     return ['name' => $account['name'], 'expiresAt' => (int) $session['expiresAt']];
 }
 
-// Para a tela de login: quantas contas ainda podem ser criadas.
-function welcome(): array
+// Para a tela de login: quantas contas ainda dá para criar sem convite e, com um convite no link, quem convidou.
+function welcome(string $code = ''): array
 {
     $ready = array_filter(accounts(), fn($account) => $account['pass_hash'] !== null);
-    return ['open' => MAX_USERS - count($ready)];
+    $result = ['open' => max(0, 2 - count($ready))];
+    if ($code !== '') {
+        $invite = find_invite($code);
+        $result['invite'] = $invite ? ['from' => $invite['owner']] : false;
+    }
+    return $result;
 }
 
 // Limite simples contra abuso: no máximo $max registros na janela de tempo.
@@ -511,6 +559,10 @@ function login(array $input, string $ip): array
         if (text_length($name) < 2) throw new HttpError(400, 'Digite um nome com pelo menos 2 caracteres.');
         if ($password === '') throw new HttpError(400, 'Digite sua senha.');
         if (strlen($password) > 200 || strpos($password, "\0") !== false) throw new HttpError(400, 'Senha inválida.');
+        // Entrando pelo link de um convite: quem convidou vira contato (e a conta nova pode ser criada).
+        $code = str($input['invite'] ?? '');
+        $invite = $code !== '' ? find_invite($code) : null;
+        if ($code !== '' && !$invite) throw new HttpError(400, 'Esse convite não vale mais (já foi usado ou passou de ' . INVITE_DAYS . ' dias). Peça outro.');
 
         $account = find_account($name);
         if ($account && $account['pass_hash'] !== null) {
@@ -518,11 +570,14 @@ function login(array $input, string $ip): array
             if (password_needs_rehash($account['pass_hash'], PASSWORD_DEFAULT)) {
                 query('UPDATE ' . t('users') . ' SET pass_hash = ? WHERE position = ?', [password_hash($password, PASSWORD_DEFAULT), $account['position']]);
             }
-            return ['token' => issue_token($account['name']), 'name' => $account['name']];
+            $result = ['token' => issue_token($account['name']), 'name' => $account['name']];
+            if ($invite && !same_name($invite['owner'], $account['name'])) $result['room'] = use_invite($invite, $account['name'])['id'];
+            return $result;
         }
 
-        // Primeiro acesso: cria a conta (ou só a senha, se a conta veio da versão sem senhas).
-        if (!$account && count(accounts()) >= MAX_USERS) throw new HttpError(403, 'Nosso chat é só de ' . implode(' e ', users()) . '.');
+        // Primeiro acesso: cria a conta (ou só a senha, se a conta veio da versão sem senhas). Sem convite, só as duas
+        // primeiras.
+        if (!$account && count(accounts()) >= 2 && !$invite) throw new HttpError(403, 'Para criar uma conta, peça um convite para quem já usa o Potato Chat.');
         $name = $account['name'] ?? $name;
         if (text_length($password) < MIN_PASSWORD) throw new HttpError(400, 'Escolha uma senha com pelo menos ' . MIN_PASSWORD . ' caracteres.');
         // Nome e senha não mudam mais: o navegador pede a senha de novo antes de criar.
@@ -532,8 +587,166 @@ function login(array $input, string $ip): array
         $hash = password_hash($password, PASSWORD_DEFAULT);
         if ($account) query('UPDATE ' . t('users') . ' SET pass_hash = ? WHERE position = ?', [$hash, $account['position']]);
         else query('INSERT INTO ' . t('users') . ' (name, created_at, pass_hash) VALUES (?, ?, ?)', [$name, iso(), $hash]);
-        return ['token' => issue_token($name), 'name' => $name, 'created' => true];
+        $result = ['token' => issue_token($name), 'name' => $name, 'created' => true];
+        if ($invite) $result['room'] = use_invite($invite, $name)['id'];
+        else link_couple(db());
+        return $result;
     });
+}
+
+// ---------- conversas e convites ----------
+// Cada conversa é de duas pessoas, como as DMs do Discord: a lista de conversas de cada um são os contatos dele. A do
+// casal (as duas primeiras contas) é a de sempre, e o Nosso cantinho é só dela. Quem já usa manda um convite (um link
+// que vale uma vez): quem abre cria a conta (ou entra na dela) e os dois ganham uma conversa.
+
+function room_id(): string
+{
+    return bin2hex(random_bytes(6));
+}
+
+// As duas pessoas da conversa em ordem (a coluna a é sempre a menor).
+function pair(string $x, string $y): array
+{
+    return strcmp($x, $y) < 0 ? [$x, $y] : [$y, $x];
+}
+
+function find_room(string $id): ?array
+{
+    static $known = [];
+    if ($id === '') return null;
+    if (!isset($known[$id])) {
+        $room = query('SELECT * FROM ' . t('rooms') . ' WHERE id = ?', [$id])->fetch();
+        if (!$room) return null;
+        $known[$id] = $room;
+    }
+    return $known[$id];
+}
+
+function room_member(?array $room, string $name): bool
+{
+    return $room !== null && ($room['a'] === $name || $room['b'] === $name);
+}
+
+function room_peer(array $room, string $name): string
+{
+    return $room['a'] === $name ? $room['b'] : $room['a'];
+}
+
+// A conversa de duas pessoas (criada agora, se ainda não existe).
+function room_between(string $x, string $y): array
+{
+    [$a, $b] = pair($x, $y);
+    $room = query('SELECT * FROM ' . t('rooms') . ' WHERE a = ? AND b = ?', [$a, $b])->fetch();
+    if ($room) return $room;
+    $room = ['id' => room_id(), 'a' => $a, 'b' => $b, 'created_at' => iso()];
+    query('INSERT INTO ' . t('rooms') . ' (id, a, b, created_at) VALUES (?, ?, ?, ?)', array_values($room));
+    return $room;
+}
+
+function rooms_of(string $name): array
+{
+    return query('SELECT * FROM ' . t('rooms') . ' WHERE a = ? OR b = ?', [$name, $name])->fetchAll();
+}
+
+function couple_room(): ?array
+{
+    static $room = null;
+    if ($room) return $room;
+    $couple = users();
+    if (count($couple) < 2) return null;
+    [$a, $b] = pair($couple[0], $couple[1]);
+    return $room = query('SELECT * FROM ' . t('rooms') . ' WHERE a = ? AND b = ?', [$a, $b])->fetch() ?: null;
+}
+
+// O casal ganha a conversa dele. Antes das conversas separadas só havia essa: as mensagens, as leituras, a música e a
+// Watch Party de antes passam a ser dela.
+function link_couple(PDO $pdo): void
+{
+    $couple = $pdo->query('SELECT name FROM ' . t('users') . ' ORDER BY position LIMIT 2')->fetchAll(PDO::FETCH_COLUMN);
+    if (count($couple) < 2) return;
+    [$a, $b] = pair($couple[0], $couple[1]);
+    $find = $pdo->prepare('SELECT id FROM ' . t('rooms') . ' WHERE a = ? AND b = ?');
+    $find->execute([$a, $b]);
+    $room = $find->fetchColumn();
+    if (!$room) {
+        $room = room_id();
+        $pdo->prepare('INSERT INTO ' . t('rooms') . ' (id, a, b, created_at) VALUES (?, ?, ?, ?)')->execute([$room, $a, $b, iso()]);
+    }
+    $pdo->prepare('UPDATE ' . t('messages') . " SET room = ? WHERE room = ''")->execute([$room]);
+    $pdo->prepare('INSERT IGNORE INTO ' . t('reads') . ' (room, name, read_id, read_at) SELECT ?, name, read_id, read_at FROM ' . t('status') . ' WHERE read_id IS NOT NULL')->execute([$room]);
+    foreach (['music', 'watch'] as $key) $pdo->prepare('UPDATE IGNORE ' . t('settings') . ' SET name = ? WHERE name = ?')->execute(["$key:$room", $key]);
+}
+
+// A conversa de uma ação: a pedida (se a pessoa é dela; senão, nenhuma) ou, sem pedido (a extensão, o app do Android),
+// a do casal ou a mais recente.
+function pick_room(string $name, string $requested): ?array
+{
+    if ($requested !== '') {
+        $room = find_room($requested);
+        return room_member($room, $name) ? $room : null;
+    }
+    $couple = couple_room();
+    if (room_member($couple, $name)) return $couple;
+    $room = query('SELECT r.* FROM ' . t('rooms') . ' r WHERE r.a = ? OR r.b = ? ORDER BY (SELECT MAX(m.n) FROM ' . t('messages') . ' m WHERE m.room = r.id) DESC, r.created_at DESC LIMIT 1', [$name, $name])->fetch();
+    return $room ?: null;
+}
+
+// As conversas de alguém (os contatos), das mais recentes para as mais antigas: com quem, a última mensagem e quantas
+// ainda não leu.
+function room_list(string $name): array
+{
+    $couple = couple_room();
+    $list = [];
+    foreach (rooms_of($name) as $room) {
+        $last = query('SELECT * FROM ' . t('messages') . ' WHERE room = ? ORDER BY n DESC LIMIT 1', [$room['id']])->fetch();
+        $unread = (int) query('SELECT COUNT(*) FROM ' . t('messages') . ' WHERE room = ? AND n > ? AND sender <> ? AND deleted = 0', [$room['id'], read_upto($room['id'], $name), $name])->fetchColumn();
+        $list[] = [
+            'id' => $room['id'], 'peer' => room_peer($room, $name), 'couple' => $couple !== null && $couple['id'] === $room['id'], 'since' => $room['created_at'],
+            'last' => $last ? ['id' => $last['id'], 'sender' => $last['sender'], 'text' => $last['deleted'] ? '' : preview_text($last), 'at' => $last['created_at'], 'deleted' => (bool) $last['deleted']] : null,
+            'unread' => $unread,
+        ];
+    }
+    usort($list, fn($x, $y) => strcmp($y['last']['at'] ?? $y['since'], $x['last']['at'] ?? $x['since']));
+    return $list;
+}
+
+// O código de um convite (vale colar o link inteiro). null = não existe, já foi usado, venceu ou quem convidou saiu.
+function find_invite(string $text): ?array
+{
+    if (!preg_match('/([a-z2-9]{10})\s*$/', strtolower($text), $match)) return null;
+    $invite = query('SELECT * FROM ' . t('invites') . ' WHERE code = ?', [$match[1]])->fetch();
+    if (!$invite || $invite['used_by'] !== null || now_ms() - (int) $invite['created_at'] > INVITE_DAYS * DAY_MS) return null;
+    return find_account($invite['owner']) ? $invite : null;
+}
+
+// Quem convidou e quem chegou viram contatos (a conversa dos dois). Os dois ficam sabendo na hora.
+function use_invite(array $invite, string $name): array
+{
+    query('UPDATE ' . t('invites') . ' SET used_by = ?, used_at = ? WHERE code = ?', [$name, now_ms(), $invite['code']]);
+    $room = room_between(find_account($invite['owner'])['name'], $name);
+    emit('rooms', ['room' => $room['id']], 'all', null, null, $room['id']);
+    return $room;
+}
+
+function invite_act(array $me, array $body): array
+{
+    $op = str($body['op'] ?? '');
+    if ($op === 'create') {
+        $today = (int) query('SELECT COUNT(*) FROM ' . t('invites') . ' WHERE owner = ? AND created_at > ?', [$me['name'], now_ms() - DAY_MS])->fetchColumn();
+        if ($today >= INVITES_PER_DAY) return ['ok' => false, 'error' => 'Muitos convites hoje. Tente de novo amanhã.'];
+        $code = '';
+        for ($i = 0; $i < 10; $i++) $code .= INVITE_ALPHABET[random_int(0, strlen(INVITE_ALPHABET) - 1)];
+        query('INSERT INTO ' . t('invites') . ' (code, owner, created_at) VALUES (?, ?, ?)', [$code, $me['name'], now_ms()]);
+        return ['ok' => true, 'code' => $code, 'days' => INVITE_DAYS];
+    }
+    if ($op === 'accept') {
+        $invite = find_invite(str($body['code'] ?? ''));
+        if (!$invite) return ['ok' => false, 'error' => 'Esse convite não vale mais (já foi usado ou passou de ' . INVITE_DAYS . ' dias). Peça outro.'];
+        if (same_name($invite['owner'], $me['name'])) return ['ok' => false, 'error' => 'Esse convite é seu: mande para quem você quer adicionar.'];
+        $room = use_invite($invite, $me['name']);
+        return ['ok' => true, 'room' => $room['id'], 'peer' => room_peer($room, $me['name'])];
+    }
+    return ['ok' => false, 'error' => 'Ação desconhecida.'];
 }
 
 // ---------- foto de perfil ----------
@@ -857,17 +1070,18 @@ function music_blank(): array
     return ['now' => null, 'queue' => [], 'playing' => false, 'position' => 0, 'updatedAt' => 0];
 }
 
-function music_state(bool $lock = false): array
+// Cada conversa tem o seu tocador (settings: music:<conversa>).
+function music_state(string $room, bool $lock = false): array
 {
-    if ($lock) query('INSERT IGNORE INTO ' . t('settings') . " (name, value) VALUES ('music', '{}')");
-    $raw = query('SELECT value FROM ' . t('settings') . " WHERE name = 'music'" . ($lock ? ' FOR UPDATE' : ''))->fetchColumn();
+    if ($lock) query('INSERT IGNORE INTO ' . t('settings') . " (name, value) VALUES (?, '{}')", ["music:$room"]);
+    $raw = query('SELECT value FROM ' . t('settings') . ' WHERE name = ?' . ($lock ? ' FOR UPDATE' : ''), ["music:$room"])->fetchColumn();
     $state = $raw ? json_decode((string) $raw, true) : null;
     return is_array($state) ? array_merge(music_blank(), $state) : music_blank();
 }
 
-function save_music(array $state): void
+function save_music(string $room, array $state): void
 {
-    query('INSERT INTO ' . t('settings') . " (name, value) VALUES ('music', ?) ON DUPLICATE KEY UPDATE value = VALUES(value)", [encode($state)]);
+    query('INSERT INTO ' . t('settings') . ' (name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)', ["music:$room", encode($state)]);
 }
 
 // serverNow: o navegador compara com o próprio relógio para saber em que segundo a música está.
@@ -877,20 +1091,22 @@ function music_public(array $state): array
 }
 
 // Cartão do Potato DJ no chat (mensagem de quem pediu a música).
-function post_music_card(array $me, array $track, int $queued): void
+function post_music_card(array $me, string $room, array $track, int $queued): void
 {
     $row = [
         'id' => uuid(), 'client_id' => null, 'sender' => $me['name'], 'text' => '', 'created_at' => iso(), 'reply_to' => null,
-        'reactions' => '{}', 'deleted' => 0, 'source' => 'music', 'media' => encode(['music' => $track + ['queued' => $queued]]),
+        'reactions' => '{}', 'deleted' => 0, 'source' => 'music', 'media' => encode(['music' => $track + ['queued' => $queued]]), 'room' => $room,
     ];
-    query('INSERT INTO ' . t('messages') . ' (id, client_id, sender, text, created_at, reply_to, reactions, deleted, source, media) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', array_values($row));
-    emit('message', to_message($row));
+    insert_message($row);
+    emit('message', to_message($row), 'all', null, null, $room);
 }
 
 // Comandos: play (com query = pede música; sem = continua), pause, resume, seek, skip, ended (a música acabou), stop,
 // remove (tira da fila) e jump (toca agora uma da fila).
 function music_act(array $me, array $body): array
 {
+    if (!$me['room']) return ['ok' => false, 'error' => 'Escolha uma conversa.'];
+    $room = $me['room']['id'];
     $op = str($body['op'] ?? '');
     $query = text_slice(text_trim(str($body['query'] ?? '')), 300);
     $track = null;
@@ -910,7 +1126,7 @@ function music_act(array $me, array $body): array
             $track = $stamp($resolved['track']);
         }
     }
-    $state = music_state(true);
+    $state = music_state($room, true);
     $now = now_ms();
     $action = ['op' => $op, 'by' => $me['name']];
     $advance = function () use (&$state, $now, &$action) {
@@ -994,10 +1210,10 @@ function music_act(array $me, array $body): array
         default:
             return ['ok' => false, 'error' => 'Comando de música desconhecido.'];
     }
-    save_music($state);
-    if ($track) post_music_card($me, $card ?? $track, $action['queued']);
+    save_music($room, $state);
+    if ($track) post_music_card($me, $room, $card ?? $track, $action['queued']);
     $public = music_public($state);
-    emit('music', ['state' => $public, 'action' => $action]);
+    emit('music', ['state' => $public, 'action' => $action, 'room' => $room], 'all', null, null, $room);
     return ['ok' => true, 'state' => $public, 'action' => $action];
 }
 
@@ -1068,17 +1284,18 @@ function watch_recent(array $recent, array $item): array
     return array_slice($recent, 0, 12);
 }
 
-function watch_state(bool $lock = false): array
+// Cada conversa tem a sua sala (settings: watch:<conversa>).
+function watch_state(string $room, bool $lock = false): array
 {
-    if ($lock) query('INSERT IGNORE INTO ' . t('settings') . " (name, value) VALUES ('watch', '{}')");
-    $raw = query('SELECT value FROM ' . t('settings') . " WHERE name = 'watch'" . ($lock ? ' FOR UPDATE' : ''))->fetchColumn();
+    if ($lock) query('INSERT IGNORE INTO ' . t('settings') . " (name, value) VALUES (?, '{}')", ["watch:$room"]);
+    $raw = query('SELECT value FROM ' . t('settings') . ' WHERE name = ?' . ($lock ? ' FOR UPDATE' : ''), ["watch:$room"])->fetchColumn();
     $state = $raw ? json_decode((string) $raw, true) : null;
     return is_array($state) ? array_merge(watch_blank(), $state) : watch_blank();
 }
 
-function save_watch(array $state): void
+function save_watch(string $room, array $state): void
 {
-    query('INSERT INTO ' . t('settings') . " (name, value) VALUES ('watch', ?) ON DUPLICATE KEY UPDATE value = VALUES(value)", [encode($state)]);
+    query('INSERT INTO ' . t('settings') . ' (name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)', ["watch:$room", encode($state)]);
 }
 
 function watch_public(array $state): array
@@ -1092,6 +1309,8 @@ function watch_act(array $me, array $body): array
 {
     $op = str($body['op'] ?? '');
     if ($op === 'search') return watch_catalog($body);
+    if (!$me['room']) return ['ok' => false, 'error' => 'Escolha uma conversa.'];
+    $room = $me['room']['id'];
     $item = null;
     if ($op === 'start') {
         $local = is_array($body['local'] ?? null) ? $body['local'] : null;
@@ -1143,7 +1362,7 @@ function watch_act(array $me, array $body): array
         }
         $item += ['uid' => bin2hex(random_bytes(8)), 'by' => $me['name']];
     }
-    $state = watch_state(true);
+    $state = watch_state($room, true);
     $now = now_ms();
     $action = ['op' => $op, 'by' => $me['name']];
     // updatedAt no futuro = contagem para o play: até lá, o vídeo fica parado no mesmo segundo.
@@ -1162,13 +1381,13 @@ function watch_act(array $me, array $body): array
             $state = ['now' => $item, 'playing' => true, 'position' => $streamed ? ($reported ?? 0) : 0, 'updatedAt' => $now, 'browsing' => null, 'recent' => watch_recent($state['recent'], $item)];
             $action['item'] = $item;
             // Os dois sons juntos não dá: a música pausa.
-            $music = music_state(true);
+            $music = music_state($room, true);
             if ($music['now'] && $music['playing']) {
                 $music['position'] += ($now - $music['updatedAt']) / 1000;
                 $music['playing'] = false;
                 $music['updatedAt'] = $now;
-                save_music($music);
-                emit('music', ['state' => music_public($music), 'action' => ['op' => 'pause', 'by' => $me['name']]]);
+                save_music($room, $music);
+                emit('music', ['state' => music_public($music), 'action' => ['op' => 'pause', 'by' => $me['name']], 'room' => $room], 'all', null, null, $room);
             }
             break;
         case 'pause':
@@ -1216,9 +1435,9 @@ function watch_act(array $me, array $body): array
         default:
             return ['ok' => false, 'error' => 'Comando desconhecido.'];
     }
-    save_watch($state);
+    save_watch($room, $state);
     $public = watch_public($state);
-    emit('watch', ['state' => $public, 'action' => $action]);
+    emit('watch', ['state' => $public, 'action' => $action, 'room' => $room], 'all', null, null, $room);
     return ['ok' => true, 'state' => $public, 'action' => $action];
 }
 
@@ -1421,14 +1640,14 @@ function clean_voice($voice): ?array
 
 // Transcreve uma mensagem de voz (qualquer um dos dois pode pedir). O texto fica na mensagem (voice.text) e
 // chega para os dois; pedir de novo devolve o que já foi feito. Roda fora da trava do banco: a API leva uns segundos.
-function transcribe_message(string $id): array
+function transcribe_message(string $id, string $name): array
 {
     if (str(config()['transcribe_key']) === '') return ['ok' => false, 'error' => 'A transcrição ainda não foi ativada: falta a chave no config.php (veja o LEIA-ME).'];
     $voiceFile = function (?array $row): ?array {
         $media = $row && !$row['deleted'] && !empty($row['media']) ? json_decode((string) $row['media'], true) : null;
         return is_array($media['file']['voice'] ?? null) ? $media : null;
     };
-    $media = $voiceFile(find_message($id));
+    $media = $voiceFile(member_message($name, $id));
     if (!$media) return ['ok' => false, 'error' => 'Só dá para transcrever mensagens de voz.'];
     if (isset($media['file']['voice']['text'])) return ['ok' => true, 'text' => $media['file']['voice']['text']];
     $audio = query('SELECT type, data FROM ' . t('files') . ' WHERE file_key = ?', [$media['file']['key']])->fetch();
@@ -1445,7 +1664,7 @@ function transcribe_message(string $id): array
         $media['file']['voice']['text'] = $text;
         $row['media'] = encode($media);
         query('UPDATE ' . t('messages') . ' SET media = ? WHERE n = ?', [$row['media'], $row['n']]);
-        emit('message:update', to_message($row));
+        emit_message('message:update', to_message($row));
         return ['ok' => true, 'text' => $text];
     });
 }
@@ -1659,7 +1878,7 @@ function save_habits(array $me, $list): array
     $prefs = prefs_data($me['name']);
     $prefs['habits'] = $habits;
     save_prefs($me['name'], $prefs);
-    emit('us', ['kind' => 'habits', 'by' => $me['name'], 'owner' => $me['name'], 'habits' => $habits]);
+    emit_us(['kind' => 'habits', 'by' => $me['name'], 'owner' => $me['name'], 'habits' => $habits]);
     return ['ok' => true, 'habits' => $habits];
 }
 
@@ -1671,7 +1890,7 @@ function save_prompts(array $me, $prompts): array
     }
     save_prefs($me['name'], $prefs);
     // Os outros aparelhos da pessoa (inclusive o app do Android em segundo plano) refazem a lista de lembretes.
-    emit('us', ['kind' => 'prompts', 'by' => $me['name']], 'self', $me);
+    emit_us(['kind' => 'prompts', 'by' => $me['name']], 'self', $me);
     return ['ok' => true, 'prompts' => $prefs['prompts']];
 }
 
@@ -1729,7 +1948,7 @@ function save_day(array $me, array $body): array
     $saved = save_item($row, $id, 'day', $me['name'], $day, $data);
     keep_photos($id, $me['name'], $photos);
     $item = day_public($saved, $me['name'], $day);
-    emit('us', ['kind' => 'day', 'by' => $me['name'], 'item' => $item, 'meal' => $meal]);
+    emit_us(['kind' => 'day', 'by' => $me['name'], 'item' => $item, 'meal' => $meal]);
     return ['ok' => true, 'item' => $item];
 }
 
@@ -1964,14 +2183,14 @@ function us_act(array $me, array $body): array
             $event = clean_event($body);
             if (!$event) return ['ok' => false, 'error' => 'Dê um nome e uma data para o compromisso.'];
             $item = item_public(save_item($row, $row['id'] ?? uuid(), 'event', $row['owner'] ?? $me['name'], $event['date'], $event));
-            emit('us', ['kind' => 'event', 'by' => $me['name'], 'item' => $item, 'created' => !$row]);
+            emit_us(['kind' => 'event', 'by' => $me['name'], 'item' => $item, 'created' => !$row]);
             return ['ok' => true, 'item' => $item];
 
         case 'event:delete':
             $row = find_item('event', $id);
             if ($row) {
                 delete_item($row);
-                emit('us', ['kind' => 'event', 'by' => $me['name'], 'id' => $id, 'deleted' => true, 'title' => item_data($row)['title'] ?? '']);
+                emit_us(['kind' => 'event', 'by' => $me['name'], 'id' => $id, 'deleted' => true, 'title' => item_data($row)['title'] ?? '']);
             }
             return ['ok' => true];
 
@@ -1981,7 +2200,7 @@ function us_act(array $me, array $body): array
             $goal = clean_goal($body, $row ? item_data($row) : []);
             if (!$goal) return ['ok' => false, 'error' => 'Dê um nome para o sonho ou a meta.'];
             $item = item_public(save_item($row, $row['id'] ?? uuid(), 'goal', $row['owner'] ?? $me['name'], null, $goal));
-            emit('us', ['kind' => 'goal', 'by' => $me['name'], 'item' => $item, 'action' => $row ? 'edit' : 'new']);
+            emit_us(['kind' => 'goal', 'by' => $me['name'], 'item' => $item, 'action' => $row ? 'edit' : 'new']);
             return ['ok' => true, 'item' => $item];
 
         // Guardar (ou tirar, com valor negativo) dinheiro; marcar um passo; marcar como realizado.
@@ -2007,14 +2226,14 @@ function us_act(array $me, array $body): array
                 $goal['doneAt'] = $goal['done'] ? iso() : null;
             }
             $item = item_public(save_item($row, $row['id'], 'goal', $row['owner'], null, $goal));
-            emit('us', ['kind' => 'goal', 'by' => $me['name'], 'item' => $item, 'action' => substr($op, 5)] + $extra);
+            emit_us(['kind' => 'goal', 'by' => $me['name'], 'item' => $item, 'action' => substr($op, 5)] + $extra);
             return ['ok' => true, 'item' => $item];
 
         case 'goal:delete':
             $row = find_item('goal', $id);
             if ($row) {
                 delete_item($row);
-                emit('us', ['kind' => 'goal', 'by' => $me['name'], 'id' => $id, 'deleted' => true]);
+                emit_us(['kind' => 'goal', 'by' => $me['name'], 'id' => $id, 'deleted' => true]);
             }
             return ['ok' => true];
 
@@ -2041,7 +2260,7 @@ function us_act(array $me, array $body): array
             ];
             $saved = save_item($row, $itemId, 'letter', $me['name'], null, $letter);
             keep_photos($itemId, $me['name'], array_merge(array_column($photos, 'key'), array_column($audios, 'key')));
-            emit('us', ['kind' => 'letter', 'by' => $me['name'], 'item' => letter_public($saved), 'action' => $row ? 'edit' : 'new']);
+            emit_us(['kind' => 'letter', 'by' => $me['name'], 'item' => letter_public($saved), 'action' => $row ? 'edit' : 'new']);
             return ['ok' => true, 'item' => letter_public($saved, true)];
 
         // Abrir a cartinha inteira. A primeira vez que a outra pessoa abre, ela fica lida (quem escreveu vê).
@@ -2054,7 +2273,7 @@ function us_act(array $me, array $body): array
                 // Ler não conta como edição: a data de atualização continua a de quem escreveu.
                 query('UPDATE ' . t('items') . ' SET data = ? WHERE n = ?', [encode($letter), $row['n']]);
                 $row['data'] = encode($letter);
-                emit('us', ['kind' => 'letter', 'by' => $me['name'], 'item' => letter_public($row), 'action' => 'read']);
+                emit_us(['kind' => 'letter', 'by' => $me['name'], 'item' => letter_public($row), 'action' => 'read']);
             }
             return ['ok' => true, 'item' => letter_public($row, true)];
 
@@ -2063,7 +2282,7 @@ function us_act(array $me, array $body): array
             if ($row && $row['owner'] !== $me['name']) return ['ok' => false, 'error' => 'Só quem escreveu apaga a cartinha.'];
             if ($row) {
                 delete_item($row);
-                emit('us', ['kind' => 'letter', 'by' => $me['name'], 'id' => $id, 'deleted' => true]);
+                emit_us(['kind' => 'letter', 'by' => $me['name'], 'id' => $id, 'deleted' => true]);
             }
             return ['ok' => true];
     }
@@ -2342,8 +2561,8 @@ function game_act(array $me, array $body): array
     $op = str($body['op'] ?? '');
     if ($op === 'new') {
         $type = str($body['type'] ?? '');
-        $peer = peer_of($me['name']);
-        if (!$peer) return ['ok' => false, 'error' => 'Os joguinhos começam quando a outra pessoa criar a conta dela.'];
+        if (!$me['room']) return ['ok' => false, 'error' => 'Escolha uma conversa para jogar.'];
+        $peer = room_peer($me['room'], $me['name']);
         switch ($type) {
             case 'vd':
                 $game = ['type' => 'vd', 'for' => $peer, 'choice' => null, 'prompt' => null];
@@ -2379,20 +2598,20 @@ function game_act(array $me, array $body): array
         }
         $row = [
             'id' => uuid(), 'client_id' => null, 'sender' => $me['name'], 'text' => '', 'created_at' => iso(), 'reply_to' => null,
-            'reactions' => '{}', 'deleted' => 0, 'source' => 'game', 'media' => encode(['game' => $game]),
+            'reactions' => '{}', 'deleted' => 0, 'source' => 'game', 'media' => encode(['game' => $game]), 'room' => $me['room']['id'],
         ];
-        query('INSERT INTO ' . t('messages') . ' (id, client_id, sender, text, created_at, reply_to, reactions, deleted, source, media) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', array_values($row));
-        set_read($me['name'], $row['id'], $row['created_at']);
+        insert_message($row);
+        set_read($row['room'], $me['name'], $row['id'], $row['created_at']);
         $message = to_message($row);
-        emit('message', $message);
+        emit_message('message', $message);
         return ['ok' => true, 'message' => $message];
     }
 
-    // Placar: as partidas de tabuleiro que já acabaram (todas, não só as da conversa carregada), por jogo: as vitórias
-    // de cada um e os empates.
+    // Placar: as partidas de tabuleiro da conversa que já acabaram (todas, não só as do trecho carregado), por jogo: as
+    // vitórias de cada um e os empates.
     if ($op === 'score') {
         $score = [];
-        foreach (query('SELECT media FROM ' . t('messages') . " WHERE source = 'game' AND deleted = 0")->fetchAll(PDO::FETCH_COLUMN) as $media) {
+        foreach (query('SELECT media FROM ' . t('messages') . " WHERE source = 'game' AND deleted = 0 AND room = ?", [$me['room']['id'] ?? ''])->fetchAll(PDO::FETCH_COLUMN) as $media) {
             $game = json_decode((string) $media, true)['game'] ?? null;
             $winner = $game['winner'] ?? null;
             if (!$winner || !isset($game['seats'])) continue;
@@ -2405,7 +2624,7 @@ function game_act(array $me, array $body): array
         return ['ok' => true, 'score' => (object) $score];
     }
 
-    $row = find_message(str($body['id'] ?? ''));
+    $row = member_message($me['name'], str($body['id'] ?? ''));
     $media = $row && !$row['deleted'] && $row['media'] ? json_decode((string) $row['media'], true) : null;
     $game = $media['game'] ?? null;
     if (!$game) return ['ok' => false, 'error' => 'Esse jogo não existe mais.'];
@@ -2429,7 +2648,7 @@ function game_act(array $me, array $body): array
             break;
         case 'vote':
             $value = $body['value'] ?? null;
-            $valid = $game['type'] === 'quem' ? in_array($value, users(), true) : ($game['type'] === 'isso' && in_array($value, [0, 1], true));
+            $valid = $game['type'] === 'quem' ? in_array($value, $game['names'] ?? [], true) : ($game['type'] === 'isso' && in_array($value, [0, 1], true));
             if (!$valid) return ['ok' => false, 'error' => 'Voto inválido.'];
             if (isset($game['votes'][$me['name']])) return ['ok' => false, 'error' => 'Você já votou.'];
             $game['votes'][$me['name']] = $mine = $value;
@@ -2446,7 +2665,7 @@ function game_act(array $me, array $body): array
     $row['media'] = encode(['game' => $game]);
     query('UPDATE ' . t('messages') . ' SET media = ? WHERE n = ?', [$row['media'], $row['n']]);
     $message = to_message($row);
-    emit('message:update', $message);
+    emit_message('message:update', $message);
     return ['ok' => true, 'message' => $message, 'mine' => $mine];
 }
 
@@ -2457,26 +2676,29 @@ function to_message(array $row): array
     $deleted = (bool) $row['deleted'];
     $reactions = json_decode((string) $row['reactions'], true);
     // A coluna media guarda o GIF ({url, width, height, title}), o arquivo ({file: {...}}), o cartão de música
-    // ({music: {...}}) ou o joguinho ({game: {...}}).
+    // ({music: {...}}), o joguinho ({game: {...}}) ou a chamada ({call: {...}}).
     $media = $deleted || empty($row['media']) ? null : json_decode((string) $row['media'], true);
     $file = is_array($media) && isset($media['file']) ? file_info($media['file']) : null;
     $music = is_array($media) && isset($media['music']) ? $media['music'] : null;
     $game = is_array($media) && isset($media['game']) ? game_public($media['game']) : null;
+    $call = is_array($media) && isset($media['call']) ? $media['call'] : null;
     return [
         'id' => $row['id'],
         'clientId' => $row['client_id'] !== null && $row['client_id'] !== '' ? $row['client_id'] : null,
         'sender' => $row['sender'],
         'text' => $deleted ? '' : $row['text'],
-        'gif' => is_array($media) && !$file && !$music && !$game ? $media : null,
+        'gif' => is_array($media) && !$file && !$music && !$game && !$call ? $media : null,
         'file' => $file,
         'music' => $music,
         'game' => $game,
+        'call' => $call,
         'createdAt' => $row['created_at'],
         'replyTo' => $row['reply_to'] ? json_decode($row['reply_to'], true) : null,
         // Reações sempre como objeto JSON ({}), igual à versão Node.
         'reactions' => (object) (is_array($reactions) ? $reactions : []),
         'deleted' => $deleted,
         'source' => $row['source'] ?: 'web',
+        'room' => $row['room'] ?? '',
         // Lida pela outra pessoa, e quando (readAt null com read = lida antes de o chat guardar a hora).
         'read' => ($row['read_at'] ?? null) !== null,
         'readAt' => ($row['read_at'] ?? null) ?: null,
@@ -2490,15 +2712,38 @@ function find_message(string $id): ?array
     return $row ?: null;
 }
 
-function page(string $before = ''): array
+// A mensagem, se name é da conversa dela (senão, como se não existisse).
+function member_message(string $name, string $id): ?array
+{
+    $row = find_message($id);
+    return $row && room_member(find_room((string) $row['room']), $name) ? $row : null;
+}
+
+// A mensagem de uma conversa (um trecho nunca começa numa mensagem de outra).
+function room_message(string $room, string $id): ?array
+{
+    $row = find_message($id);
+    return $row && $row['room'] === $room ? $row : null;
+}
+
+function insert_message(array $row): int
+{
+    query(
+        'INSERT INTO ' . t('messages') . ' (id, client_id, sender, text, created_at, reply_to, reactions, deleted, source, media, room) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [$row['id'], $row['client_id'], $row['sender'], $row['text'], $row['created_at'], $row['reply_to'], $row['reactions'], $row['deleted'], $row['source'], $row['media'], $row['room']]
+    );
+    return (int) db()->lastInsertId();
+}
+
+function page(string $room, string $before = ''): array
 {
     $limit = PAGE_SIZE + 1;
     if ($before !== '') {
-        $anchor = find_message($before);
+        $anchor = room_message($room, $before);
         if (!$anchor) return ['items' => [], 'hasMore' => false];
-        $rows = query('SELECT * FROM ' . t('messages') . " WHERE n < ? ORDER BY n DESC LIMIT $limit", [$anchor['n']])->fetchAll();
+        $rows = query('SELECT * FROM ' . t('messages') . " WHERE room = ? AND n < ? ORDER BY n DESC LIMIT $limit", [$room, $anchor['n']])->fetchAll();
     } else {
-        $rows = query('SELECT * FROM ' . t('messages') . " ORDER BY n DESC LIMIT $limit")->fetchAll();
+        $rows = query('SELECT * FROM ' . t('messages') . " WHERE room = ? ORDER BY n DESC LIMIT $limit", [$room])->fetchAll();
     }
     $hasMore = count($rows) > PAGE_SIZE;
     $rows = array_reverse(array_slice($rows, 0, PAGE_SIZE));
@@ -2508,31 +2753,31 @@ function page(string $before = ''): array
 // Um trecho antigo da conversa (pesquisa ou "ir para o dia"): a mensagem pedida (id), ou a primeira desde from (hora
 // ISO do começo do dia, no fuso de quem pediu; depois da última, a última), com metade da página antes e o resto
 // depois. hasNewer = ainda tem mensagens depois do trecho.
-function around(string $id, string $from = ''): array
+function around(string $room, string $id, string $from = ''): array
 {
     if ($id !== '') {
-        $anchor = find_message($id);
+        $anchor = room_message($room, $id);
     } elseif (preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/', $from)) {
-        $anchor = query('SELECT * FROM ' . t('messages') . ' WHERE created_at >= ? ORDER BY n LIMIT 1', [$from])->fetch()
-            ?: query('SELECT * FROM ' . t('messages') . ' ORDER BY n DESC LIMIT 1')->fetch();
+        $anchor = query('SELECT * FROM ' . t('messages') . ' WHERE room = ? AND created_at >= ? ORDER BY n LIMIT 1', [$room, $from])->fetch()
+            ?: query('SELECT * FROM ' . t('messages') . ' WHERE room = ? ORDER BY n DESC LIMIT 1', [$room])->fetch();
     } else {
         return ['ok' => false, 'error' => 'Dia inválido.'];
     }
     if (!$anchor) return ['ok' => false, 'error' => $id !== '' ? 'Essa mensagem não existe mais.' : 'A conversa ainda está vazia.'];
     $before = intdiv(PAGE_SIZE, 2);
     $after = PAGE_SIZE - $before - 1;
-    $older = query('SELECT * FROM ' . t('messages') . ' WHERE n < ? ORDER BY n DESC LIMIT ' . ($before + 1), [$anchor['n']])->fetchAll();
-    $newer = query('SELECT * FROM ' . t('messages') . ' WHERE n > ? ORDER BY n LIMIT ' . ($after + 1), [$anchor['n']])->fetchAll();
+    $older = query('SELECT * FROM ' . t('messages') . ' WHERE room = ? AND n < ? ORDER BY n DESC LIMIT ' . ($before + 1), [$room, $anchor['n']])->fetchAll();
+    $newer = query('SELECT * FROM ' . t('messages') . ' WHERE room = ? AND n > ? ORDER BY n LIMIT ' . ($after + 1), [$room, $anchor['n']])->fetchAll();
     $rows = array_merge(array_reverse(array_slice($older, 0, $before)), [$anchor], array_slice($newer, 0, $after));
     return ['ok' => true, 'items' => array_map('to_message', $rows), 'target' => $anchor['id'], 'hasMore' => count($older) > $before, 'hasNewer' => count($newer) > $after];
 }
 
 // Descendo num trecho antigo: a página depois de after, e hasNewer se ainda tem mais.
-function page_after(string $after): array
+function page_after(string $room, string $after): array
 {
-    $anchor = find_message($after);
+    $anchor = room_message($room, $after);
     if (!$anchor) return ['items' => [], 'hasNewer' => false];
-    $rows = query('SELECT * FROM ' . t('messages') . ' WHERE n > ? ORDER BY n LIMIT ' . (PAGE_SIZE + 1), [$anchor['n']])->fetchAll();
+    $rows = query('SELECT * FROM ' . t('messages') . ' WHERE room = ? AND n > ? ORDER BY n LIMIT ' . (PAGE_SIZE + 1), [$room, $anchor['n']])->fetchAll();
     return ['items' => array_map('to_message', array_slice($rows, 0, PAGE_SIZE)), 'hasNewer' => count($rows) > PAGE_SIZE];
 }
 
@@ -2540,14 +2785,14 @@ function page_after(string $after): array
 // pedidas, sem diferença de maiúsculas nem acentos. Das mais novas para as mais antigas, SEARCH_PAGE por vez
 // (before = id da última que já veio). O LIKE do banco separa as candidatas e o fold confere onde o termo está (no
 // JSON da coluna media, o LIKE também acharia os nomes dos campos).
-function search_messages(string $query, string $before = ''): array
+function search_messages(string $room, string $query, string $before = ''): array
 {
     $query = text_slice(text_trim(preg_replace('/\s+/u', ' ', $query) ?? ''), 100);
     $needle = fold($query);
     if (text_length($needle) < 2) return ['ok' => false, 'error' => 'Escreva pelo menos 2 letras.'];
     $from = PHP_INT_MAX;
     if ($before !== '') {
-        $anchor = find_message($before);
+        $anchor = room_message($room, $before);
         if (!$anchor) return ['ok' => true, 'items' => [], 'hasMore' => false];
         $from = (int) $anchor['n'];
     }
@@ -2555,7 +2800,7 @@ function search_messages(string $query, string $before = ''): array
     $found = [];
     $more = false;
     do {
-        $rows = query('SELECT * FROM ' . t('messages') . " WHERE deleted = 0 AND n < ? AND (text LIKE ? ESCAPE '!' OR media LIKE ? ESCAPE '!') ORDER BY n DESC LIMIT 200", [$from, $like, $like])->fetchAll();
+        $rows = query('SELECT * FROM ' . t('messages') . " WHERE room = ? AND deleted = 0 AND n < ? AND (text LIKE ? ESCAPE '!' OR media LIKE ? ESCAPE '!') ORDER BY n DESC LIMIT 200", [$room, $from, $like, $like])->fetchAll();
         foreach ($rows as $row) {
             $from = (int) $row['n'];
             if (!search_hit($row, $needle)) continue;
@@ -2582,40 +2827,50 @@ function search_hit(array $row, string $needle): bool
     return false;
 }
 
-function reads(): array
+function reads(string $room): array
 {
     $reads = [];
-    foreach (query('SELECT name, read_id, read_at FROM ' . t('status') . ' WHERE read_id IS NOT NULL')->fetchAll() as $row) {
+    foreach (query('SELECT name, read_id, read_at FROM ' . t('reads') . ' WHERE room = ? AND read_id IS NOT NULL', [$room])->fetchAll() as $row) {
         $reads[$row['name']] = ['id' => $row['read_id'], 'at' => $row['read_at']];
     }
     return $reads;
 }
 
-// Histórico de quem conecta, com o tema da conta (null = nunca escolheu) e a chave da busca de GIFs
-// (chave do GIPHY, feita para ficar no navegador; vazia = GIFs desligados).
-function history(string $me): array
+// Histórico de quem conecta (ou troca de conversa): a conversa aberta (room, com quem é, as mensagens, as leituras, a
+// música, a Watch Party e as partidas dela), a lista de conversas, as chamadas abertas, o tema da conta (null = nunca
+// escolheu) e a chave da busca de GIFs (chave do GIPHY, feita para ficar no navegador; vazia = GIFs desligados).
+// couple = esta pessoa é do casal (o Nosso cantinho aparece).
+function history(string $me, ?array $room): array
 {
-    return page() + [
-        'reads' => (object) reads(),
+    $id = $room['id'] ?? '';
+    return ($room ? page($id) : ['items' => [], 'hasMore' => false]) + [
+        'room' => $id,
+        'peer' => $room ? room_peer($room, $me) : null,
+        'rooms' => room_list($me),
+        'couple' => in_array($me, users(), true) && couple_room() !== null,
+        'reads' => (object) ($room ? reads($id) : []),
         'me' => $me,
         'theme' => find_account($me)['theme'] ?? null,
         'wallpaper' => wallpaper_info(find_account($me)),
         'gifKey' => str(config()['giphy_key']),
         'fileMax' => file_max(),
         'transcribe' => str(config()['transcribe_key']) !== '',
-        'music' => music_public(music_state()),
-        'watch' => watch_public(watch_state()),
-        'games' => open_games(),
+        'music' => music_public(music_state($id)),
+        'watch' => watch_public(watch_state($id)),
+        'games' => $room ? open_games($id) : [],
+        // As chamadas abertas com esta pessoa: quem conecta depois (estava offline) vê tocando, ou entra nela.
+        'calls' => array_values(array_map('call_public', array_filter(all_calls(), fn($call) => in_array($me, [$call['caller'], $call['callee']], true)))),
+        'serverNow' => now_ms(),
     ];
 }
 
 // Partidas ainda rolando (até 20, das mais novas), que vão junto com o histórico: a mesinha e os avisos continuam
 // valendo mesmo quando a partida é mais antiga que as mensagens carregadas (o chat recarrega só as mais novas quando
 // fica um tempo sem conexão, como com o celular bloqueado).
-function open_games(): array
+function open_games(string $room): array
 {
     $open = [];
-    foreach (query('SELECT * FROM ' . t('messages') . " WHERE source = 'game' AND deleted = 0 ORDER BY n DESC LIMIT 200")->fetchAll() as $row) {
+    foreach (query('SELECT * FROM ' . t('messages') . " WHERE room = ? AND source = 'game' AND deleted = 0 ORDER BY n DESC LIMIT 200", [$room])->fetchAll() as $row) {
         $message = to_message($row);
         $game = $message['game'];
         if (!$game) continue;
@@ -2626,39 +2881,52 @@ function open_games(): array
     return array_reverse($open);
 }
 
-function set_read(string $name, string $id, string $at): void
+function set_read(string $room, string $name, string $id, string $at): void
 {
-    query('INSERT INTO ' . t('status') . ' (name, read_id, read_at) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE read_id = VALUES(read_id), read_at = VALUES(read_at)', [$name, $id, $at]);
+    query('INSERT INTO ' . t('reads') . ' (room, name, read_id, read_at) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE read_id = VALUES(read_id), read_at = VALUES(read_at)', [$room, $name, $id, $at]);
 }
 
-// name leu até a mensagem row (antes, até a de número from): as da outra pessoa nesse trecho ganham a hora da
-// leitura, que aparece nos dados da mensagem. Devolve quantas.
+// name leu até a mensagem row (antes, até a de número from) na conversa dela: as da outra pessoa nesse trecho ganham a
+// hora da leitura, que aparece nos dados da mensagem. Devolve quantas.
 function mark_read(string $name, array $row, string $at, int $from): int
 {
-    set_read($name, $row['id'], $at);
-    return query('UPDATE ' . t('messages') . ' SET read_at = ? WHERE n > ? AND n <= ? AND sender <> ? AND read_at IS NULL', [$at, $from, $row['n'], $name])->rowCount();
+    set_read($row['room'], $name, $row['id'], $at);
+    return query('UPDATE ' . t('messages') . ' SET read_at = ? WHERE room = ? AND n > ? AND n <= ? AND sender <> ? AND read_at IS NULL', [$at, $row['room'], $from, $row['n'], $name])->rowCount();
 }
 
-// Número da última mensagem que name leu (0 = nenhuma).
-function read_upto(string $name): int
+// Número da última mensagem da conversa que name leu (0 = nenhuma).
+function read_upto(string $room, string $name): int
 {
-    return (int) query('SELECT m.n FROM ' . t('status') . ' s JOIN ' . t('messages') . ' m ON m.id = s.read_id WHERE s.name = ?', [$name])->fetchColumn();
+    return (int) query('SELECT m.n FROM ' . t('reads') . ' r JOIN ' . t('messages') . ' m ON m.id = r.read_id WHERE r.room = ? AND r.name = ?', [$room, $name])->fetchColumn();
 }
 
 // ---------- conexões, presença e eventos ----------
 
-// Registra um evento para as conexões. Escopos: "all" (todas), "peer" (abas de chat da outra
-// pessoa, ou só a conexão "to") e "self" (as minhas outras abas de chat).
-function emit(string $type, $data = null, string $scope = 'all', ?array $from = null, ?string $to = null): void
+// Registra um evento para as conexões. Escopos: "all" (todas), "peer" (abas de chat da outra pessoa, ou só a conexão
+// "to") e "self" (as minhas outras abas de chat). Com room, só as duas pessoas da conversa recebem.
+function emit(string $type, $data = null, string $scope = 'all', ?array $from = null, ?string $to = null, ?string $room = null): void
 {
     query(
-        'INSERT INTO ' . t('events') . ' (at, type, data, scope, from_conn, from_name, to_conn) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [now_ms(), $type, $data === null ? null : encode($data), $scope, $from['conn'] ?? null, $from['name'] ?? null, $to]
+        'INSERT INTO ' . t('events') . ' (at, type, data, scope, from_conn, from_name, to_conn, room) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [now_ms(), $type, $data === null ? null : encode($data), $scope, $from['conn'] ?? null, $from['name'] ?? null, $to, $room]
     );
+}
+
+// Mensagem nova ou mudada: vai para a conversa dela.
+function emit_message(string $type, array $message): void
+{
+    emit($type, $message, 'all', null, null, $message['room']);
+}
+
+// Novidade do Nosso cantinho: só o casal.
+function emit_us(array $data, string $scope = 'all', ?array $from = null): void
+{
+    emit('us', $data, $scope, $from, null, couple_room()['id'] ?? null);
 }
 
 function event_for(array $event, string $conn, array $client): bool
 {
+    if (!empty($event['room']) && !room_member(find_room((string) $event['room']), $client['name'])) return false;
     if ($event['scope'] === 'peer') {
         return $client['client'] === 'web' && $client['name'] !== $event['from_name'] && (empty($event['to_conn']) || $event['to_conn'] === $conn);
     }
@@ -2694,8 +2962,11 @@ function people(): array
     return query('SELECT DISTINCT name FROM ' . t('clients'))->fetchAll(PDO::FETCH_COLUMN);
 }
 
-function presence(): array
+// Quem aparece para name (ele e os contatos dele): online, ativo agora, visto por último e a foto.
+function presence(string $name): array
 {
+    $names = [$name];
+    foreach (rooms_of($name) as $room) $names[] = room_peer($room, $name);
     $online = [];
     $active = [];
     foreach (query('SELECT name, client, visible FROM ' . t('clients'))->fetchAll() as $client) {
@@ -2709,7 +2980,7 @@ function presence(): array
         'active' => isset($active[$account['name']]),
         'lastSeen' => $lastSeen[$account['name']] ?? null,
         'avatar' => avatar_url($account['avatar_key']),
-    ], accounts());
+    ], array_values(array_filter(accounts(), fn($account) => in_array($account['name'], $names, true))));
 }
 
 function conn_id(array $input): string
@@ -2747,8 +3018,11 @@ function drop(string $conn, bool $forever = false): void
     $client = find_client($conn);
     if (!$client) return;
     query('DELETE FROM ' . t('clients') . ' WHERE conn = ?', [$conn]);
+    // Quem estava numa chamada (ou ligando) saiu: ela acaba.
+    foreach (all_calls() as $call) {
+        if (in_array($conn, [$call['callerConn'], $call['calleeConn']], true)) call_finish($call, 'dropped', $client['name']);
+    }
     if ($client['client'] === 'web') {
-        emit('peer-left', ['id' => $conn, 'name' => $client['name']], 'peer', ['conn' => $conn, 'name' => $client['name']]);
         if (!web_online($client['name'])) {
             query('INSERT INTO ' . t('status') . ' (name, last_seen) VALUES (?, ?) ON DUPLICATE KEY UPDATE last_seen = VALUES(last_seen)', [$client['name'], iso()]);
         }
@@ -2771,34 +3045,50 @@ function sweep(): void
 
 // ---------- ações vindas do navegador ----------
 
+// $me: conn, name, client e room (a conversa da ação, a que estava aberta quando ela foi feita; null = nenhuma).
 function act(array $me, string $event, $data)
 {
     $name = $me['name'];
     $body = is_array($data) ? $data : [];
+    $room = $me['room']['id'] ?? '';
 
     switch ($event) {
         case 'message':
             return send_message($me, $body);
 
         case 'history:before':
-            return page(str($body['before'] ?? ''));
+            return page($room, str($body['before'] ?? ''));
 
         case 'history:around':
-            return around(str($body['id'] ?? ''), str($body['from'] ?? ''));
+            return around($room, str($body['id'] ?? ''), str($body['from'] ?? ''));
 
         case 'history:after':
-            return page_after(str($body['after'] ?? ''));
+            return page_after($room, str($body['after'] ?? ''));
 
         case 'search':
-            return search_messages(str($body['query'] ?? ''), str($body['before'] ?? ''));
+            return search_messages($room, str($body['query'] ?? ''), str($body['before'] ?? ''));
+
+        // Abre outra conversa: o histórico dela, como ao conectar.
+        case 'room':
+            $id = str($body['id'] ?? '');
+            $target = $id !== '' ? pick_room($name, $id) : null;
+            if (!$target) return ['ok' => false, 'error' => 'Essa conversa não existe.'];
+            return ['ok' => true] + history($name, $target);
+
+        case 'rooms':
+            return ['ok' => true, 'rooms' => room_list($name)];
+
+        // Adicionar pessoas: criar o link de convite ou aceitar o de alguém.
+        case 'invite':
+            return invite_act($me, $body);
 
         case 'avatar':
             return set_avatar($name, $body['image'] ?? null);
 
-        // Números do perfil: os seus ou, com name, os da outra pessoa (só quem tem conta no chat).
+        // Números do perfil: os seus ou, com name, os da pessoa da conversa aberta.
         case 'stats':
             $who = str($body['name'] ?? '');
-            return stats(in_array($who, array_column(accounts(), 'name'), true) ? $who : $name);
+            return stats($me['room'] && $who === room_peer($me['room'], $name) ? $who : $name, $me['room']);
 
         case 'wallpaper':
             return set_wallpaper($me, $body);
@@ -2809,8 +3099,9 @@ function act(array $me, string $event, $data)
         case 'watch':
             return watch_act($me, $body);
 
-        // Nosso cantinho: o dia de cada um, agenda, sonhos e metas, cartinhas e lembretes.
+        // Nosso cantinho (só do casal): o dia de cada um, agenda, sonhos e metas, cartinhas e lembretes.
         case 'us':
+            if (!in_array($name, users(), true)) return ['ok' => false, 'error' => 'O Nosso cantinho é só do casal.'];
             return us_act($me, $body);
 
         case 'game':
@@ -2826,7 +3117,7 @@ function act(array $me, string $event, $data)
 
         case 'react':
             $emoji = str($body['emoji'] ?? '');
-            $row = find_message(str($body['id'] ?? ''));
+            $row = member_message($name, str($body['id'] ?? ''));
             if (!$row || $row['deleted'] || !in_array($emoji, REACTIONS, true)) return null;
             $reactions = json_decode((string) $row['reactions'], true) ?: [];
             $list = (array) ($reactions[$emoji] ?? []);
@@ -2835,26 +3126,27 @@ function act(array $me, string $event, $data)
             else unset($reactions[$emoji]);
             $row['reactions'] = encode((object) $reactions);
             query('UPDATE ' . t('messages') . ' SET reactions = ? WHERE n = ?', [$row['reactions'], $row['n']]);
-            emit('message:update', to_message($row));
+            emit_message('message:update', to_message($row));
             return null;
 
         case 'delete':
-            $row = find_message(str($body['id'] ?? ''));
+            $row = member_message($name, str($body['id'] ?? ''));
             if (!$row || $row['sender'] !== $name || $row['deleted']) return null;
             $row = array_merge($row, ['deleted' => 1, 'text' => '', 'media' => null, 'reactions' => '{}']);
             query('UPDATE ' . t('messages') . " SET deleted = 1, text = '', media = NULL, reactions = '{}' WHERE n = ?", [$row['n']]);
             // A foto ou o arquivo some junto (o endereço para de funcionar).
             query('DELETE FROM ' . t('files') . ' WHERE message_id = ?', [$row['id']]);
-            emit('message:update', to_message($row));
+            emit_message('message:update', to_message($row));
             return null;
 
         case 'seen':
-            $row = find_message(str($body['id'] ?? ''));
-            $upto = read_upto($name);
-            if (!$row || $row['n'] <= $upto) return null;
+            $row = member_message($name, str($body['id'] ?? ''));
+            if (!$row) return null;
+            $upto = read_upto($row['room'], $name);
+            if ($row['n'] <= $upto) return null;
             $at = iso();
             mark_read($name, $row, $at, $upto);
-            emit('seen', ['name' => $name, 'id' => $row['id'], 'at' => $at]);
+            emit('seen', ['name' => $name, 'id' => $row['id'], 'at' => $at, 'room' => $row['room']], 'all', null, null, $row['room']);
             return null;
 
         case 'visibility':
@@ -2862,43 +3154,203 @@ function act(array $me, string $event, $data)
             emit('presence');
             return null;
 
-        // Digitando (true ou false) ou gravando um áudio ("audio").
+        // Digitando (true ou false) ou gravando um áudio ("audio"), na conversa aberta.
         case 'typing':
-            emit('typing', ['name' => $name, 'active' => (bool) $data, 'audio' => $data === 'audio'], 'peer', $me);
+            if ($room === '') return null;
+            emit('typing', ['name' => $name, 'active' => (bool) $data, 'audio' => $data === 'audio', 'room' => $room], 'peer', $me, null, $room);
             return null;
 
-        // Sinalização WebRTC: sempre para a outra pessoa, nunca para as próprias abas.
+        // Sinalização WebRTC: só para a conexão do outro lado de uma chamada atendida (to).
         case 'webrtc-offer':
-            emit($event, array_merge($body, ['from' => $me['conn'], 'name' => $name]), 'peer', $me, str($body['to'] ?? '') ?: null);
-            return null;
-
         case 'webrtc-answer':
-            emit($event, array_merge($body, ['from' => $me['conn']]), 'peer', $me, str($body['to'] ?? '') ?: null);
-            emit('call-handled', null, 'self', $me);
-            return null;
-
         case 'webrtc-ice':
         case 'call-state':
-            emit($event, array_merge($body, ['from' => $me['conn']]), 'peer', $me, str($body['to'] ?? '') ?: null);
+            $to = str($body['to'] ?? '');
+            $paired = false;
+            foreach (all_calls() as $call) {
+                $ends = [$call['callerConn'], $call['calleeConn']];
+                if ($to !== '' && in_array($me['conn'], $ends, true) && in_array($to, $ends, true) && $to !== $me['conn']) $paired = true;
+            }
+            if (!$paired) return null;
+            emit($event, array_merge($body, ['from' => $me['conn'], 'name' => $name]), 'peer', $me, $to);
+            if ($event === 'webrtc-answer') emit('call-handled', null, 'self', $me);
             return null;
 
-        case 'call-declined':
-            emit('call-declined', ['name' => $name], 'peer', $me);
-            emit('call-handled', null, 'self', $me);
-            return null;
+        // Chamada: começar (toca para a outra pessoa, mesmo offline), atender, recusar e ver como está.
+        case 'call':
+            return call_act($me, $body);
 
+        // Desligar (também vem da aba fechando, sem a conexão). Sem id: a chamada em que esta conexão está.
         case 'call-ended':
-            emit('call-ended', ['name' => $name], 'peer', $me);
+            $id = str($body['id'] ?? '');
+            foreach (all_calls() as $call) {
+                $mine = $id !== '' ? $call['id'] === $id : in_array($me['conn'], [$call['callerConn'], $call['calleeConn']], true);
+                if ($mine && in_array($name, [$call['caller'], $call['callee']], true)) call_finish($call, 'hangup', $name);
+            }
             return null;
     }
     return null;
 }
 
-// Números da tela de perfil: mensagens enviadas, reações dadas e desde quando a conversa existe.
-function stats(string $name): array
+// ---------- chamadas ----------
+// Estilo Discord: ligar não depende de a outra pessoa estar online. Cada conversa tem no máximo uma chamada aberta, em
+// settings (name = 'call:<conversa>'): quem ligou e de qual conexão, para quem, o tipo, quando começou e quem atendeu
+// (a conexão) e quando. Ela toca CALL_RING_MS nos aparelhos da outra pessoa (o site aberto e o serviço do app do
+// Android) e continua aberta, esperando, até quem ligou desligar: quem abrir o chat nesse meio-tempo ainda entra.
+// Atendeu, quem ligou manda a oferta WebRTC direto para a conexão que atendeu. Cada um fica numa chamada por vez. Cada
+// chamada também vira uma mensagem na conversa (source 'call', media {call: {...}}): tocando, acontecendo, quanto durou,
+// recusada ou perdida.
+
+function all_calls(): array
 {
-    $messages = (int) query('SELECT COUNT(*) FROM ' . t('messages') . " WHERE sender = ? AND deleted = 0 AND source NOT IN ('music', 'game')", [$name])->fetchColumn();
-    $since = query('SELECT created_at FROM ' . t('messages') . ' ORDER BY n LIMIT 1')->fetchColumn();
+    $calls = [];
+    foreach (query('SELECT value FROM ' . t('settings') . " WHERE name LIKE 'call:%'")->fetchAll(PDO::FETCH_COLUMN) as $raw) {
+        $call = json_decode((string) $raw, true);
+        if (is_array($call) && isset($call['id'], $call['room'])) $calls[] = $call;
+    }
+    return $calls;
+}
+
+function find_call(string $id): ?array
+{
+    foreach (all_calls() as $call) if ($id !== '' && $call['id'] === $id) return $call;
+    return null;
+}
+
+function save_call(array $call): void
+{
+    query('INSERT INTO ' . t('settings') . ' (name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)', ['call:' . $call['room'], encode($call)]);
+}
+
+// O que os aparelhos sabem de uma chamada: from = a conexão de quem ligou; ringUntil no relógio do servidor; state = o
+// que quem ligou tem ligado (microfone, câmera, tela).
+function call_public(?array $call): ?array
+{
+    if (!$call) return null;
+    return [
+        'id' => $call['id'], 'room' => $call['room'], 'caller' => $call['caller'], 'callee' => $call['callee'], 'media' => $call['media'],
+        'from' => $call['callerConn'], 'state' => $call['state'], 'startedAt' => $call['startedAt'], 'ringUntil' => $call['startedAt'] + CALL_RING_MS,
+        'answered' => $call['answeredAt'] !== null,
+    ];
+}
+
+function clean_call_state($state): array
+{
+    $state = is_array($state) ? $state : [];
+    return ['mic' => ($state['mic'] ?? true) !== false, 'cam' => ($state['cam'] ?? false) === true, 'screen' => ($state['screen'] ?? false) === true];
+}
+
+// A mensagem da chamada na conversa. status: ringing, live ou ended; result (no fim): answered, declined ou missed.
+function call_log(array $call, array $changes = []): array
+{
+    return array_merge([
+        'id' => $call['id'], 'media' => $call['media'], 'caller' => $call['caller'], 'callee' => $call['callee'],
+        'status' => $call['answeredAt'] === null ? 'ringing' : 'live', 'result' => null,
+        'startedAt' => $call['startedAt'], 'answeredAt' => $call['answeredAt'], 'endedAt' => null,
+    ], $changes);
+}
+
+function update_call_log(array $call, array $changes = []): void
+{
+    $row = find_message((string) $call['message']);
+    if (!$row || $row['deleted']) return;
+    $row['media'] = encode(['call' => call_log($call, $changes)]);
+    query('UPDATE ' . t('messages') . ' SET media = ? WHERE n = ?', [$row['media'], $row['n']]);
+    emit_message('message:update', to_message($row));
+}
+
+// "Chamada perdida", "Chamada recusada" ou o tipo (citação de uma resposta).
+function call_label(array $call): string
+{
+    $result = $call['result'] ?? null;
+    if ($result === 'missed') return 'Chamada perdida';
+    if ($result === 'declined') return 'Chamada recusada';
+    return CALL_NAMES[$call['media'] ?? ''] ?? 'Chamada';
+}
+
+// Fim da chamada. reason: hangup (alguém desligou), declined (recusou), missed (ninguém entrou) ou dropped (a conexão
+// de alguém caiu). Avisa os aparelhos dos dois (o que ainda tocava para de tocar) e a mensagem mostra como foi.
+function call_finish(array $call, string $reason, ?string $by = null): void
+{
+    query('DELETE FROM ' . t('settings') . ' WHERE name = ?', ['call:' . $call['room']]);
+    $result = $call['answeredAt'] !== null ? 'answered' : ($reason === 'declined' ? 'declined' : 'missed');
+    update_call_log($call, ['status' => 'ended', 'result' => $result, 'endedAt' => now_ms()]);
+    emit('call-ended', ['id' => $call['id'], 'room' => $call['room'], 'name' => $by, 'reason' => $reason, 'result' => $result, 'caller' => $call['caller'], 'media' => $call['media']], 'all', null, null, $call['room']);
+}
+
+function call_act(array $me, array $body): array
+{
+    $op = str($body['op'] ?? '');
+    $name = $me['name'];
+    if ($op === 'get') {
+        $call = find_call(str($body['id'] ?? ''));
+        return ['ok' => true, 'call' => $call && in_array($name, [$call['caller'], $call['callee']], true) ? call_public($call) : null];
+    }
+
+    if ($op === 'start') {
+        if (!$me['room']) return ['ok' => false, 'error' => 'Escolha uma conversa para ligar.'];
+        $room = $me['room'];
+        $peer = room_peer($room, $name);
+        foreach (all_calls() as $open) {
+            // Sobrou de uma conexão que já saiu: não segura a próxima.
+            if (!find_client($open['callerConn']) || ($open['calleeConn'] && !find_client($open['calleeConn']))) {
+                call_finish($open, 'dropped');
+                continue;
+            }
+            $people = [$open['caller'], $open['callee']];
+            if ($open['room'] === $room['id']) {
+                if ($open['answeredAt'] !== null) return ['ok' => false, 'error' => 'Já tem uma chamada acontecendo.'];
+                return ['ok' => false, 'error' => $open['caller'] === $peer ? "$peer já está te ligando." : 'Você já está ligando de outro aparelho.'];
+            }
+            if (in_array($name, $people, true)) return ['ok' => false, 'error' => 'Você já está em outra chamada.'];
+            if (in_array($peer, $people, true)) return ['ok' => false, 'error' => "$peer está em outra chamada agora."];
+        }
+        $media = in_array($body['media'] ?? '', array_keys(CALL_NAMES), true) ? $body['media'] : 'audio';
+        $call = [
+            'id' => uuid(), 'room' => $room['id'], 'caller' => $name, 'callerConn' => $me['conn'], 'callee' => $peer, 'media' => $media,
+            'state' => clean_call_state($body['state'] ?? null), 'startedAt' => now_ms(), 'answeredAt' => null, 'calleeConn' => null, 'message' => null,
+        ];
+        $row = [
+            'id' => uuid(), 'client_id' => null, 'sender' => $name, 'text' => '', 'created_at' => iso(), 'reply_to' => null,
+            'reactions' => '{}', 'deleted' => 0, 'source' => 'call', 'media' => encode(['call' => call_log($call)]), 'room' => $room['id'],
+        ];
+        insert_message($row);
+        set_read($room['id'], $name, $row['id'], $row['created_at']);
+        $call['message'] = $row['id'];
+        save_call($call);
+        emit_message('message', to_message($row));
+        emit('call-ring', call_public($call), 'peer', $me, null, $room['id']);
+        return ['ok' => true, 'call' => call_public($call), 'online' => web_online($peer)];
+    }
+
+    $call = find_call(str($body['id'] ?? ''));
+    if (!$call) return ['ok' => false, 'error' => 'Essa chamada já terminou.'];
+    if ($call['callee'] !== $name) return ['ok' => false, 'error' => 'Essa chamada não é para você.'];
+
+    switch ($op) {
+        // Só a primeira conexão que atende entra; as outras (o site em outro aparelho, o app) param de tocar.
+        case 'accept':
+            if ($call['answeredAt'] !== null) return ['ok' => false, 'error' => 'Você já atendeu em outro aparelho.'];
+            $call['answeredAt'] = now_ms();
+            $call['calleeConn'] = $me['conn'];
+            save_call($call);
+            update_call_log($call);
+            emit('call-accepted', ['id' => $call['id'], 'room' => $call['room'], 'from' => $me['conn'], 'name' => $name, 'state' => clean_call_state($body['state'] ?? null)], 'peer', $me, $call['callerConn'], $call['room']);
+            emit('call-handled', ['id' => $call['id']], 'self', $me);
+            return ['ok' => true, 'call' => call_public($call)];
+
+        case 'decline':
+            if ($call['answeredAt'] === null) call_finish($call, 'declined', $name);
+            return ['ok' => true];
+    }
+    return ['ok' => false, 'error' => 'Ação desconhecida.'];
+}
+
+// Números da tela de perfil: mensagens enviadas, reações dadas e desde quando vocês conversam (a conversa aberta).
+function stats(string $name, ?array $room): array
+{
+    $messages = (int) query('SELECT COUNT(*) FROM ' . t('messages') . " WHERE sender = ? AND deleted = 0 AND source NOT IN ('music', 'game', 'call')", [$name])->fetchColumn();
+    $since = $room ? query('SELECT created_at FROM ' . t('messages') . ' WHERE room = ? ORDER BY n LIMIT 1', [$room['id']])->fetchColumn() : null;
     $reactions = 0;
     $rows = query('SELECT reactions FROM ' . t('messages') . " WHERE deleted = 0 AND reactions <> '{}'")->fetchAll(PDO::FETCH_COLUMN);
     foreach ($rows as $json) {
@@ -2935,11 +3387,14 @@ function preview_text(array $row): string
     if (isset($media['file'])) return ['image' => 'Foto', 'video' => 'Vídeo', 'audio' => 'Áudio'][$media['file']['kind']] ?? text_slice((string) $media['file']['name'], 160);
     if (isset($media['music'])) return text_slice('Música: ' . $media['music']['title'], 160);
     if (isset($media['game'])) return GAME_NAMES[$media['game']['type']] ?? 'Joguinho';
+    if (isset($media['call'])) return call_label($media['call']);
     return $media ? 'GIF' : '';
 }
 
 function send_message(array $me, array $body): array
 {
+    if (!$me['room']) return ['ok' => false, 'error' => 'Escolha uma conversa.'];
+    $room = $me['room']['id'];
     // Foto ou arquivo já enviado em api.php?action=upload (chave). Áudio gravado no chat vem com voice.
     $fileKey = str($body['file'] ?? '');
     $gif = $fileKey === '' ? clean_gif($body['gif'] ?? null) : null;
@@ -2970,7 +3425,7 @@ function send_message(array $me, array $body): array
         if ($voice) $file['voice'] = $voice;
     }
 
-    $original = find_message(str($body['replyTo'] ?? ''));
+    $original = room_message($room, str($body['replyTo'] ?? ''));
     $reply = $original
         ? ['id' => $original['id'], 'sender' => $original['sender'], 'text' => preview_text($original)]
         : null;
@@ -2985,17 +3440,14 @@ function send_message(array $me, array $body): array
         'deleted' => 0,
         'source' => $me['client'],
         'media' => $file ? encode(['file' => $file]) : ($gif ? encode($gif) : null),
+        'room' => $room,
     ];
-    query(
-        'INSERT INTO ' . t('messages') . ' (id, client_id, sender, text, created_at, reply_to, reactions, deleted, source, media) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        array_values($row)
-    );
-    $n = (int) db()->lastInsertId();
+    $n = insert_message($row);
     if ($file) query('UPDATE ' . t('files') . ' SET message_id = ? WHERE file_key = ?', [$row['id'], $file['key']]);
     // Quem responde leu o que veio antes: as mensagens da outra pessoa ficam lidas (e ela vê na hora).
-    $read = mark_read($me['name'], ['n' => $n] + $row, $row['created_at'], read_upto($me['name']));
+    $read = mark_read($me['name'], ['n' => $n] + $row, $row['created_at'], read_upto($room, $me['name']));
     $message = to_message($row);
-    emit('message', $message);
-    if ($read) emit('seen', ['name' => $me['name'], 'id' => $row['id'], 'at' => $row['created_at']]);
+    emit_message('message', $message);
+    if ($read) emit('seen', ['name' => $me['name'], 'id' => $row['id'], 'at' => $row['created_at'], 'room' => $room], 'all', null, null, $room);
     return ['ok' => true, 'message' => $message];
 }
