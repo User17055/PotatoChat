@@ -2109,8 +2109,9 @@ function dama_board(): array
     return $board;
 }
 
-// Jogadas possíveis de uma cor ([from, to, over]: over = a peça capturada). Havendo captura, só valem as capturas;
-// no meio de uma sequência (chain), só as capturas da peça que está capturando.
+// Jogadas possíveis de uma cor ([from, to, over]: over = a peça capturada). A pedra anda e come só para a frente; a dama
+// anda e come de longe, para todos os lados. Havendo captura, só valem as capturas; no meio de uma sequência (chain), só
+// as capturas da peça que está capturando.
 function dama_moves(array $board, string $color, ?int $chain = null): array
 {
     $captures = [];
@@ -2130,6 +2131,8 @@ function dama_moves(array $board, string $color, ?int $chain = null): array
                 $row += $dr;
                 $col += $dc;
             }
+            // A pedra come só para a frente; a dama, para todos os lados.
+            if (!$king && $dr !== $forward) continue;
             if (!$inside($row, $col) || $board[$row * 8 + $col] === '' || strtolower($board[$row * 8 + $col]) === $color) continue;
             $over = $row * 8 + $col;
             for ($row += $dr, $col += $dc; $inside($row, $col) && $board[$row * 8 + $col] === ''; $row += $dr, $col += $dc) {
@@ -2245,6 +2248,9 @@ function board_play(array &$game, string $me, string $op, array $body): ?string
             foreach ($moves as $option) if ($option[0] === $from && $option[1] === $to) $move = $option;
             if (!$move) return $moves && $moves[0][2] !== null ? 'Captura obrigatória: tem peça para comer!' : 'Essa jogada não vale.';
             $board = &$game['board'];
+            // O que foi comido (a casa e a peça) e o número da jogada: o navegador anima só a jogada nova.
+            $game['taken'] = $move[2] !== null ? ['at' => $move[2], 'piece' => $board[$move[2]]] : null;
+            $game['ply'] = ($game['ply'] ?? 0) + 1;
             $board[$to] = $board[$from];
             $board[$from] = '';
             if ($move[2] !== null) $board[$move[2]] = '';
@@ -2403,6 +2409,7 @@ function game_act(array $me, array $body): array
     $media = $row && !$row['deleted'] && $row['media'] ? json_decode((string) $row['media'], true) : null;
     $game = $media['game'] ?? null;
     if (!$game) return ['ok' => false, 'error' => 'Esse jogo não existe mais.'];
+    if ($op === 'get') return ['ok' => true, 'message' => to_message($row)];
     $mine = null;
     if (isset($game['seats'])) {
         $error = board_play($game, $me['name'], $op, $body);
@@ -2598,7 +2605,25 @@ function history(string $me): array
         'transcribe' => str(config()['transcribe_key']) !== '',
         'music' => music_public(music_state()),
         'watch' => watch_public(watch_state()),
+        'games' => open_games(),
     ];
+}
+
+// Partidas ainda rolando (até 20, das mais novas), que vão junto com o histórico: a mesinha e os avisos continuam
+// valendo mesmo quando a partida é mais antiga que as mensagens carregadas (o chat recarrega só as mais novas quando
+// fica um tempo sem conexão, como com o celular bloqueado).
+function open_games(): array
+{
+    $open = [];
+    foreach (query('SELECT * FROM ' . t('messages') . " WHERE source = 'game' AND deleted = 0 ORDER BY n DESC LIMIT 200")->fetchAll() as $row) {
+        $message = to_message($row);
+        $game = $message['game'];
+        if (!$game) continue;
+        $playing = isset($game['seats']) ? empty($game['winner']) : ($game['type'] === 'vd' ? empty($game['choice']) : empty($game['done']));
+        if ($playing) $open[] = $message;
+        if (count($open) === 20) break;
+    }
+    return array_reverse($open);
 }
 
 function set_read(string $name, string $id, string $at): void

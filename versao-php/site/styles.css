@@ -2120,6 +2120,9 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
 .sq.can .stone { box-shadow: inset 0 -3px 0 #0004, 0 0 0 3px var(--accent), 0 3px 6px #0007; }
 .sq.selected .stone { transform: scale(1.1); }
 .stone.mini { flex: none; width: 18px; height: 18px; }
+/* A pedra andando (e a comida saindo) por cima das outras casas, sem a transição do CSS atrapalhar o GSAP. */
+.stone.moving { position: relative; z-index: 3; transition: none; pointer-events: none; }
+.stone.moving.eaten { z-index: 2; }
 
 /* Memória: as cartas viram (o verso é a batata). */
 .memory-board { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; width: min(100%, 360px); }

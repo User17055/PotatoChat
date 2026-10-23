@@ -474,6 +474,41 @@ export const fx = {
     gsap.to(paths, { strokeDashoffset: 0, duration, delay, stagger, ease: "power2.out", onComplete: () => paths.forEach((path) => { path.style.strokeDasharray = ""; path.style.strokeDashoffset = ""; }) });
   },
 
+  // Dama: a pedra desliza da casa de onde saiu até a nova. Comendo, ela pula por cima da peça (sobe e cresce no meio do
+  // caminho), que é esmagada, solta umas faíscas e sai do tabuleiro girando. land = a pedra encostando na casa;
+  // eaten = a peça sendo comida (os sons).
+  damaMove(stone, from, taken, land, eaten) {
+    if (!stone || !from || !motion()) {
+      taken?.remove();
+      if (taken) eaten?.();
+      land?.();
+      return;
+    }
+    const start = from.getBoundingClientRect();
+    const end = stone.parentElement.getBoundingClientRect();
+    stone.classList.add("moving");
+    taken?.classList.add("moving");
+    const timeline = gsap.timeline({
+      onComplete: () => {
+        stone.classList.remove("moving");
+        gsap.set(stone, { clearProps: "transform" });
+        taken?.remove();
+      }
+    });
+    timeline.fromTo(stone, { x: start.left - end.left, y: start.top - end.top }, { x: 0, y: 0, duration: taken ? 0.56 : 0.34, ease: taken ? "power1.inOut" : "power2.inOut" }, 0);
+    if (!taken) return timeline.call(() => land?.(), null, 0.3);
+    timeline
+      .fromTo(stone, { scale: 1 }, { scale: 1.38, duration: 0.28, ease: "sine.out", yoyo: true, repeat: 1 }, 0)
+      .to(taken, { scaleX: 1.18, scaleY: 0.55, duration: 0.09, ease: "power2.out" }, 0.24)
+      .call(() => {
+        const box = taken.getBoundingClientRect();
+        fx.burst(box.left + box.width / 2, box.top + box.height / 2, ["✨", "💥"], 6);
+        eaten?.();
+      }, null, 0.33)
+      .to(taken, { scale: 0, rotation: 220, opacity: 0, duration: 0.42, ease: "back.in(1.8)" }, 0.34)
+      .call(() => land?.(), null, 0.54);
+  },
+
   // Carta de jogo chegando na mesa (girando um pouco) ou virando para revelar o que tem.
   dealCard(card) {
     if (!motion()) return;

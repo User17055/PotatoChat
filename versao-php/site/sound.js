@@ -83,6 +83,15 @@ const sounds = {
   tap() {
     tone({ freq: 1200, duration: 0.03, volume: 0.06, type: "square" });
   },
+  // Dama: a pedra encostando na casa (um toque de madeira) e a peça comida saindo do tabuleiro.
+  clack() {
+    tone({ freq: 340, to: 210, duration: 0.07, volume: 0.2, type: "triangle", attack: 0.002 });
+    noise({ from: 2400, to: 1100, duration: 0.04, volume: 0.07, attack: 0.001 });
+  },
+  capture() {
+    tone({ freq: 560, to: 150, duration: 0.24, volume: 0.16, type: "triangle", attack: 0.003 });
+    noise({ from: 3200, to: 380, duration: 0.2, volume: 0.09, attack: 0.002, start: 0.02 });
+  },
   // Gravação de áudio: um bipe curto subindo ao começar (toca antes de o microfone abrir) e descendo ao apagar.
   record() {
     tone({ freq: 740, to: 1180, duration: 0.07, volume: 0.13, type: "triangle" });

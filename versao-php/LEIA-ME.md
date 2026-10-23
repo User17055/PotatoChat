@@ -221,13 +221,15 @@ Em *Jogos* (no menu, ou no clipe da conversa → *Joguinhos*), cada jogo tem um 
 | Jogo | Como funciona |
 | --- | --- |
 | Jogo da velha | Quem começa fica com o X. O tabuleiro é riscado à mão, cada X e O é traçado na hora e a linha da vitória risca as três casas. Embaixo, o placar da série entre vocês |
-| Dama | Quem começa joga com as brancas; quem joga com as pretas vê o tabuleiro do lado dele. Pedra anda uma casa para a frente e come para os dois lados; dama anda e come de longe. Comer é obrigatório e continua enquanto der. Dá para desistir |
+| Dama | Quem começa joga com as brancas; quem joga com as pretas vê o tabuleiro do lado dele. Pedra anda uma casa e come só para a frente; dama anda e come de longe, para todos os lados. Comer é obrigatório e continua enquanto der. Cada jogada chega animada para os dois: a pedra desliza até a casa nova e, comendo, pula por cima da outra, que é esmagada e sai do tabuleiro girando (com som de madeira). Dá para desistir |
 | Jogo da memória | Oito pares de figuras. As cartas são distribuídas e viram em 3D; acertou, joga de novo; errou, as duas tremem e viram de volta. Quem achar mais pares ganha. As cartas fechadas nunca saem do servidor |
 | Stop | Uma letra e seis categorias (nome, animal, comida, lugar, objeto e coisa fofa). Quem preencher tudo pede **STOP** e a rodada acaba para os dois; o outro só vê quantos campos você já preencheu. 10 pontos por palavra com a letra certa, 5 se os dois escreveram a mesma |
 | Quem é mais provável? | Cada um vota em um dos dois. Os votos só aparecem quando os dois votarem |
 | Verdade ou desafio | A outra pessoa escolhe verdade ou desafio e a carta vira, com uma pergunta ou um desafio fofinho; ela responde na conversa e pode desafiar de volta |
 | Isso ou aquilo | Duas opções; cada um escolhe sem ver a escolha do outro. Será que combinam? |
 | Perguntinha | Uma pergunta para os dois; as respostas aparecem quando os dois responderem |
+
+As partidas que ainda estão rolando (até 20) vão junto com o histórico: mesmo que a partida tenha começado lá atrás na conversa, a mesinha continua aberta e recebendo as jogadas quando o chat recarrega (por exemplo, depois de o celular ficar um tempo bloqueado). E, se a conexão cair no meio de uma jogada, o tabuleiro volta a responder.
 
 As cartas de verdade ou desafio, quem é mais provável, isso ou aquilo e perguntinha estão em `site/lib/jogos.php` (dá para acrescentar à vontade) e não se repetem até o baralho acabar. As ilustrações dos jogos ficam em `site/img/jogos`.
 

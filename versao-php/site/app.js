@@ -48,6 +48,9 @@ let socket = null;
 let me = "";
 let list = [];
 const byId = new Map();
+// Partidas dos joguinhos que valem mesmo fora do trecho carregado (as que ainda estão rolando vêm com o histórico): a
+// mesinha e os avisos continuam funcionando depois de o chat recarregar só as mensagens mais novas.
+const games = new Map();
 const pending = new Map();
 let reads = {};
 let presenceList = [];
@@ -440,6 +443,15 @@ function connect(token, animate) {
       list = payload.items;
       hasMore = payload.hasMore;
     }
+    // As partidas: as que estão rolando (vêm com o histórico) e a aberta na mesinha, que não pode sumir no meio do jogo
+    // (se ela não veio, o servidor diz como ela está agora).
+    const open = table.id ? byId.get(table.id) : null;
+    games.clear();
+    for (const message of payload.games || []) games.set(message.id, message);
+    if (open && !games.has(open.id) && !payload.items.some((message) => message.id === open.id)) {
+      games.set(open.id, open);
+      refreshGame(open.id);
+    }
     indexMessages();
     for (const clientId of pending.keys()) if (payload.items.some((message) => message.clientId === clientId)) pending.delete(clientId);
     reads = payload.reads || {};
@@ -522,6 +534,7 @@ function connect(token, animate) {
 function receive(message, live) {
   if (byId.has(message.id)) return;
   byId.set(message.id, message);
+  if (message.game) games.set(message.id, message);
   const local = message.clientId && pending.get(message.clientId);
   const mine = message.sender === me;
 
@@ -575,23 +588,26 @@ function receive(message, live) {
 
 function updateMessage(message) {
   const previous = byId.get(message.id);
-  if (!previous) return;
-  if (message.deleted && playback.key === voiceKey(previous)) stopVoice();
+  // Partida fora do trecho carregado (a resposta da sua jogada, por exemplo): passa a valer aqui também.
+  if (!previous && !message.game) return;
+  if (previous && message.deleted && playback.key === voiceKey(previous)) stopVoice();
   for (const items of [list, latest?.list]) {
     const index = items ? items.findIndex((item) => item.id === message.id) : -1;
     if (index >= 0) items[index] = message;
   }
   byId.set(message.id, message);
+  if (message.game && !message.deleted) games.set(message.id, message);
+  else games.delete(message.id);
   paintInfo();
   // Jogos: avisos (sua vez, quem ganhou) e a mesinha aberta acompanha a jogada (e fecha se a partida for apagada).
-  if (message.game) gameNotice(previous.game, message.game, message);
+  if (message.game) gameNotice(previous?.game, message.game, message);
   // Uma partida acabou (ou uma que já tinha acabado foi apagada): o placar muda.
-  if (Boolean(message.game?.winner) !== Boolean(previous.game?.winner)) loadScore();
+  if (Boolean(message.game?.winner) !== Boolean(previous?.game?.winner)) loadScore();
   if (table.id === message.id) paintTable();
-  if (message.game || previous.game) paintUsBadge();
-  if ((message.game || previous.game) && tab === "us" && us.section === "jogos") paintGames();
+  if (message.game || previous?.game) paintUsBadge();
+  if ((message.game || previous?.game) && tab === "us" && us.section === "jogos") paintGames();
   const node = messagesEl.querySelector(`[data-id="${message.id}"]`);
-  if (!node) return;
+  if (!node || !previous) return;
   const before = Object.fromEntries(Object.entries(previous.reactions || {}).map(([emoji, names]) => [emoji, names.length]));
   if (message.deleted && !previous.deleted) return fx.remove(node, () => fill(node, message));
   fill(node, message);
@@ -1654,11 +1670,15 @@ function showMessage(node, query, smooth) {
 
 function indexMessages() {
   byId.clear();
-  for (const message of [...list, ...(latest?.list || [])]) byId.set(message.id, message);
+  for (const message of games.values()) byId.set(message.id, message);
+  for (const message of [...list, ...(latest?.list || [])]) {
+    byId.set(message.id, message);
+    if (message.game && !message.deleted) games.set(message.id, message);
+  }
 }
 
-// Tudo o que está carregado (o trecho antigo aberto e a conversa de agora).
-const loaded = () => (latest ? [...list, ...latest.list] : list);
+// Tudo o que está carregado (o trecho antigo aberto, a conversa de agora e as partidas que estão rolando).
+const loaded = () => joinMessages(list, latest?.list || [], [...games.values()]);
 
 // Junta trechos da conversa sem repetir, na ordem em que as mensagens foram enviadas.
 function joinMessages(...parts) {
@@ -1736,10 +1756,10 @@ function loadOlder() {
     loadMore.textContent = "Carregar mensagens anteriores";
     if (error || !result) return;
     const previousHeight = messagesEl.scrollHeight;
-    const fresh = result.items.filter((message) => !byId.has(message.id));
-    fresh.forEach((message) => byId.set(message.id, message));
-    list = [...fresh, ...list];
+    const known = new Set(list.map((message) => message.id));
+    list = [...result.items.filter((message) => !known.has(message.id)), ...list];
     hasMore = result.hasMore;
+    indexMessages();
     renderAll();
     messagesEl.scrollTop += messagesEl.scrollHeight - previousHeight;
   });
@@ -8125,7 +8145,12 @@ function startGame(type) {
 
 // Uma jogada (op do game_act em lib/potato.php). A mensagem atualizada volta na resposta e também chega pelo aviso.
 function gameMove(message, op, extra = {}, done) {
-  if (!socket?.connected) return toast("Sem conexão agora. Tente de novo em instantes.", "error");
+  if (!socket?.connected) {
+    // A casa já tinha sido marcada como "jogando": o tabuleiro volta a responder.
+    table.busy = false;
+    if (table.id === message.id) paintTable();
+    return toast("Sem conexão agora. Tente de novo em instantes.", "error");
+  }
   socket.timeout(10000).emit("game", { op, id: message.id, ...extra }, (error, result) => {
     table.busy = false;
     if (error || !result?.ok) {
@@ -8137,6 +8162,17 @@ function gameMove(message, op, extra = {}, done) {
     if (result.mine !== undefined && result.mine !== null) rememberPick(message.id, result.mine);
     updateMessage(result.message);
     done?.(result.message);
+  });
+}
+
+// A partida aberta não veio com o histórico (já acabou, ou é antiga): o servidor diz como ela está (ou que foi apagada).
+function refreshGame(id) {
+  socket?.timeout(10000).emit("game", { op: "get", id }, (error, result) => {
+    if (error) return;
+    if (result?.ok) return updateMessage(result.message);
+    games.delete(id);
+    byId.delete(id);
+    if (table.id === id) paintTable();
   });
 }
 
@@ -8364,7 +8400,9 @@ const tableEl = $("#game-table");
 // cada novidade). O resto é o que estava na tela na última vez, para animar só o que mudou: as cartas da memória
 // viradas e com dono, o par errado, as marcas da velha e a linha da vitória, a escolha do verdade ou desafio.
 const table = { id: "", selected: null, built: "", busy: false };
-const tableFresh = () => ({ shown: [], matched: [], missKey: "", board: null, line: null, choice: null, done: false, dealt: false });
+// Na dama, drawn = o tabuleiro desenhado (a mesma jogada chegando de novo não o refaz, para não cortar a animação) e
+// ply = a última jogada animada (null = acabou de abrir: nada anima).
+const tableFresh = () => ({ shown: [], matched: [], missKey: "", board: null, line: null, choice: null, done: false, dealt: false, drawn: "", ply: null });
 let stopTimer = 0;
 
 function onTableKey(event) {
@@ -8535,6 +8573,9 @@ function paintDama(message) {
   if (game.chain !== null && game.turn === me) table.selected = game.chain;
   if (!movable.has(table.selected)) table.selected = movable.size === 1 ? [...movable][0] : null;
   const targets = new Set(moves.filter(([from]) => from === table.selected).map(([, to]) => to));
+  const drawn = JSON.stringify([game.board, game.ply ?? 0, game.turn, game.winner, table.selected, moves]);
+  if (table.drawn === drawn) return;
+  table.drawn = drawn;
   const grid = el("div", "dama-board");
   for (let position = 0; position < 64; position += 1) {
     const index = flip ? 63 - position : position;
@@ -8561,6 +8602,22 @@ function paintDama(message) {
     grid.append(square);
   }
   $("#table-board").replaceChildren(grid);
+  // Jogada nova (sua ou da outra pessoa): a pedra sai da casa de onde veio e, comendo, pula por cima da outra, que sai
+  // do tabuleiro.
+  const ply = game.ply ?? 0;
+  if (table.ply !== null && ply > table.ply && game.last) {
+    const [from, to] = game.last;
+    const square = (index) => grid.querySelector(`[data-square="${index}"]`);
+    let ghost = null;
+    if (game.taken) {
+      const king = game.taken.piece !== game.taken.piece.toLowerCase();
+      ghost = el("span", `stone eaten ${game.taken.piece.toLowerCase()}${king ? " king" : ""}`);
+      if (king) ghost.append(icon("crown"));
+      square(game.taken.at)?.append(ghost);
+    }
+    fx.damaMove(square(to)?.querySelector(".stone"), square(from), ghost, () => sound.play("clack"), () => sound.play("capture"));
+  }
+  table.ply = ply;
 }
 
 function pickSquare(message, index) {

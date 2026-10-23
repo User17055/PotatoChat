@@ -1096,13 +1096,22 @@ try {
     assert.equal((await move(us2, 42, 33)).error, "Captura obrigatória: tem peça para comer!");
     const captured = await move(us2, 35, 21);
     assert.deepEqual([captured.message.game.board[28], captured.message.game.board[21], captured.message.game.turn], ["", "w", "Pessoa 1"]);
+    // A jogada diz o que foi comido e o número dela (o navegador anima só a jogada nova).
+    assert.deepEqual([captured.message.game.taken, captured.message.game.ply, captured.message.game.last], [{ at: 28, piece: "b" }, 3, [35, 21]]);
     assert.ok(captured.message.game.moves.every(([, , over]) => over === undefined) && captured.message.game.moves.length === 2, "as pretas também têm que comer");
     const resigned = await game(us1, { op: "resign", id: checkers.message.id });
     assert.deepEqual([resigned.message.game.winner, resigned.message.game.resigned], ["Pessoa 2", "Pessoa 1"]);
-    // Regras direto no lib/potato.php: pedra come para trás; dama anda e come de longe.
+    // A mesinha pode perguntar como uma partida está (a aberta que não veio com o histórico).
+    assert.equal((await game(us1, { op: "get", id: checkers.message.id })).message.game.winner, "Pessoa 2");
+    assert.equal((await game(us1, { op: "get", id: "nao-existe" })).error, "Esse jogo não existe mais.");
+    // Regras direto no lib/potato.php: pedra anda e come só para a frente; dama anda e come de longe, para todos os lados.
     const board = (pieces) => { const squares = Array(64).fill(""); for (const [index, piece] of Object.entries(pieces)) squares[index] = piece; return squares; };
     const moves = (pieces, color, chain = null) => php(`dama_moves(${phpValue(board(pieces))}, '${color}', ${chain ?? "null"})`);
-    assert.deepEqual(moves({ 27: "w", 36: "b" }, "w"), [[27, 45, 36]]);
+    assert.deepEqual(moves({ 27: "w", 36: "b" }, "w"), [[27, 18, null], [27, 20, null]], "branca não come para trás");
+    assert.deepEqual(moves({ 36: "w", 27: "b" }, "w"), [[36, 18, 27]]);
+    assert.deepEqual(moves({ 27: "b", 18: "w" }, "b"), [[27, 34, null], [27, 36, null]], "preta não come para trás");
+    assert.deepEqual(moves({ 27: "b", 36: "w" }, "b"), [[27, 45, 36]]);
+    assert.deepEqual(moves({ 8: "W", 17: "b" }, "w"), [[8, 26, 17], [8, 35, 17], [8, 44, 17], [8, 53, 17], [8, 62, 17]], "a dama come para trás");
     assert.equal(moves({ 56: "W" }, "w").length, 7);
     assert.deepEqual(moves({ 56: "W", 35: "b" }, "w"), [[56, 28, 35], [56, 21, 35], [56, 14, 35], [56, 7, 35]]);
     assert.deepEqual(moves({ 45: "w", 36: "b", 40: "w" }, "w", 40), []);
@@ -1156,6 +1165,11 @@ try {
     // Responder a uma carta cita o nome do jogo; o jogo não conta como mensagem no perfil; o histórico vem escondido.
     assert.equal((await withAck(us2, "message", { text: "Eu!", clientId: "cliente-jogo", replyTo: likely.message.id })).message.replyTo.text, "Quem é mais provável?");
     const reopenedGames = await connect(secondLogin.body.token);
+    // As partidas que ainda estão rolando vêm com o histórico (mesmo antigas); as que acabaram, não.
+    const openIds = reopenedGames.history.games.map((message) => message.id);
+    assert.ok(openIds.includes(memory.message.id), "a memória ainda está rolando");
+    assert.ok(!openIds.includes(checkers.message.id), "a dama já acabou");
+    assert.ok(reopenedGames.history.games.every((message) => !message.game.winner));
     const likelyAgain = reopenedGames.history.items.find((message) => message.id === likely.message.id);
     assert.deepEqual([likelyAgain.game.votes, likelyAgain.game.players], [{}, ["Pessoa 1"]]);
     reopenedGames.disconnect();
