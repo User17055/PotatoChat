@@ -5847,7 +5847,8 @@ function syncCall(calls) {
 
 // Chamada na conversa, como no Discord: uma linha só, com o ícone do telefone, o que aconteceu e quanto durou
 // ("Ana iniciou uma chamada que durou 9 minutos.", "Você perdeu uma chamada de Ana que durou poucos segundos.").
-// Enquanto a chamada está aberta esperando você, tem o Entrar.
+// No celular vai a versão curta, que cabe numa linha com a hora ("Ana iniciou uma chamada · 9 min", "Chamada perdida
+// de Ana"). Enquanto a chamada está aberta esperando você, tem o Entrar.
 function callCard(message) {
   const info = message.call;
   const mine = info.caller === me;
@@ -5856,13 +5857,25 @@ function callCard(message) {
   const lost = !mine && (info.result === "missed" || info.result === "declined");
   const line = el("div", `call-line${lost ? " lost" : ""}${open ? " open" : ""}`);
   line.append(icon(lost ? "phone-missed" : "phone"));
-  const text = el("span", "call-line-text");
-  const lasted = (ms) => ` que durou ${callDuration(ms)}.`;
-  if (open) text.append(name(info.caller), info.status === "live" ? " está numa chamada." : " iniciou uma chamada.");
-  else if (info.result === "declined") text.append(...(mine ? [name(info.callee), " recusou a sua chamada."] : ["Você recusou uma chamada de ", name(info.caller), "."]));
-  else if (lost) text.append("Você perdeu uma chamada de ", name(info.caller), lasted(info.endedAt - info.startedAt));
-  else text.append(name(info.caller), ` iniciou uma chamada${lasted(info.endedAt - (info.answeredAt || info.startedAt))}`);
-  line.append(text);
+  const long = el("span", "call-line-text call-long");
+  const short = el("span", "call-line-text call-short");
+  const lasted = info.endedAt - (lost ? info.startedAt : info.answeredAt || info.startedAt);
+  if (open) {
+    const live = info.status === "live";
+    long.append(name(info.caller), live ? " está numa chamada." : " iniciou uma chamada.");
+    short.append(name(info.caller), live ? " está numa chamada" : " está ligando");
+  } else if (info.result === "declined") {
+    long.append(...(mine ? [name(info.callee), " recusou a sua chamada."] : ["Você recusou uma chamada de ", name(info.caller), "."]));
+    short.append(...(mine ? [name(info.callee), " recusou a chamada"] : ["Você recusou a chamada"]));
+  } else if (lost) {
+    long.append("Você perdeu uma chamada de ", name(info.caller), ` que durou ${callDuration(lasted)}.`);
+    short.append("Chamada perdida de ", name(info.caller));
+  } else {
+    long.append(name(info.caller), ` iniciou uma chamada que durou ${callDuration(lasted)}.`);
+    if (info.result === "missed") short.append("Chamada não atendida");
+    else short.append(name(info.caller), ` iniciou uma chamada · ${callDurationShort(lasted)}`);
+  }
+  line.append(long, short);
   if (open && !mine && info.status === "ringing" && !call?.accepted) {
     const join = el("button", "call-line-join", "Entrar");
     join.type = "button";
@@ -5879,6 +5892,15 @@ function callDuration(ms) {
   if (minutes < 60) return minutes === 1 ? "um minuto" : `${minutes} minutos`;
   const hours = Math.floor(minutes / 60);
   return hours === 1 ? "uma hora" : `${hours} horas`;
+}
+
+// A mesma, curta (no celular): "40 s", "9 min", "1 h 20 min".
+function callDurationShort(ms) {
+  const seconds = Math.round(Math.max(0, ms) / 1000);
+  if (seconds < 60) return `${Math.max(1, seconds)} s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  return minutes % 60 ? `${Math.floor(minutes / 60)} h ${minutes % 60} min` : `${minutes / 60} h`;
 }
 
 function callCardAction(action, info) {

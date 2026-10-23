@@ -1895,6 +1895,15 @@ button.day-note:hover { background: var(--surface-3); }
 .call-line > .icon { flex: none; width: 18px; height: 18px; color: var(--speak); }
 .call-line.lost > .icon { color: var(--muted); }
 .call-line-text strong { color: var(--ink); font-weight: 600; }
+/* No celular, a versão curta (cabe numa linha, com a hora do lado). */
+.call-short { display: none; }
+@media (max-width: 760px) {
+  .call-long { display: none; }
+  .call-short { display: inline; }
+  .call-line { gap: 10px; font-size: 13.5px; }
+  .call-line > .icon { width: 16px; height: 16px; }
+  .call-line-join { padding: 3px 10px; font-size: 12px; }
+}
 .call-line-join { padding: 4px 12px; border: 0; border-radius: 999px; background: var(--speak); color: #fff; font-size: 12.5px; font-weight: 600; }
 .call-line.open > .icon { animation: call-line-ring 1.2s ease-in-out infinite; }
 @keyframes call-line-ring { 0%, 60%, 100% { transform: rotate(0); } 20% { transform: rotate(-14deg); } 40% { transform: rotate(14deg); } }
