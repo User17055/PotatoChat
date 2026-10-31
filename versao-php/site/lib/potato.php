@@ -3177,6 +3177,14 @@ function act(array $me, string $event, $data)
             if ($event === 'webrtc-answer') emit('call-handled', null, 'self', $me);
             return null;
 
+        // Watch Party, vídeo do aparelho: quem tem o arquivo transmite direto (WebRTC) para quem está na conversa.
+        // Sem to, vai para todas as conexões da outra pessoa (o pedido); com to, só para aquela.
+        case 'watch-rtc':
+            if ($room === '') return null;
+            $to = str($body['to'] ?? '');
+            emit($event, array_merge($body, ['from' => $me['conn']]), 'peer', $me, $to === '' ? null : $to, $room);
+            return null;
+
         // Chamada: começar (toca para a outra pessoa, mesmo offline), atender, recusar e ver como está.
         case 'call':
             return call_act($me, $body);

@@ -476,7 +476,7 @@ function asset(string $file): string
             <div id="watch-count" class="watch-count hidden" aria-live="assertive"><span id="watch-count-number"></span><small>deem o play juntos</small></div>
             <div id="watch-need" class="watch-need hidden">
               <svg class="icon"><use href="#i-file" /></svg>
-              <p><strong id="watch-need-name"></strong>Esse vídeo está no aparelho de quem começou. Escolha o mesmo arquivo no seu para assistirem juntos.</p>
+              <p><strong id="watch-need-name"></strong>Esse vídeo está no aparelho de quem começou: ele chega aqui sozinho assim que a sala estiver aberta lá. Se preferir, escolha o mesmo arquivo no seu.</p>
               <button id="watch-pick" class="music-pill" type="button"><svg class="icon"><use href="#i-file" /></svg>Escolher o vídeo</button>
             </div>
             <button id="watch-unblock" class="music-unblock hidden" type="button"><svg class="icon"><use href="#i-play" /></svg>Toque no play para assistir junto</button>

@@ -1,5 +1,5 @@
 // Assistir junto: o player grande, em cima da conversa. YouTube (IFrame API), Twitch (vídeo gravado ou canal ao vivo,
-// Embed API) ou um vídeo que cada um escolhe no próprio aparelho (<video>, nada sobe para o servidor).
+// Embed API) ou um vídeo do aparelho (<video>: o arquivo de quem escolheu, ou a transmissão dele, que chega por WebRTC).
 // Quem decide o que passa e em que segundo é o servidor; o app.js chama open/play/pause/seek para acompanhar.
 import { youtubeApi } from "./music.js";
 
@@ -25,20 +25,23 @@ export function createWatchPlayer(host, events) {
   let twitch = null;
   let video = null;
   let objectUrl = "";
+  let stream = null;
 
   function destroy() {
     load += 1;
+    if (item) events.onClose?.(item.uid);
     try { youtube?.destroy(); } catch {}
     try { twitch?.pause(); } catch {}
     if (video) video.pause();
     if (objectUrl) URL.revokeObjectURL(objectUrl);
-    youtube = twitch = video = item = null;
+    youtube = twitch = video = item = stream = null;
     objectUrl = "";
     ready = false;
     host.replaceChildren();
   }
 
-  async function open(next, position, playing, file) {
+  // feed = a transmissão de quem tem o arquivo (MediaStream): quem manda no segundo é quem transmite.
+  async function open(next, position, playing, file, feed = null) {
     destroy();
     const mine = load;
     item = next;
@@ -87,6 +90,15 @@ export function createWatchPlayer(host, events) {
         });
         for (const name of [Twitch.Player.PLAY, Twitch.Player.PAUSE, Twitch.Player.PLAYING]) player.addEventListener(name, () => twitch === player && events.onUpdate?.());
         player.addEventListener(Twitch.Player.ENDED, () => twitch === player && events.onEnded?.(item.uid));
+      } else if (feed) {
+        const element = video = document.createElement("video");
+        stream = element.srcObject = feed;
+        element.playsInline = true;
+        mount.replaceWith(element);
+        for (const name of ["play", "pause", "playing", "waiting"]) element.addEventListener(name, () => video === element && events.onUpdate?.());
+        ready = true;
+        if (playing()) element.play().catch(() => {});
+        events.onReady?.();
       } else {
         objectUrl = URL.createObjectURL(file);
         const element = video = document.createElement("video");
@@ -113,10 +125,15 @@ export function createWatchPlayer(host, events) {
   return {
     get uid() { return item?.uid || null; },
     get ready() { return ready; },
-    // Canal ao vivo da Twitch: não dá para escolher o segundo, só tocar e pausar.
-    get live() { return item?.source === "twitch" && item.kind === "channel"; },
+    // Canal ao vivo da Twitch e a transmissão do vídeo do aparelho: não dá para escolher o segundo, só tocar e pausar.
+    get live() { return Boolean(stream) || (item?.source === "twitch" && item.kind === "channel"); },
+    get stream() { return stream; },
     open,
     destroy,
+    // O vídeo do aparelho virando transmissão (Chrome, Edge, Android; o Safari não sabe).
+    capture() {
+      return video && !stream && video.captureStream ? video.captureStream() : null;
+    },
     time() {
       if (youtube) return youtube.getCurrentTime?.() || 0;
       if (twitch) return twitch.getCurrentTime?.() || 0;
@@ -125,7 +142,8 @@ export function createWatchPlayer(host, events) {
     duration() {
       if (youtube) return youtube.getDuration?.() || 0;
       if (twitch) return twitch.getDuration?.() || 0;
-      return video?.duration || 0;
+      // A transmissão não tem fim (Infinity): vale a duração que veio do servidor.
+      return Number.isFinite(video?.duration) ? video.duration : 0;
     },
     playing() {
       if (youtube) return [1, 3].includes(youtube.getPlayerState?.());

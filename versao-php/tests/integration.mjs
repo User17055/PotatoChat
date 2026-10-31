@@ -705,6 +705,13 @@ try {
   assert.deepEqual([channel.kind, channel.id], ["channel", "gaules"]);
   const local = await withAck(dj1, "watch", { op: "start", local: { name: "filme/da noite.mp4", size: 1234, duration: 5400.5 } });
   assert.deepEqual([local.state.now.source, local.state.now.name, local.state.now.duration], ["local", "filme_da noite.mp4", 5400.5]);
+  // Só quem escolheu tem o arquivo: o pedido de transmissão chega a ele com a conexão de quem pediu, e a oferta volta só para ela.
+  const wanted = next(dj1, "watch-rtc");
+  dj2.emit("watch-rtc", { op: "want", uid: local.state.now.uid });
+  assert.deepEqual([(await wanted).op, (await wanted).uid, (await wanted).from], ["want", local.state.now.uid, dj2.id]);
+  const offered = next(dj2, "watch-rtc");
+  dj1.emit("watch-rtc", { op: "offer", uid: local.state.now.uid, sdp: { type: "offer", sdp: "x" }, to: dj2.id });
+  assert.deepEqual([(await offered).op, (await offered).from], ["offer", dj1.id]);
   assert.equal((await withAck(dj1, "watch", { op: "start", query: "https://clips.twitch.tv/AlgumClipe" })).error, "Clipe da Twitch não dá para assistir junto: use o link do vídeo ou do canal.");
   assert.equal((await withAck(dj1, "watch", { op: "start", query: "um filme bom" })).error, "Não achei esse vídeo. Cole o link do YouTube ou da Twitch (ou escolha um vídeo do aparelho).");
   const watchEnded = await withAck(dj2, "watch", { op: "ended", uid: local.state.now.uid });
