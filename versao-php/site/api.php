@@ -6,6 +6,7 @@
 //   wallpaper → papel de parede da conversa;
 //   upload  → recebe a foto ou o arquivo de uma mensagem (a mensagem vai depois, pelo ops);
 //   file    → entrega a foto ou o arquivo de uma mensagem;
+//   watch-upload / watch-file → recebe (em pedaços) e entrega o vídeo do aparelho da Watch Party;
 //   transcribe → transcreve uma mensagem de voz (se a chave estiver no config.php);
 //   connect → entra na sala e recebe o histórico;
 //   ops     → envia ações (mensagem, reação, leitura, digitando, sinalização da chamada…);
@@ -199,6 +200,75 @@ function upload(): array
     });
 }
 
+// Watch Party: um pedaço do vídeo do aparelho. O corpo é o pedaço; a sessão, a conversa, o nome, o tamanho total, a
+// chave (vazia no primeiro) e onde o pedaço começa vão nos cabeçalhos. Fora da trava do banco: um pedaço leva segundos
+// para chegar e não pode segurar o chat. Pedaço repetido ou fora de ordem não grava: a resposta diz quanto já chegou
+// (received) e o navegador continua dali.
+function watch_upload(): array
+{
+    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') throw new HttpError(405, 'Use POST.');
+    @set_time_limit(600);
+    $name = authenticate(['token' => $_SERVER['HTTP_X_POTATO_TOKEN'] ?? ''])['name'];
+    $length = (int) ($_SERVER['CONTENT_LENGTH'] ?? 0);
+    $offset = (int) ($_SERVER['HTTP_X_POTATO_OFFSET'] ?? 0);
+    $key = str($_SERVER['HTTP_X_POTATO_KEY'] ?? '');
+    if ($length < 1 || $length > watch_chunk()) throw new HttpError(413, 'Pedaço grande demais para o servidor.');
+    if ($key === '') {
+        $room = pick_room($name, str($_SERVER['HTTP_X_POTATO_ROOM'] ?? ''));
+        $size = (int) ($_SERVER['HTTP_X_POTATO_SIZE'] ?? 0);
+        if (!$room) return ['ok' => false, 'error' => 'Escolha uma conversa.'];
+        if ($size > WATCH_FILE_MAX) return ['ok' => false, 'error' => 'Vídeo grande demais (máximo de ' . round(WATCH_FILE_MAX / 1073741824) . ' GB).'];
+        if ($offset !== 0 || $size < $length) throw new HttpError(400, 'Envio inválido.');
+        prune_watch_files($room['id']);
+        if (!is_dir(WATCH_DIR) && !@mkdir(WATCH_DIR, 0755, true)) throw new HttpError(500, 'O servidor não deixou criar a pasta filmes.');
+        // Ninguém abre a pasta direto: o vídeo só sai por api.php?action=watch-file.
+        if (!is_file(WATCH_DIR . '/.htaccess')) {
+            @file_put_contents(WATCH_DIR . '/.htaccess', "<IfModule mod_authz_core.c>\nRequire all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\nDeny from all\n</IfModule>\n");
+            @file_put_contents(WATCH_DIR . '/index.html', '');
+        }
+        $file = ['key' => bin2hex(random_bytes(16)), 'owner' => $name, 'room' => $room['id'], 'name' => clean_file_name(rawurldecode((string) ($_SERVER['HTTP_X_POTATO_NAME'] ?? ''))), 'size' => $size, 'type' => '', 'at' => now_ms()];
+        save_watch_file($file);
+    } else {
+        $file = find_watch_file($key);
+        if (!$file || !same_name($file['owner'], $name)) return ['ok' => false, 'error' => 'Esse envio não está mais no servidor. Escolha o vídeo de novo.'];
+    }
+    $path = watch_file_path($file['key']);
+    // Um handle só, para gravar e ler (no Windows, a trava do flock vale até para outro handle do mesmo PHP).
+    $out = @fopen($path, 'c+b');
+    if (!$out) throw new HttpError(500, 'O servidor não deixou gravar o vídeo.');
+    try {
+        flock($out, LOCK_EX);
+        fseek($out, 0, SEEK_END);
+        $received = (int) ftell($out);
+        if ($offset !== $received || $received + $length > $file['size']) return ['ok' => true, 'key' => $file['key'], 'received' => $received];
+        $in = fopen('php://input', 'rb');
+        $copied = (int) stream_copy_to_stream($in, $out, $length);
+        fflush($out);
+        // Chegou pela metade (a conexão caiu) ou o disco encheu: o pedaço sai e o navegador tenta de novo.
+        if ($copied !== $length) {
+            ftruncate($out, $received);
+            return ['ok' => false, 'key' => $file['key'], 'received' => $received, 'error' => 'O servidor não conseguiu gravar o vídeo (pode estar sem espaço).'];
+        }
+        if ($received === 0) {
+            // Pelos primeiros bytes (o tipo informado pelo navegador não vale): só vídeo ou som passam.
+            fseek($out, 0);
+            $kind = sniff_file((string) fread($out, $length));
+            if (!in_array($kind['kind'], ['video', 'audio'], true)) {
+                fclose($out);
+                $out = null;
+                drop_watch_file($file['key']);
+                return ['ok' => false, 'error' => 'Esse arquivo não é um vídeo que o navegador toca (use MP4, WebM ou MOV).'];
+            }
+            $file['type'] = $kind['type'];
+        }
+        $file['at'] = now_ms();
+        save_watch_file($file);
+        return ['ok' => true, 'key' => $file['key'], 'received' => $received + $length];
+    } finally {
+        if ($out) fclose($out);
+    }
+}
+
 // Transcrição de uma mensagem de voz. Fora do ops: a API de transcrição leva alguns segundos e não pode
 // segurar a fila de ações (nem a trava do banco) enquanto responde.
 function transcribe(array $input): array
@@ -223,6 +293,15 @@ function serve_file(string $key, bool $download): void
     // Mesmo que alguém mande um HTML disfarçado, ele não roda dentro do site.
     header("Content-Security-Policy: default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; sandbox");
     header('Cache-Control: private, max-age=31536000, immutable');
+    [$start, $end] = byte_range($size);
+    echo substr($data, $start, $end - $start + 1);
+    exit;
+}
+
+// A faixa de bytes pedida (Range), já com o 206, o Content-Range e o Content-Length; sem Range, o arquivo inteiro.
+// cap: o máximo numa resposta (o navegador pede o resto sozinho).
+function byte_range(int $size, int $cap = PHP_INT_MAX): array
+{
     header('Accept-Ranges: bytes');
     $start = 0;
     $end = $size - 1;
@@ -238,11 +317,34 @@ function serve_file(string $key, bool $download): void
             header("Content-Range: bytes */$size");
             exit;
         }
+        $end = min($end, $start + $cap - 1);
         http_response_code(206);
         header("Content-Range: bytes $start-$end/$size");
     }
     header('Content-Length: ' . ($end - $start + 1));
-    echo substr($data, $start, $end - $start + 1);
+    return [$start, $end];
+}
+
+// O vídeo do aparelho da Watch Party, do disco. Até 8 MB por resposta: ninguém prende o PHP da hospedagem por uma hora
+// baixando o filme inteiro de uma vez. O endereço só chega a quem está na conversa e a chave é aleatória.
+function serve_watch_file(string $key): void
+{
+    $file = find_watch_file($key);
+    $path = $file ? watch_file_path($file['key']) : '';
+    if (!$file || !is_file($path) || filesize($path) < $file['size']) throw new HttpError(404, 'Esse vídeo não está mais no servidor.');
+    header('Content-Type: ' . ($file['type'] ?: 'video/mp4'));
+    header("Content-Security-Policy: default-src 'none'; sandbox");
+    header('Cache-Control: private, max-age=86400');
+    [$start, $end] = byte_range((int) $file['size'], WATCH_CHUNK);
+    @set_time_limit(0);
+    $in = fopen($path, 'rb');
+    fseek($in, $start);
+    for ($left = $end - $start + 1; $left > 0 && !connection_aborted(); $left -= strlen($piece)) {
+        $piece = (string) fread($in, min(1048576, $left));
+        if ($piece === '') break;
+        echo $piece;
+        flush();
+    }
     exit;
 }
 
@@ -283,6 +385,10 @@ try {
             serve_file(str($_GET['k'] ?? ''), isset($_GET['dl']));
         case 'upload':
             respond(200, upload());
+        case 'watch-upload':
+            respond(200, watch_upload());
+        case 'watch-file':
+            serve_watch_file(str($_GET['k'] ?? ''));
         case 'transcribe':
             respond(200, transcribe(input()));
         case 'login':

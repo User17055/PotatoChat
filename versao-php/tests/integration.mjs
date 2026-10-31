@@ -137,6 +137,13 @@ async function upload(token, name, data, type = "application/octet-stream") {
   return { status: response.status, body: await response.json() };
 }
 
+// Watch Party: um pedaço do vídeo do aparelho (como o app.js manda).
+async function watchUpload(token, { key = "", offset = 0, size, name = "filme.mp4", room = "" }, data) {
+  const headers = { "Content-Type": "application/octet-stream", "X-Potato-Token": token, "X-Potato-Key": key, "X-Potato-Offset": String(offset), "X-Potato-Size": String(size), "X-Potato-Name": encodeURIComponent(name), "X-Potato-Room": room };
+  const response = await fetch(`${baseUrl}/api.php?action=watch-upload`, { method: "POST", headers, body: data });
+  return { status: response.status, body: await response.json() };
+}
+
 const login = (name, password, confirm) => api("login", confirm === undefined ? { name, password } : { name, password, confirm });
 const welcome = async () => (await fetch(`${baseUrl}/api.php?action=welcome`)).json();
 
@@ -703,19 +710,34 @@ try {
   assert.deepEqual([twitch.state.now.source, twitch.state.now.kind, twitch.state.now.id, twitch.state.position], ["twitch", "video", "123456789", 0]);
   const channel = (await withAck(dj2, "watch", { op: "start", query: "twitch.tv/Gaules" })).state.now;
   assert.deepEqual([channel.kind, channel.id], ["channel", "gaules"]);
-  const local = await withAck(dj1, "watch", { op: "start", local: { name: "filme/da noite.mp4", size: 1234, duration: 5400.5 } });
+  // Vídeo do aparelho: sobe em pedaços para o servidor e os dois assistem de lá (quem mandou pode sair).
+  const movie = Buffer.concat([Buffer.from("000000186674797069736f6d0000020069736f6d69736f32", "hex"), crypto.randomBytes(3000)]);
+  const room = dj1.history.room;
+  const junk = Buffer.from("não é vídeo nenhum");
+  assert.equal((await watchUpload(firstLogin.body.token, { size: junk.length, room }, junk)).body.error, "Esse arquivo não é um vídeo que o navegador toca (use MP4, WebM ou MOV).");
+  assert.match((await watchUpload(firstLogin.body.token, { size: 5e9, room }, movie.subarray(0, 10))).body.error, /grande demais/);
+  const part1 = (await watchUpload(firstLogin.body.token, { size: movie.length, name: "filme/da noite.mp4", room }, movie.subarray(0, 1000))).body;
+  assert.deepEqual([part1.ok, part1.received], [true, 1000]);
+  assert.equal((await withAck(dj1, "watch", { op: "start", local: { key: part1.key } })).error, "O vídeo ainda não terminou de subir.");
+  // Pedaço repetido não grava de novo: o servidor diz até onde já tem. O envio é só de quem começou.
+  assert.equal((await watchUpload(firstLogin.body.token, { key: part1.key, offset: 0, size: movie.length, room }, movie.subarray(0, 1000))).body.received, 1000);
+  assert.equal((await watchUpload(secondLogin.body.token, { key: part1.key, offset: 1000, size: movie.length, room }, movie.subarray(1000))).body.ok, false);
+  assert.equal((await watchUpload(firstLogin.body.token, { key: part1.key, offset: 1000, size: movie.length, room }, movie.subarray(1000))).body.received, movie.length);
+  const local = await withAck(dj1, "watch", { op: "start", local: { key: part1.key, duration: 5400.5 } });
   assert.deepEqual([local.state.now.source, local.state.now.name, local.state.now.duration], ["local", "filme_da noite.mp4", 5400.5]);
-  // Só quem escolheu tem o arquivo: o pedido de transmissão chega a ele com a conexão de quem pediu, e a oferta volta só para ela.
-  const wanted = next(dj1, "watch-rtc");
-  dj2.emit("watch-rtc", { op: "want", uid: local.state.now.uid });
-  assert.deepEqual([(await wanted).op, (await wanted).uid, (await wanted).from], ["want", local.state.now.uid, dj2.id]);
-  const offered = next(dj2, "watch-rtc");
-  dj1.emit("watch-rtc", { op: "offer", uid: local.state.now.uid, sdp: { type: "offer", sdp: "x" }, to: dj2.id });
-  assert.deepEqual([(await offered).op, (await offered).from], ["offer", dj1.id]);
+  const servedWhole = await fetch(`${baseUrl}/${local.state.now.url}`);
+  assert.deepEqual([servedWhole.status, servedWhole.headers.get("content-type")], [200, "video/mp4"]);
+  assert.ok(Buffer.from(await servedWhole.arrayBuffer()).equals(movie));
+  const servedPart = await fetch(`${baseUrl}/${local.state.now.url}`, { headers: { Range: "bytes=1000-" } });
+  assert.deepEqual([servedPart.status, servedPart.headers.get("content-range")], [206, `bytes 1000-${movie.length - 1}/${movie.length}`]);
+  assert.ok(Buffer.from(await servedPart.arrayBuffer()).equals(movie.subarray(1000)));
   assert.equal((await withAck(dj1, "watch", { op: "start", query: "https://clips.twitch.tv/AlgumClipe" })).error, "Clipe da Twitch não dá para assistir junto: use o link do vídeo ou do canal.");
   assert.equal((await withAck(dj1, "watch", { op: "start", query: "um filme bom" })).error, "Não achei esse vídeo. Cole o link do YouTube ou da Twitch (ou escolha um vídeo do aparelho).");
   const watchEnded = await withAck(dj2, "watch", { op: "ended", uid: local.state.now.uid });
   assert.equal(watchEnded.state.playing, false);
+  // Trocou de vídeo: o arquivo sai do servidor.
+  await withAck(dj2, "watch", { op: "start", query: "twitch.tv/Gaules" });
+  assert.equal((await fetch(`${baseUrl}/${local.state.now.url}`)).status, 404);
   // Netflix e HBO Max: cada um assiste na própria conta; a sala guarda o segundo, faz a contagem e ouve a extensão.
   const netflix = await withAck(dj1, "watch", { op: "start", query: "Stranger Things", service: "netflix" });
   assert.deepEqual([netflix.state.now.source, netflix.state.now.title, netflix.state.now.url], ["netflix", "Stranger Things", "https://www.netflix.com/search?q=Stranger%20Things"]);

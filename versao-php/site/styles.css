@@ -1092,10 +1092,11 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
 .watch-count span { font-size: clamp(56px, 14vw, 120px); font-weight: 800; line-height: 1; text-shadow: 0 0 40px #a78bfa; }
 .watch-count small { color: #ffffffb3; font-size: 14px; font-weight: 600; }
 .watch-count.go span { color: #3ddc84; text-shadow: 0 0 40px #3ddc84; }
-.watch-need { position: absolute; inset: 0; z-index: 1; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 20px; background: radial-gradient(circle, #1c1c1c, #000); color: #fff; text-align: center; }
-.watch-need .icon { width: 34px; height: 34px; color: var(--accent); }
-.watch-need p { max-width: 380px; margin: 0; color: #ffffffb3; font-size: 13.5px; line-height: 1.5; }
-.watch-need strong { display: block; margin-bottom: 4px; color: #fff; font-size: 15px; overflow-wrap: anywhere; }
+.watch-upload { position: absolute; inset: 0; z-index: 1; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 20px; background: radial-gradient(circle, #1c1c1c, #000); color: #fff; text-align: center; }
+.watch-upload .icon { width: 34px; height: 34px; color: var(--accent); }
+.watch-upload p { max-width: 380px; margin: 0; color: #ffffffb3; font-size: 13.5px; line-height: 1.5; }
+.watch-upload strong { display: block; margin-bottom: 4px; color: #fff; font-size: 15px; overflow-wrap: anywhere; }
+.watch-upload progress { width: min(320px, 80%); accent-color: var(--accent); }
 .watch-bar { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--surface); color: var(--ink); }
 .watch-btn { flex: none; width: 38px; height: 38px; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--surface-2); color: var(--ink); transition: background .2s, color .2s, transform .15s; }
 .watch-btn:hover { background: var(--surface-3); }

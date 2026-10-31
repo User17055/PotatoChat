@@ -474,10 +474,12 @@ function asset(string $file): string
               <p id="watch-stream-note" class="watch-stream-note"></p>
             </div>
             <div id="watch-count" class="watch-count hidden" aria-live="assertive"><span id="watch-count-number"></span><small>deem o play juntos</small></div>
-            <div id="watch-need" class="watch-need hidden">
+            <!-- Vídeo do aparelho subindo para o servidor (só para quem mandou; a outra pessoa vê "Ana está enviando um vídeo…"). -->
+            <div id="watch-upload" class="watch-upload hidden">
               <svg class="icon"><use href="#i-file" /></svg>
-              <p><strong id="watch-need-name"></strong>Esse vídeo está no aparelho de quem começou: ele chega aqui sozinho assim que a sala estiver aberta lá. Se preferir, escolha o mesmo arquivo no seu.</p>
-              <button id="watch-pick" class="music-pill" type="button"><svg class="icon"><use href="#i-file" /></svg>Escolher o vídeo</button>
+              <p><strong id="watch-upload-name"></strong><span id="watch-upload-text"></span></p>
+              <progress id="watch-upload-bar" max="1" value="0"></progress>
+              <button id="watch-upload-cancel" class="watch-ghost" type="button">Cancelar</button>
             </div>
             <button id="watch-unblock" class="music-unblock hidden" type="button"><svg class="icon"><use href="#i-play" /></svg>Toque no play para assistir junto</button>
           </div>

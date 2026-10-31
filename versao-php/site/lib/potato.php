@@ -24,6 +24,10 @@ const AVATAR_GIF_MAX = 700000;
 // Fotos e arquivos das mensagens: até 10 MB (menos, se o PHP ou o MySQL da hospedagem não aguentarem; veja file_max).
 const FILE_MAX = 10000000;
 const FILE_UPLOADS_PER_10_MIN = 60;
+// Watch Party, vídeo do aparelho: sobe em pedaços de até 8 MB e fica em disco (filmes/), não no banco.
+const WATCH_FILE_MAX = 4294967296;
+const WATCH_CHUNK = 8388608;
+const WATCH_DIR = __DIR__ . '/../filmes';
 // Mensagem de voz: até 1 hora (o chat já para a gravação em 15 minutos) e até 64 barras na forma de onda.
 const VOICE_MAX = 3600;
 const VOICE_PEAKS = 64;
@@ -1243,7 +1247,8 @@ function watch_blank(): array
     return ['now' => null, 'playing' => false, 'position' => 0, 'updatedAt' => 0, 'browsing' => null, 'recent' => []];
 }
 
-const WATCH_SERVICES = ['youtube', 'netflix', 'max', 'twitch'];
+// local: mandando um vídeo do aparelho para o servidor.
+const WATCH_SERVICES = ['youtube', 'netflix', 'max', 'twitch', 'local'];
 
 // Prateleiras do catálogo do YouTube na sala: buscas com filtro (mais vistos da semana ou do mês, só vídeos).
 const WATCH_SHELVES = [
@@ -1271,8 +1276,8 @@ function watch_catalog(array $body): array
     return ['ok' => true, 'results' => $results];
 }
 
-// "Vistos por vocês": os 12 últimos da sala, sem repetir. O vídeo do aparelho fica de fora (o arquivo é de cada
-// um), e da Netflix e da HBO Max só entra o que tem título certo (o endereço de um filme ou episódio).
+// "Vistos por vocês": os 12 últimos da sala, sem repetir. O vídeo do aparelho fica de fora (o arquivo sai do servidor
+// quando a sala troca de vídeo), e da Netflix e da HBO Max só entra o que tem título certo (o endereço de um filme ou episódio).
 function watch_recent(array $recent, array $item): array
 {
     $source = $item['source'];
@@ -1303,7 +1308,7 @@ function watch_public(array $state): array
     return $state + ['serverNow' => now_ms()];
 }
 
-// Comandos: start (query = link ou nome; video = escolhido no catálogo; local = vídeo do aparelho), pause, resume,
+// Comandos: start (query = link ou nome; video = escolhido no catálogo; local = vídeo do aparelho, já no servidor), pause, resume,
 // seek, ended, countdown, browse (quem está escolhendo), stop e search (o catálogo, sem mexer na sala).
 function watch_act(array $me, array $body): array
 {
@@ -1327,8 +1332,13 @@ function watch_act(array $me, array $body): array
             $item = ['source' => 'youtube', 'id' => $id, 'title' => $title !== '' ? $title : 'Vídeo do YouTube']
                 + ($channel !== '' ? ['channel' => $channel] : []) + ($duration > 0 ? ['duration' => $duration] : []);
         } elseif ($local) {
-            $name = clean_file_name(str($local['name'] ?? ''));
-            $item = ['source' => 'local', 'title' => $name, 'name' => $name, 'size' => max(0, (int) ($local['size'] ?? 0)), 'duration' => max(0, min(86400, (float) ($local['duration'] ?? 0)))];
+            // O vídeo que esta pessoa mandou para esta conversa (api.php?action=watch-upload), já inteiro.
+            $file = find_watch_file(str($local['key'] ?? ''));
+            if (!$file || $file['room'] !== $room || !same_name($file['owner'], $me['name'])) return ['ok' => false, 'error' => 'Esse vídeo não está mais no servidor. Escolha de novo.'];
+            clearstatcache();
+            if ((int) @filesize(watch_file_path($file['key'])) < $file['size']) return ['ok' => false, 'error' => 'O vídeo ainda não terminou de subir.'];
+            $item = ['source' => 'local', 'title' => $file['name'], 'name' => $file['name'], 'key' => $file['key'], 'url' => 'api.php?action=watch-file&k=' . $file['key'],
+                'size' => $file['size'], 'duration' => max(0, min(86400, (float) ($local['duration'] ?? 0)))];
         } else {
             $query = text_slice(text_trim(str($body['query'] ?? '')), 300);
             $service = str($body['service'] ?? '');
@@ -1363,6 +1373,7 @@ function watch_act(array $me, array $body): array
         $item += ['uid' => bin2hex(random_bytes(8)), 'by' => $me['name']];
     }
     $state = watch_state($room, true);
+    $before = $state['now'];
     $now = now_ms();
     $action = ['op' => $op, 'by' => $me['name']];
     // updatedAt no futuro = contagem para o play: até lá, o vídeo fica parado no mesmo segundo.
@@ -1436,9 +1447,60 @@ function watch_act(array $me, array $body): array
             return ['ok' => false, 'error' => 'Comando desconhecido.'];
     }
     save_watch($room, $state);
+    // Trocou de vídeo ou fechou: o arquivo do vídeo do aparelho que passava sai do servidor.
+    if (($before['source'] ?? '') === 'local' && isset($before['key']) && ($state['now']['key'] ?? '') !== $before['key']) drop_watch_file((string) $before['key']);
     $public = watch_public($state);
     emit('watch', ['state' => $public, 'action' => $action, 'room' => $room], 'all', null, null, $room);
     return ['ok' => true, 'state' => $public, 'action' => $action];
+}
+
+// ---------- Watch Party: vídeo do aparelho no servidor ----------
+// Quem escolhe manda o arquivo em pedaços (api.php?action=watch-upload) e cada um assiste de lá
+// (api.php?action=watch-file): quem mandou pode sair que o vídeo continua. O arquivo fica em filmes/<chave>; o dono, a
+// conversa, o nome, o tamanho e o tipo, em settings (watchfile:<chave>).
+
+// Pedaço do envio: 8 MB, ou menos se o post_max_size da hospedagem não deixar.
+function watch_chunk(): int
+{
+    $post = ini_bytes((string) ini_get('post_max_size'));
+    return $post > 0 ? max(65536, min(WATCH_CHUNK, $post - 65536)) : WATCH_CHUNK;
+}
+
+function watch_file_path(string $key): string
+{
+    return WATCH_DIR . '/' . $key;
+}
+
+function find_watch_file(string $key): ?array
+{
+    if (!preg_match('/^[0-9a-f]{32}$/', $key)) return null;
+    $raw = query('SELECT value FROM ' . t('settings') . ' WHERE name = ?', ["watchfile:$key"])->fetchColumn();
+    $file = $raw ? json_decode((string) $raw, true) : null;
+    return is_array($file) ? $file : null;
+}
+
+function save_watch_file(array $file): void
+{
+    query('INSERT INTO ' . t('settings') . ' (name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)', ['watchfile:' . $file['key'], encode($file)]);
+}
+
+function drop_watch_file(string $key): void
+{
+    if (!preg_match('/^[0-9a-f]{32}$/', $key)) return;
+    @unlink(watch_file_path($key));
+    query('DELETE FROM ' . t('settings') . ' WHERE name = ?', ["watchfile:$key"]);
+}
+
+// Antes de um envio novo: sai o que a conversa tinha e não está passando (um envio por vez em cada sala), e o que
+// alguém largou no meio há mais de um dia.
+function prune_watch_files(string $room): void
+{
+    foreach (query('SELECT value FROM ' . t('settings') . " WHERE name LIKE 'watchfile:%'")->fetchAll(PDO::FETCH_COLUMN) as $raw) {
+        $file = json_decode((string) $raw, true);
+        if (!is_array($file) || !isset($file['key'], $file['room'])) continue;
+        if ((watch_state((string) $file['room'])['now']['key'] ?? '') === $file['key']) continue;
+        if ($file['room'] === $room || now_ms() - (int) ($file['at'] ?? 0) > DAY_MS) drop_watch_file((string) $file['key']);
+    }
 }
 
 // ---------- papel de parede ----------
@@ -2854,6 +2916,7 @@ function history(string $me, ?array $room): array
         'wallpaper' => wallpaper_info(find_account($me)),
         'gifKey' => str(config()['giphy_key']),
         'fileMax' => file_max(),
+        'watchChunk' => watch_chunk(),
         'transcribe' => str(config()['transcribe_key']) !== '',
         'music' => music_public(music_state($id)),
         'watch' => watch_public(watch_state($id)),
@@ -3175,14 +3238,6 @@ function act(array $me, string $event, $data)
             if (!$paired) return null;
             emit($event, array_merge($body, ['from' => $me['conn'], 'name' => $name]), 'peer', $me, $to);
             if ($event === 'webrtc-answer') emit('call-handled', null, 'self', $me);
-            return null;
-
-        // Watch Party, vídeo do aparelho: quem tem o arquivo transmite direto (WebRTC) para quem está na conversa.
-        // Sem to, vai para todas as conexões da outra pessoa (o pedido); com to, só para aquela.
-        case 'watch-rtc':
-            if ($room === '') return null;
-            $to = str($body['to'] ?? '');
-            emit($event, array_merge($body, ['from' => $me['conn']]), 'peer', $me, $to === '' ? null : $to, $room);
             return null;
 
         // Chamada: começar (toca para a outra pessoa, mesmo offline), atender, recusar e ver como está.

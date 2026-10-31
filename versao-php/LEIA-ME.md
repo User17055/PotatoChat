@@ -154,11 +154,12 @@ Escolher é como no Rave: um catálogo com os serviços (no celular, os cartões
 | YouTube | O catálogo abre dentro da sala: prateleiras (Em alta, Músicas, Trailers, Humor, Games, Podcasts, Esportes, Documentários, Receitas) e a busca. Tocou no vídeo, começa para os dois. Colar um link na busca também vale, e `/watchparty nome do vídeo` continua funcionando |
 | Netflix e HBO Max | Abre a Netflix ou a HBO Max de verdade (no celular, o app), na conta de cada um. Escolha lá e dê o play: com a extensão no computador, a sala começa sozinha para os dois. Veja abaixo |
 | Twitch | O nome do canal (ao vivo; aí só dá para pausar, não avançar) ou o link de um vídeo gravado (`twitch.tv/videos/…`) |
-| Do aparelho | Cada um escolhe o mesmo arquivo no próprio aparelho; nada sobe para o servidor |
+| Do aparelho | Um escolhe o arquivo (MP4, WebM ou MOV, até 4 GB) e ele sobe para o servidor, com a porcentagem na tela; quando termina, começa para os dois, que assistem de lá. Quem mandou pode sair que o vídeo continua |
 
 - **Vistos por vocês:** o que vocês já assistiram juntos fica numa fileira no começo do catálogo (e na tela de cada serviço). Um toque assiste de novo, para os dois.
 - Quando um vídeo começa, a sala abre para os dois. Cada um sai quando quiser (o vídeo continua para o outro, e o botão de TV fica com um pontinho vermelho). O **X** embaixo do vídeo para para os dois.
 - Começar um vídeo pausa a música do bot. Clipes da Twitch não têm como sincronizar.
+- **Vídeo do aparelho no servidor:** ele sobe em pedaços de até 8 MB (ou menos, se o `post_max_size` da hospedagem for menor) e fica em disco, na pasta `filmes/` (criada sozinha ao lado do `index.php`, fechada para quem tentar abrir direto), não no banco. A internet caiu no meio: o envio continua de onde parou. O arquivo sai do servidor quando a sala troca de vídeo ou fecha o vídeo; um envio largado no meio sai em até um dia. Confira se a hospedagem tem espaço em disco para o tamanho dos filmes.
 
 ### Netflix e HBO Max
 

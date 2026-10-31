@@ -494,7 +494,6 @@ function connect(token, animate) {
     applyWatch(state);
     watchNotice(action);
   });
-  socket.on("watch-rtc", onWatchSignal);
   // Nosso cantinho: o dia de cada um, agenda, sonhos, cartinhas.
   socket.on("us", applyUs);
 
@@ -548,6 +547,7 @@ function applyHistory(payload) {
   reads = payload.reads || {};
   gifKey = payload.gifKey || "";
   fileMax = payload.fileMax || 0;
+  watchChunk = payload.watchChunk || 0;
   transcribeOn = Boolean(payload.transcribe);
   syncTheme(payload.theme);
   applyWallpaper(payload.wallpaper);
@@ -4367,16 +4367,10 @@ window.addEventListener("keydown", (event) => {
 
 // O que vem do servidor: o vídeo (now), se está passando e em que segundo estava em updatedAt (relógio dele).
 let watch = { now: null, playing: false, position: 0, updatedAt: 0 };
-// Vídeo do aparelho: só quem escolheu tem o arquivo (nada sobe para o servidor) e transmite para a outra pessoa, direto
-// entre os navegadores (WebRTC, como na chamada; o servidor só passa os recados). Quem também tiver o arquivo toca o seu.
-let watchFile = null;
-// Quem transmite: a conexão de quem assiste → { pc, chain }. Quem assiste: { uid, at, pc, chain, from, stream }.
-const watchShares = new Map();
-let watchFeed = null;
-let watchNoShare = null;
-let watchFileFor = null;
-let watchStarting = false;
-let watchPicking = false;
+// Vídeo do aparelho: quem escolhe manda o arquivo para o servidor (em pedaços) e cada um assiste de lá.
+// O envio em andamento: { file, xhr, cancelled }. Pedaço que o servidor aceita (vem com o histórico).
+let watchUpload = null;
+let watchChunk = 0;
 let watchBlocked = false;
 let watchSeeking = false;
 let watchBlockTimer = 0;
@@ -4417,12 +4411,8 @@ const catalogCache = new Map();
 const catalogVideos = new Map();
 let countdownAt = 0;
 let countdownTimer = 0;
-const hasWatchFile = (item) => Boolean(watchFile && (watchFileFor === item.uid || watchFile.name === item.name));
-
 const watchPlayer = createWatchPlayer($("#watch-host"), {
   onReady: () => {
-    // O vídeo do aparelho abriu aqui: quem está esperando a transmissão já pode pedir.
-    if (watch.now?.source === "local" && hasWatchFile(watch.now) && !watchPlayer.stream) socket?.emit("watch-rtc", { op: "ready", uid: watch.now.uid });
     syncWatch();
     checkWatchBlocked();
   },
@@ -4438,121 +4428,8 @@ const watchPlayer = createWatchPlayer($("#watch-host"), {
   },
   onError: (uid, text) => {
     if (watch.now?.uid === uid) toast(text, "error");
-  },
-  // Fechou o vídeo daqui: quem assistia pela transmissão fica sabendo e volta a pedir.
-  onClose: () => {
-    for (const conn of [...watchShares.keys()]) {
-      socket?.emit("watch-rtc", { op: "bye", to: conn });
-      dropWatchShare(conn);
-    }
   }
 });
-
-// Os recados de cada conexão, na ordem em que chegam (o ICE não pode passar na frente da oferta ou da resposta).
-const rtcStep = (link, step) => (link.chain = link.chain.then(step).catch(() => {}));
-
-function onWatchSignal(signal) {
-  const { op, from } = signal;
-  if (op === "want") return shareWatch(signal);
-  if (op === "offer") return receiveWatchFeed(signal);
-  if (op === "ready" && watchFeed?.uid === signal.uid && !watchFeed.stream) {
-    watchFeed.at = 0;
-    return syncWatch();
-  }
-  if (op === "cant" && watch.now?.uid === signal.uid && watchNoShare !== signal.uid) {
-    watchNoShare = signal.uid;
-    return toast(`O navegador de ${watch.now.by} não transmite vídeo (iPhone ou Firefox). Abra lá no Chrome ou no Edge, ou escolha o mesmo arquivo aqui.`, "error");
-  }
-  const share = watchShares.get(from);
-  const link = share || (watchFeed?.from === from ? watchFeed : null);
-  if (!link?.pc) return;
-  if (op === "answer" && share) rtcStep(share, () => share.pc.setRemoteDescription(signal.sdp));
-  if (op === "ice") rtcStep(link, () => link.pc.addIceCandidate(signal.candidate));
-  if (op === "bye" && link === watchFeed) {
-    closeWatchFeed();
-    paintWatch();
-    syncWatch();
-  }
-}
-
-// Quem tem o arquivo: a outra pessoa pediu, o vídeo daqui vira transmissão para a conexão dela.
-function shareWatch({ uid, from }) {
-  const item = watch.now;
-  if (!item || item.uid !== uid || !hasWatchFile(item) || watchPlayer.uid !== uid || !watchPlayer.ready) return;
-  const stream = watchPlayer.capture();
-  if (!stream) {
-    if (watchNoShare !== uid) toast("Este navegador não transmite o vídeo (use o Chrome ou o Edge). Sem isso, a outra pessoa precisa escolher o mesmo arquivo.", "error");
-    watchNoShare = uid;
-    return socket?.emit("watch-rtc", { op: "cant", uid, to: from });
-  }
-  dropWatchShare(from);
-  const pc = new RTCPeerConnection(rtcConfig);
-  const share = { pc, chain: Promise.resolve() };
-  watchShares.set(from, share);
-  const senders = Object.fromEntries(["video", "audio"].map((kind) => [kind, pc.addTransceiver(kind, { direction: "sendonly" }).sender]));
-  // As faixas do vídeo podem aparecer só depois (quando ele carrega): os canais já estão abertos, é só trocar.
-  const put = (track) => senders[track.kind]?.replaceTrack(track).catch(() => {});
-  stream.getTracks().forEach(put);
-  stream.addEventListener("addtrack", ({ track }) => put(track));
-  pc.onicecandidate = ({ candidate }) => candidate && socket?.emit("watch-rtc", { op: "ice", candidate, to: from });
-  pc.onconnectionstatechange = () => pc.connectionState === "failed" && watchShares.get(from) === share && dropWatchShare(from);
-  rtcStep(share, async () => {
-    await pc.setLocalDescription(await pc.createOffer());
-    socket?.emit("watch-rtc", { op: "offer", uid, sdp: pc.localDescription, to: from });
-    // Filme pede mais que os 2,5 Mbps que o navegador usa de padrão (a rede ainda decide quanto passa).
-    const params = senders.video.getParameters();
-    if (params.encodings?.length) {
-      params.encodings[0].maxBitrate = 8e6;
-      await senders.video.setParameters(params);
-    }
-  });
-}
-
-function dropWatchShare(conn) {
-  const share = watchShares.get(conn);
-  if (!share) return;
-  share.pc.getSenders().forEach((sender) => sender.track?.stop());
-  share.pc.close();
-  watchShares.delete(conn);
-}
-
-// Quem não tem o arquivo pede a transmissão, de novo a cada 8 s até chegar (quem tem pode estar fora da sala).
-function askWatchFeed(item) {
-  if (watchFeed?.uid === item.uid && (watchFeed.stream || Date.now() - watchFeed.at < 8000)) return;
-  closeWatchFeed();
-  watchFeed = { uid: item.uid, at: Date.now(), pc: null, chain: Promise.resolve(), from: "", stream: null };
-  socket?.emit("watch-rtc", { op: "want", uid: item.uid });
-}
-
-function receiveWatchFeed({ uid, sdp, from }) {
-  const item = watch.now;
-  if (!watchView || !item || item.uid !== uid || hasWatchFile(item)) return;
-  closeWatchFeed();
-  const pc = new RTCPeerConnection(rtcConfig);
-  const feed = watchFeed = { uid, at: Date.now(), pc, chain: Promise.resolve(), from, stream: null };
-  pc.onicecandidate = ({ candidate }) => candidate && socket?.emit("watch-rtc", { op: "ice", candidate, to: from });
-  pc.onconnectionstatechange = () => {
-    if (feed !== watchFeed || pc.connectionState !== "failed") return;
-    closeWatchFeed();
-    paintWatch();
-  };
-  rtcStep(feed, async () => {
-    await pc.setRemoteDescription(sdp);
-    await pc.setLocalDescription(await pc.createAnswer());
-    socket?.emit("watch-rtc", { op: "answer", sdp: pc.localDescription, to: from });
-    if (feed !== watchFeed) return;
-    feed.stream = new MediaStream(pc.getReceivers().map((receiver) => receiver.track));
-    paintWatch();
-    syncWatch();
-  });
-}
-
-function closeWatchFeed() {
-  if (!watchFeed) return;
-  watchFeed.pc?.close();
-  if (watchFeed.stream && watchPlayer.stream === watchFeed.stream) watchPlayer.destroy();
-  watchFeed = null;
-}
 
 // O navegador barrou o som: aparece o "Toque no play" (no iPhone, o toque tem que ser no próprio player).
 function checkWatchBlocked() {
@@ -4567,13 +4444,8 @@ function checkWatchBlocked() {
 // Acompanha o servidor: troca de vídeo, play/pause e acerta o tempo se ficou mais de 2 s fora.
 function syncWatch() {
   const item = watch.now;
-  // Vídeo do aparelho sem o arquivo aqui: assiste pela transmissão de quem tem.
-  const remote = Boolean(watchView && item?.source === "local" && !hasWatchFile(item));
-  if (remote) askWatchFeed(item);
-  else closeWatchFeed();
-  const feed = remote ? watchFeed?.stream : null;
-  if (!watchView || !item || streaming(item) || (item.source === "local" && !hasWatchFile(item) && !feed)) return watchPlayer.destroy();
-  if (watchPlayer.uid !== item.uid) return watchPlayer.open(item, watchAt, () => watch.playing, watchFile, feed);
+  if (!watchView || !item || streaming(item)) return watchPlayer.destroy();
+  if (watchPlayer.uid !== item.uid) return watchPlayer.open(item, watchAt, () => watch.playing);
   if (!watchPlayer.ready) return;
   if (watch.playing) {
     if (!watchPlayer.live && Math.abs(watchPlayer.time() - watchAt()) > 2) watchPlayer.seek(watchAt());
@@ -4606,9 +4478,6 @@ function applyWatch(state, measured = false, join = true) {
   watch = state;
   if (started) {
     watchBlocked = false;
-    // Quem começou um vídeo do aparelho já está com o arquivo.
-    if (watchStarting && state.now.source === "local" && state.now.by === me) watchFileFor = state.now.uid;
-    watchStarting = false;
     // Quando o vídeo acabar, o catálogo volta do começo (os serviços).
     watchScreen = "home";
   }
@@ -4679,7 +4548,7 @@ function paintWatchPicker() {
   const chooser = watchChooser();
   const notice = $("#watch-browsing");
   notice.classList.toggle("hidden", !chooser);
-  if (chooser) notice.textContent = `${chooser.name} está escolhendo ${WATCH_WHERE[chooser.service] || "algo"}…`;
+  if (chooser) notice.textContent = chooser.service === "local" ? `${chooser.name} está enviando um vídeo do aparelho…` : `${chooser.name} está escolhendo ${WATCH_WHERE[chooser.service] || "algo"}…`;
   const recent = watch.recent || [];
   $("#watch-recent").classList.toggle("hidden", !recent.length);
   paintWatchRow($("#watch-recent-list"), recent);
@@ -4839,13 +4708,11 @@ function paintWatch() {
   const service = item ? STREAMING[item.source] : null;
   $("#watch-stream").classList.toggle("hidden", !service);
   if (!item) {
-    $("#watch-need").classList.add("hidden");
     $("#watch-unblock").classList.add("hidden");
     paintWatchPicker();
     return setWatchExpanded(false);
   }
   watchPanel.classList.remove("browsing");
-  const needFile = item.source === "local" && !hasWatchFile(item) && !watchFeed?.stream;
   const live = item.source === "twitch" && item.kind === "channel";
   if (service) {
     const mark = $("#watch-stream-mark");
@@ -4857,9 +4724,7 @@ function paintWatch() {
     open.querySelector("span").textContent = `Abrir na ${service.name}`;
     $("#watch-stream-note").textContent = WATCH_HINT.streaming;
   }
-  $("#watch-need").classList.toggle("hidden", !needFile);
-  $("#watch-need-name").textContent = item.name || "";
-  $("#watch-unblock").classList.toggle("hidden", !watchBlocked || needFile);
+  $("#watch-unblock").classList.toggle("hidden", !watchBlocked);
   watchStage.classList.toggle("blocked", watchBlocked);
   watchPanel.classList.toggle("live", live);
   $("#watch-live").classList.toggle("hidden", !live);
@@ -4904,7 +4769,6 @@ function watchCommand(op, extra = {}) {
   socket.timeout(20000).emit("watch", { op, ...extra }, (error, result) => {
     if (error) return toast("Não deu para mexer no vídeo agora. Tente de novo.", "error");
     if (!result?.ok) {
-      watchStarting = false;
       sound.play("error");
       return toast(result?.error || "Não deu certo.", "error");
     }
@@ -4925,9 +4789,12 @@ function watchNotice(action) {
   else if (action.op === "stop") toast(`${action.by} fechou o vídeo`, "music", "x");
 }
 
-// Vídeo do aparelho: lê a duração e começa para os dois (a outra pessoa assiste pela transmissão daqui).
-async function startLocalVideo(file) {
-  if (!file.type.startsWith("video/") && !/\.(mp4|m4v|mov|webm|mkv)$/i.test(file.name)) return toast("Escolha um arquivo de vídeo.", "error");
+// Vídeo do aparelho: lê a duração, manda o arquivo para o servidor em pedaços e começa para os dois. Cada um assiste de
+// lá: quem mandou pode sair que o vídeo continua. A internet caiu no meio: tenta de novo de onde o servidor parou.
+async function uploadWatchVideo(file) {
+  if (!file.type.startsWith("video/") && !/.(mp4|m4v|mov|webm|mkv)$/i.test(file.name)) return toast("Escolha um arquivo de vídeo.", "error");
+  if (watchUpload) return toast("Já tem um vídeo subindo.", "error");
+  if (!socket?.connected || !watchChunk) return toast("Sem conexão agora. Tente de novo em instantes.", "error");
   const duration = await new Promise((resolve) => {
     const probe = document.createElement("video");
     const url = URL.createObjectURL(file);
@@ -4944,27 +4811,91 @@ async function startLocalVideo(file) {
     setTimeout(() => finish(0), 6000);
     probe.src = url;
   });
-  watchFile = file;
-  watchFileFor = null;
-  watchStarting = true;
-  watchCommand("start", { local: { name: file.name, size: file.size, duration } });
+  const upload = watchUpload = { file, room, key: "", sent: 0, xhr: null, cancelled: false, told: 0 };
+  paintWatchUpload();
+  let failures = 0;
+  try {
+    while (upload.sent < file.size) {
+      // A outra pessoa vê "Ana está enviando um vídeo…" (o aviso vale 10 minutos: renova no caminho).
+      if (Date.now() - upload.told > 300000) {
+        upload.told = Date.now();
+        socket?.emit("watch", { op: "browse", service: "local" });
+      }
+      const result = await sendWatchChunk(upload);
+      if (upload.cancelled) return;
+      if (result.key) upload.key = result.key;
+      if (Number.isFinite(result.received)) upload.sent = result.received;
+      if (result.ok) {
+        failures = 0;
+        continue;
+      }
+      if (!result.retry || ++failures > 5) throw new Error(result.error || "O vídeo não subiu. Tente de novo.");
+      await new Promise((resolve) => setTimeout(resolve, 2000 * failures));
+    }
+    watchCommand("start", { local: { key: upload.key, duration } });
+  } catch (error) {
+    sound.play("error");
+    toast(error.message, "error");
+    socket?.emit("watch", { op: "browse", service: "" });
+  } finally {
+    if (watchUpload === upload) watchUpload = null;
+    paintWatchUpload();
+  }
 }
+
+// Um pedaço: o servidor responde quanto já tem (received). Internet ou servidor fora do ar: retry (tenta de novo);
+// recusa de verdade (não é vídeo, grande demais): para.
+function sendWatchChunk(upload) {
+  return new Promise((resolve) => {
+    const start = upload.sent;
+    const xhr = upload.xhr = new XMLHttpRequest();
+    xhr.open("POST", apiUrl("watch-upload"));
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.setRequestHeader("X-Potato-Token", socket.auth.token);
+    xhr.setRequestHeader("X-Potato-Room", upload.room || "");
+    xhr.setRequestHeader("X-Potato-Name", encodeURIComponent(upload.file.name));
+    xhr.setRequestHeader("X-Potato-Size", String(upload.file.size));
+    xhr.setRequestHeader("X-Potato-Key", upload.key);
+    xhr.setRequestHeader("X-Potato-Offset", String(start));
+    xhr.upload.onprogress = (event) => paintWatchUpload(start + event.loaded);
+    xhr.onload = () => {
+      let result = null;
+      try { result = JSON.parse(xhr.responseText); } catch {}
+      if (xhr.status === 200 && result) return resolve({ ...result, retry: !result.ok && Boolean(result.key) });
+      resolve({ ok: false, error: result?.error, retry: xhr.status === 0 || xhr.status >= 500 });
+    };
+    xhr.onerror = () => resolve({ ok: false, retry: true });
+    xhr.onabort = () => resolve({ ok: false, retry: false });
+    xhr.send(upload.file.slice(start, start + watchChunk));
+  });
+}
+
+function cancelWatchUpload() {
+  if (!watchUpload) return;
+  watchUpload.cancelled = true;
+  watchUpload.xhr?.abort();
+  socket?.emit("watch", { op: "browse", service: "" });
+}
+
+function paintWatchUpload(sent = watchUpload?.sent || 0) {
+  const upload = watchUpload;
+  $("#watch-upload").classList.toggle("hidden", !upload);
+  if (!upload) return;
+  const total = upload.file.size;
+  $("#watch-upload-name").textContent = upload.file.name;
+  $("#watch-upload-text").textContent = `Subindo para o servidor: ${Math.floor((sent / total) * 100)}% (${formatSize(sent)} de ${formatSize(total)}). Quando terminar, começa para os dois.`;
+  $("#watch-upload-bar").value = sent / total;
+}
+
+// Fechar a aba no meio do envio perde o que já subiu: o navegador pergunta antes.
+window.addEventListener("beforeunload", (event) => {
+  if (watchUpload) event.preventDefault();
+});
 
 $("#pick-watch").addEventListener("change", (event) => {
   const file = event.target.files[0];
   event.target.value = "";
-  if (!file) return;
-  // Entrando num vídeo que a outra pessoa começou: só guarda o arquivo daqui.
-  if (watchPicking && watch.now?.source === "local") {
-    watchPicking = false;
-    watchFile = file;
-    watchFileFor = watch.now.uid;
-    if (watch.now.size && file.size !== watch.now.size) toast("Esse arquivo é diferente do da outra pessoa: as cenas podem não bater.", "info");
-    paintWatch();
-    return syncWatch();
-  }
-  watchPicking = false;
-  startLocalVideo(file);
+  if (file) uploadWatchVideo(file);
 });
 
 // Tela cheia: no computador e no Android, de verdade; no iPhone, ocupa a tela do navegador.
@@ -5031,10 +4962,7 @@ watchPanel.addEventListener("click", async (event) => {
   // Sem a extensão (no celular): já escolheram lá e deram o play; a sala começa a contar o tempo.
   if (target.closest("#watch-launch-start")) return watchCommand("start", { service: watchScreen, query: "" });
   if (target.closest("#watch-unblock")) return watchListen();
-  if (target.closest("#watch-pick")) {
-    watchPicking = true;
-    return $("#pick-watch").click();
-  }
+  if (target.closest("#watch-upload-cancel")) return cancelWatchUpload();
   if (target.closest("#watch-full")) return setWatchExpanded(!watchPanel.classList.contains("expanded"));
   if (target.closest("#watch-toggle")) {
     if (watchBlocked) return watchListen();

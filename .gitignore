@@ -9,3 +9,6 @@ android/**/build/
 *.apk
 
 data/.token-secret
+
+# Vídeos da Watch Party enviados para o servidor (criados pelo site).
+versao-php/site/filmes/
