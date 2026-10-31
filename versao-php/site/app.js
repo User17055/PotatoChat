@@ -4421,6 +4421,8 @@ const hasWatchFile = (item) => Boolean(watchFile && (watchFileFor === item.uid |
 
 const watchPlayer = createWatchPlayer($("#watch-host"), {
   onReady: () => {
+    // O vídeo do aparelho abriu aqui: quem está esperando a transmissão já pode pedir.
+    if (watch.now?.source === "local" && hasWatchFile(watch.now) && !watchPlayer.stream) socket?.emit("watch-rtc", { op: "ready", uid: watch.now.uid });
     syncWatch();
     checkWatchBlocked();
   },
@@ -4453,6 +4455,14 @@ function onWatchSignal(signal) {
   const { op, from } = signal;
   if (op === "want") return shareWatch(signal);
   if (op === "offer") return receiveWatchFeed(signal);
+  if (op === "ready" && watchFeed?.uid === signal.uid && !watchFeed.stream) {
+    watchFeed.at = 0;
+    return syncWatch();
+  }
+  if (op === "cant" && watch.now?.uid === signal.uid && watchNoShare !== signal.uid) {
+    watchNoShare = signal.uid;
+    return toast(`O navegador de ${watch.now.by} não transmite vídeo (iPhone ou Firefox). Abra lá no Chrome ou no Edge, ou escolha o mesmo arquivo aqui.`, "error");
+  }
   const share = watchShares.get(from);
   const link = share || (watchFeed?.from === from ? watchFeed : null);
   if (!link?.pc) return;
@@ -4473,7 +4483,7 @@ function shareWatch({ uid, from }) {
   if (!stream) {
     if (watchNoShare !== uid) toast("Este navegador não transmite o vídeo (use o Chrome ou o Edge). Sem isso, a outra pessoa precisa escolher o mesmo arquivo.", "error");
     watchNoShare = uid;
-    return;
+    return socket?.emit("watch-rtc", { op: "cant", uid, to: from });
   }
   dropWatchShare(from);
   const pc = new RTCPeerConnection(rtcConfig);
