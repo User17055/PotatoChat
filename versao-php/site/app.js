@@ -5711,7 +5711,6 @@ function paintStage() {
   const peerLive = Boolean(remoteState.screen && remote.screen);
   const hasCamera = Boolean(local.cam || (remoteState.cam && remote.cam));
   callPanel.classList.toggle("voice-only", !hasCamera && !peerLive);
-  $("#call-heading").textContent = peerLive || local.screen ? "Transmissão de tela" : hasCamera ? "Chamada de vídeo" : "Chamada de voz";
 
   // Só a transmissão recebida aparece: exibir a própria tela cria um espelho infinito.
   stage.classList.toggle("has-stream", peerLive);

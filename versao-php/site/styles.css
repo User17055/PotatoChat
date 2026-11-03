@@ -1201,10 +1201,8 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
 .stage.has-stream .person-tile.has-video.live { box-shadow: 0 0 0 2px var(--live), 0 10px 24px #000a; }
 
 /* Barra de controles. */
-.call-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--line-soft); background: color-mix(in srgb, var(--stage-2) 80%, transparent); }
+.call-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--line-soft); background: color-mix(in srgb, var(--stage-2) 80%, transparent); }
 .call-info { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--muted); font-size: 12.5px; font-weight: 600; }
-.call-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
-.call-info.live .call-dot { background: var(--speak); box-shadow: 0 0 0 3px #3ba55d33; }
 .call-info.live #call-status { color: var(--speak); }
 #call-status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .call-timer { color: var(--faint); font-variant-numeric: tabular-nums; }
@@ -2396,9 +2394,13 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
 .call-dock .hangup:hover { background: var(--live); color: #fff; }
 #call-dock-mic.is-off { background: #ff6b5e26; color: var(--danger); }
 .call-minimized #call-panel { display: none !important; }
-.call-head { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 12px; }
-.call-heading { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--muted); font-size: 11px; font-weight: 650; }
-.call-minimize { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); box-shadow: 0 2px 5px #0002; color: var(--ink); font-size: 11px; font-weight: 600; transition: background .18s, border-color .18s; }
+.call-head { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; }
+.call-head .call-info { flex: 1; width: auto; min-width: 0; justify-content: flex-start; gap: 8px; flex-wrap: wrap; }
+.call-head #call-status { max-width: 100%; font-size: 12px; font-weight: 650; }
+.call-head .call-timer { flex: none; padding: 3px 7px; border-radius: 7px; background: var(--hover); color: var(--muted); font-size: 10px; }
+.call-head .call-timer:empty { display: none; }
+.call-head .live-pill { max-width: 100%; padding: 3px 7px; font-size: 10px; }
+.call-minimize { display: flex; flex: none; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 6px 10px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--hover); color: var(--muted); font-size: 11px; font-weight: 600; transition: background .18s, border-color .18s; }
 .call-minimize:hover { background: var(--surface-3); border-color: var(--muted); }
 .call-minimize .icon { width: 16px; height: 16px; color: var(--muted); }
 .call-dock-open:focus-visible, .call-dock .round:focus-visible, .call-minimize:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
