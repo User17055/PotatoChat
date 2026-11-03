@@ -14,7 +14,9 @@ O script [setup-turn.sh](setup-turn.sh) instala o serviço e configura um vhost 
 
 ## Integração
 
-PHP: publique o arquivo privado `versao-php/site/turn.config.php` junto com a atualização do site, no mesmo diretório de `config.php`. Ele foi criado localmente e está ignorado pelo Git. O exemplo público está em `turn.config.example.php`. A regra `.htaccess` bloqueia acesso HTTP direto ao arquivo privado.
+PHP: o fluxo de produção é **Git → GitHub Actions → FTP**. O Secret `POTATO_TURN_CONFIG_B64` guarda o conteúdo de `turn.config.php` codificado em Base64. O workflow executa `ops/prepare-turn-config.py` para gerar esse arquivo no runner antes de enviar o site para `/public_html/potato/`. Se o Secret estiver ausente ou inválido, o deploy para com uma mensagem de erro, evitando publicar a atualização sem TURN. Não é necessário ZIP nem envio manual.
+
+O arquivo privado `versao-php/site/turn.config.php` continua ignorado pelo Git; o segredo do coturn não entra nos commits. O exemplo público está em `turn.config.example.php`. A regra `.htaccess` bloqueia acesso HTTP direto ao arquivo privado. Para atualizar o Secret, codifique o conteúdo do arquivo privado em Base64 e salve-o em **Settings → Secrets and variables → Actions → POTATO_TURN_CONFIG_B64**. Base64 só codifica o conteúdo; a proteção vem do armazenamento como Secret do GitHub.
 
 Node: a configuração privada fica no `.env`, pelas variáveis `TURN_URLS`, `TURN_SECRET`, `TURN_TTL` e `TURN_ONLY`. Também são aceitos `TURN_USERNAME` e `TURN_PASSWORD` para provedores com credenciais fixas.
 
