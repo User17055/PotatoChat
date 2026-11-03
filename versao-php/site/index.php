@@ -270,9 +270,9 @@ function asset(string $file): string
     <main id="chat-view" class="app-shell hidden" data-tab="chat">
       <section id="call-dock" class="call-dock hidden" aria-label="Chamada em andamento">
         <button id="call-dock-open" class="call-dock-open" type="button" aria-controls="call-panel" aria-expanded="false">
-          <span class="call-dock-icon" aria-hidden="true"><svg class="icon"><use href="#i-headphones" /></svg></span>
-          <span class="call-dock-copy"><strong id="call-dock-name"></strong><span><i class="call-dot" aria-hidden="true"></i><span id="call-dock-status">Voltar à chamada</span><time id="call-dock-timer" class="call-timer"></time></span></span>
-          <svg class="icon call-dock-arrow" aria-hidden="true"><use href="#i-chevron-right" /></svg>
+          <span id="call-dock-avatar" class="avatar call-dock-avatar" aria-hidden="true">?</span>
+          <span class="call-dock-copy"><span class="call-dock-meta"><span id="call-dock-status">Em chamada</span><time id="call-dock-timer" class="call-timer"></time></span><strong id="call-dock-name"></strong></span>
+          <span class="call-dock-return" aria-hidden="true"><span>Voltar à chamada</span><svg class="icon"><use href="#i-chevron-up" /></svg></span>
         </button>
         <div class="call-dock-actions">
           <button id="call-dock-mic" class="round swap" type="button" aria-label="Silenciar microfone">
@@ -357,7 +357,7 @@ function asset(string $file): string
         <div id="call-panel" class="call-panel hidden">
           <div class="call-head">
             <span class="call-heading"><svg class="icon" aria-hidden="true"><use href="#i-headphones" /></svg><span id="call-heading">Chamada de voz</span></span>
-            <button id="call-minimize" class="call-minimize" type="button" title="Recolher chamada e continuar navegando" aria-label="Recolher chamada" aria-controls="call-panel"><span>Recolher</span><svg class="icon" aria-hidden="true"><use href="#i-chevron-down" /></svg></button>
+            <button id="call-minimize" class="call-minimize" type="button" title="Recolher chamada e continuar navegando" aria-label="Recolher chamada" aria-controls="call-panel"><svg class="icon" aria-hidden="true"><use href="#i-chevron-down" /></svg><span>Recolher</span></button>
           </div>
           <div id="stage" class="stage">
             <div id="stream-tile" class="tile stream hidden">

@@ -5613,8 +5613,9 @@ function paintCallDock() {
   chatView.classList.toggle("in-call", focused);
   if (!active) return;
   callDock.classList.toggle("connected", active.connected && peerConnection?.connectionState === "connected");
-  $("#call-dock-name").textContent = `Chamada com ${active.name}`;
-  $("#call-dock-status").textContent = callStatus.textContent.startsWith("Em chamada com") ? "Em chamada · Toque para voltar" : callStatus.textContent;
+  paintAvatar($("#call-dock-avatar"), active.name);
+  $("#call-dock-name").textContent = active.name;
+  $("#call-dock-status").textContent = callStatus.textContent.startsWith("Em chamada com") ? "Em chamada" : callStatus.textContent;
   $("#call-dock-timer").textContent = callTimer.textContent;
   $("#call-dock-open").setAttribute("aria-label", `Voltar à chamada com ${active.name}`);
   setToggle(dockMic, micOn(), "Silenciar microfone", "Ativar microfone");
