@@ -97,13 +97,20 @@ test("ponte Android encerra as faixas quando o sistema para a projeção e ignor
   const originals = Object.fromEntries(["window", "RTCPeerConnection", "MediaStream"].map((key) => [key, globalThis[key]]));
   const messages = [];
   globalThis.window = Object.assign(new EventTarget(), { __potatoScreenCapture: true, PotatoAndroid: { postMessage: (raw) => messages.push(JSON.parse(raw)) } });
-  class Track extends EventTarget { stop() { this.stopped = true; } }
+  class Track extends EventTarget { constructor(kind = "video") { super(); this.kind = kind; } stop() { this.stopped = true; } }
   class NativePeer extends EventTarget {
     iceGatheringState = "complete";
-    addTransceiver() {}
+    kinds = [];
+    addTransceiver(kind) { this.kinds.push(kind); }
     async createOffer() { return { type: "offer", sdp: "local-only" }; }
     async setLocalDescription(description) { this.localDescription = description; }
-    async setRemoteDescription() { this.track = new Track(); this.ontrack({ track: this.track }); }
+    async setRemoteDescription() {
+      for (const kind of this.kinds) {
+        if (kind === "audio" && this.noAudio) continue;
+        if (kind === "audio") await tick(); // Vídeo chega primeiro: a stream não pode ser entregue antes do áudio.
+        this.ontrack({ track: new Track(kind) });
+      }
+    }
     close() { this.closed = true; }
   }
   globalThis.RTCPeerConnection = NativePeer;
@@ -127,6 +134,21 @@ test("ponte Android encerra as faixas quando o sistema para a projeção e ignor
     native(request.id, "stopped"); // A sessão anterior não pode parar a nova.
     native(current.id, "answer", "answer");
     assert.equal((await second).getTracks()[0].stopped, undefined);
+    bridge.stopNativeScreen();
+    window.__potatoScreenAudio = true;
+    const withAudio = bridge.startNativeScreen({ height: 1080, frameRate: 30 }, true);
+    await tick();
+    const audioRequest = messages.filter((item) => item.type === "screen-start").at(-1);
+    assert.equal(audioRequest.audio, true);
+    window.dispatchEvent(new CustomEvent("potato-screen", { detail: { id: audioRequest.id, event: "answer", value: "answer", audio: true } }));
+    assert.deepEqual((await withAudio).getTracks().map((track) => track.kind), ["video", "audio"]);
+    bridge.stopNativeScreen();
+    const videoOnly = bridge.startNativeScreen({ height: 720, frameRate: 30 }, false);
+    await tick();
+    const silentRequest = messages.filter((item) => item.type === "screen-start").at(-1);
+    assert.equal(silentRequest.audio, false);
+    native(silentRequest.id, "answer", "answer");
+    assert.deepEqual((await videoOnly).getTracks().map((track) => track.kind), ["video"]);
     bridge.stopNativeScreen();
     const canceled = bridge.startNativeScreen({ height: 720, frameRate: 30 });
     await tick();

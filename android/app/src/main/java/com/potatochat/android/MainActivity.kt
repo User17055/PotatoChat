@@ -57,6 +57,9 @@ class MainActivity : ComponentActivity() {
     private var callState: CallService.State? = null
     private var screenActive = false
     private var peerScreenActive = false
+    private var peerVideoActive = false
+    private var pipRatio = Rational(16, 9)
+    private var pipPending = false
     private var pendingScreen: JSONObject? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
@@ -71,6 +74,7 @@ class MainActivity : ComponentActivity() {
                 ContextCompat.startForegroundService(this, Intent(this, ScreenShareService::class.java)
                     .putExtra("id", id).putExtra("sdp", request.optString("sdp"))
                     .putExtra("height", request.optInt("height", 720)).putExtra("fps", request.optInt("fps", 30))
+                    .putExtra("audio", request.optBoolean("audio", false))
                     .putExtra("permission", result.data))
             }.onFailure {
                 screenEvent(JSONObject().put("id", id).put("event", "error").put("value", "Não foi possível iniciar a captura."))
@@ -349,7 +353,16 @@ class MainActivity : ComponentActivity() {
                 if (pendingScreen?.optString("id") == message.optString("id")) pendingScreen = null
                 stopService(Intent(this, ScreenShareService::class.java))
             }
-            "pip" -> enterCallPip()
+            "pip" -> if (!enterCallPip()) js("window.potatoCall?.('pip-unavailable')")
+            "pip-shape" -> {
+                val width = message.optInt("width")
+                val height = message.optInt("height")
+                if (width > 0 && height > 0) {
+                    // O Android aceita proporções entre 1:2,39 e 2,39:1.
+                    pipRatio = Rational(((width.toDouble() / height).coerceIn(1.0 / 2.39, 2.39) * 10000).toInt(), 10000)
+                    updatePip()
+                }
+            }
             // O convite (Adicionar pessoa): a janela de compartilhar do Android (WhatsApp, Instagram…).
             "share" -> runCatching {
                 val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, message.optString("text"))
@@ -364,6 +377,8 @@ class MainActivity : ComponentActivity() {
             callState = null
             screenActive = false
             peerScreenActive = false
+            peerVideoActive = false
+            pipRatio = Rational(16, 9)
             pendingScreen = null
             stopService(Intent(this, ScreenShareService::class.java))
             CallService.stop(this)
@@ -379,6 +394,7 @@ class MainActivity : ComponentActivity() {
         callState = state
         screenActive = message.optBoolean("screen")
         peerScreenActive = message.optBoolean("peerScreen")
+        peerVideoActive = message.optBoolean("peerVideo", peerScreenActive)
         startCallService(state)
         updatePip()
     }
@@ -390,9 +406,10 @@ class MainActivity : ComponentActivity() {
     private fun pipParams(): PictureInPictureParams {
         val hangup = PendingIntent.getService(this, 73, Intent(this, CallService::class.java).setAction(CallService.ACTION_HANGUP), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val action = RemoteAction(Icon.createWithResource(this, R.drawable.ic_notification), "Desligar", "Encerrar chamada", hangup)
-        return PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).setActions(listOf(action)).apply {
+        return PictureInPictureParams.Builder().setAspectRatio(pipRatio).setActions(listOf(action)).apply {
             if (Build.VERSION.SDK_INT >= 31) {
-                setAutoEnterEnabled(callState != null && (screenActive || peerScreenActive) && pendingScreen == null)
+                // Preparamos a superfície de vídeo antes de entrar, evitando miniaturizar o site inteiro.
+                setAutoEnterEnabled(false)
                 setSeamlessResizeEnabled(false)
             }
         }.build()
@@ -403,14 +420,22 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun enterCallPip(): Boolean {
-        if (callState == null || pendingScreen != null || !packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) return false
-        if (isInPictureInPictureMode) return true
-        return runCatching { enterPictureInPictureMode(pipParams()) }.getOrDefault(false)
+        if (callState == null || !peerVideoActive || pendingScreen != null || !packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) return false
+        if (isInPictureInPictureMode || pipPending) return true
+        pipPending = true
+        webView.evaluateJavascript("window.potatoCall?.('pip', true)") {
+            webView.postOnAnimation {
+                pipPending = false
+                val entered = callState != null && peerVideoActive && pendingScreen == null && runCatching { enterPictureInPictureMode(pipParams()) }.getOrDefault(false)
+                if (!entered) js("window.potatoCall?.('pip', false)")
+            }
+        }
+        return true
     }
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (screenActive || peerScreenActive) enterCallPip()
+        if (peerVideoActive) enterCallPip()
     }
 
     override fun onPictureInPictureModeChanged(inPip: Boolean, newConfig: Configuration) {
@@ -438,6 +463,7 @@ class MainActivity : ComponentActivity() {
               if (window.__potatoNativeReady) return;
               window.__potatoNativeReady = true;
               window.__potatoScreenCapture = true;
+              window.__potatoScreenAudio = ${Build.VERSION.SDK_INT >= 29};
               const nativeStyle = document.createElement('style');
               nativeStyle.textContent = '@media (max-width:760px){.tabbar{padding-bottom:6px!important}}';
               if (document.head || document.documentElement) (document.head || document.documentElement).appendChild(nativeStyle);

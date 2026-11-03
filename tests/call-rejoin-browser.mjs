@@ -45,7 +45,8 @@ try {
     args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", "--autoplay-policy=no-user-gesture-required"] });
   const errors = [];
   const open = async (account, mobile = false) => {
-    const context = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1100, height: 850 }, isMobile: mobile, hasTouch: mobile, permissions: ["microphone", "camera"] });
+    const context = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1100, height: 850 }, isMobile: mobile, hasTouch: mobile, permissions: ["microphone", "camera"],
+      ...(mobile && process.env.POTATO_TEST_SCREEN ? { userAgent: "Mozilla/5.0 Android PotatoChatAndroid/3.0" } : {}) });
     await context.route(/^https:\/\//, (route) => route.abort());
     await context.addInitScript(() => {
       const original = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
@@ -63,6 +64,44 @@ try {
         }
         return stream;
       };
+    });
+    if (mobile && process.env.POTATO_TEST_SCREEN) await context.addInitScript(() => {
+      window.__potatoScreenCapture = true;
+      window.__potatoScreenAudio = true;
+      window.__nativeMessages = [];
+      let pc, timer, source, tone;
+      window.PotatoAndroid = { postMessage(raw) {
+        const message = JSON.parse(raw);
+        window.__nativeMessages.push(message);
+        if (message.type === "screen-stop") { pc?.close(); clearInterval(timer); source?.getTracks().forEach((t) => t.stop()); tone?.close(); }
+        if (message.type !== "screen-start") return;
+        (async () => {
+          // Simula apenas o produtor nativo; as duas conexões WebRTC e a UI são reais.
+          pc = new RTCPeerConnection({ iceServers: [] });
+          const canvas = document.createElement("canvas"); canvas.width = 1080; canvas.height = 2400;
+          const draw = () => { const ctx = canvas.getContext("2d"); ctx.fillStyle = "#235c8e"; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.fillStyle = "white"; ctx.font = "80px sans-serif"; ctx.fillText("Tela Android", 50, 150); ctx.fillText(String(Date.now()), 50, 300); };
+          draw(); source = canvas.captureStream(15); timer = setInterval(draw, 66);
+          window.__rotateScreen = () => { canvas.width = 1920; canvas.height = 1080; draw(); };
+          tone = new AudioContext({ sampleRate: 48000 });
+          const destination = tone.createMediaStreamDestination(), oscillator = tone.createOscillator();
+          oscillator.frequency.value = 440; oscillator.connect(destination); oscillator.start(); await tone.resume();
+          await pc.setRemoteDescription({ type: "offer", sdp: message.sdp });
+          for (const transceiver of pc.getTransceivers()) {
+            transceiver.direction = "sendonly";
+            await transceiver.sender.replaceTrack(transceiver.receiver.track.kind === "video" ? source.getVideoTracks()[0] : destination.stream.getAudioTracks()[0]);
+          }
+          await pc.setLocalDescription(await pc.createAnswer());
+          await new Promise((resolve) => {
+            if (pc.iceGatheringState === "complete") return resolve();
+            pc.addEventListener("icegatheringstatechange", () => { if (pc.iceGatheringState === "complete") resolve(); });
+          });
+          for (const sender of pc.getSenders()) if (sender.track?.kind === "video") {
+            const params = sender.getParameters(); params.encodings[0].maxBitrate = 16000000;
+            params.degradationPreference = "maintain-resolution"; await sender.setParameters(params);
+          }
+          window.dispatchEvent(new CustomEvent("potato-screen", { detail: { id: message.id, event: "answer", value: pc.localDescription.sdp, audio: true } }));
+        })().catch((error) => window.dispatchEvent(new CustomEvent("potato-screen", { detail: { id: message.id, event: "error", value: error.message } })));
+      } };
     });
     await context.addInitScript((account) => {
       if (localStorage.getItem("call.test.seeded")) return;
@@ -87,6 +126,42 @@ try {
   await b.waitForSelector("#incoming:not(.hidden)", { timeout: 15000 });
   await b.locator("#accept-call").click({ force: true });
   await Promise.all([connected(a), connected(b)]);
+  if (process.env.POTATO_TEST_SCREEN) {
+    await b.locator("#toggle-live").click();
+    assert.equal(await b.locator("#share-audio").isDisabled(), false);
+    await b.locator('#share-options [data-quality="1080p"]').click();
+    await b.locator("#share-go").click();
+    await a.waitForFunction(() => { const v = document.querySelector("#stream-video"); return v.videoWidth >= 720 && v.videoHeight > v.videoWidth; }, undefined, { timeout: 30000 });
+    assert.equal(await b.locator("#my-stream").isHidden(), true);
+    assert.equal(await b.locator("#my-stream video").evaluate((v) => v.srcObject), null);
+    const dimensions = await a.locator("#stream-video").evaluate((v) => [v.videoWidth, v.videoHeight]);
+    assert.ok(await a.locator("#stream-tile").evaluate((v) => v.getBoundingClientRect().height) > 600);
+    const signal = await a.locator("#stream-video").evaluate(async (video) => {
+      const context = new AudioContext(), analyser = context.createAnalyser();
+      const source = context.createMediaStreamSource(new MediaStream(video.srcObject.getAudioTracks())); source.connect(analyser);
+      await context.resume();
+      return new Promise((resolve) => {
+        const values = new Float32Array(analyser.fftSize), start = performance.now();
+        const sample = () => { analyser.getFloatTimeDomainData(values); const peak = Math.max(...values.map(Math.abs)); if (peak > .01 || performance.now() - start > 10000) { source.disconnect(); context.close(); resolve(peak); } else setTimeout(sample, 100); }; sample();
+      });
+    });
+    assert.ok(signal > .01, `O áudio interno precisa chegar ao PC com sinal: ${signal}`);
+    await fs.mkdir(path.join(root, "dist"), { recursive: true });
+    await a.screenshot({ path: path.join(root, "dist/screen-portrait-pc.png") });
+    await b.waitForFunction(() => document.querySelector("#remote-pip video")?.videoWidth > 0);
+    await b.evaluate(() => window.potatoCall("pip", true));
+    assert.ok(await b.locator("#call-panel").evaluate((v) => getComputedStyle(v).visibility === "hidden"));
+    assert.equal(await b.locator("#remote-pip video").evaluate((v) => getComputedStyle(v).visibility), "visible");
+    assert.ok(await b.locator("#remote-pip video").evaluate((v) => v.dataset.track === document.querySelector("#remote-video").dataset.track));
+    await b.screenshot({ path: path.join(root, "dist/screen-remote-pip.png") });
+    await b.evaluate(() => window.potatoCall("pip", false));
+    await b.evaluate(() => window.__rotateScreen());
+    await a.waitForFunction(() => { const v = document.querySelector("#stream-video"); return v.videoWidth > v.videoHeight; }, undefined, { timeout: 30000 });
+    await b.locator("#toggle-live").click();
+    await a.waitForSelector("#stream-tile", { state: "hidden" });
+    assert.equal(await b.evaluate(() => window.__nativeMessages.filter((m) => m.type === "screen-start").at(-1).audio), true);
+    console.log(`Tela Android ${dimensions.join("x")}, áudio audível no PC, rotação, prévia própria oculta e PiP só com vídeo remoto: OK.`);
+  }
   const id = await a.evaluate(() => JSON.parse(localStorage.getItem("potato.callResume")).id);
   const firstGeneration = getCall(id).generation;
   assert.equal(getCall(id).waitingUntil, null);

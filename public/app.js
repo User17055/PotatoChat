@@ -1,6 +1,7 @@
 import { sound } from "./sound.js";
 import { fx, effectFor, motion } from "./fx.js";
 import { nativeScreenAvailable, startNativeScreen, stopNativeScreen } from "./native-screen.js";
+import { updateRemotePip } from "./remote-pip.js";
 import { createRtcRecovery } from "./rtc-recovery.js";
 import { createRtcConfigLoader } from "./rtc-config.js";
 import { createEmojiPicker } from "./emoji-picker.js";
@@ -1066,8 +1067,8 @@ function paintStage() {
   if (!call) return;
   const { local, remote, remoteState } = call;
   const peerLive = Boolean(remoteState.screen && remote.screen);
-  const owner = peerLive ? "peer" : local.screen ? "me" : null;
-  document.documentElement.classList.toggle("pip-own", owner === "me");
+  const owner = peerLive ? "peer" : null;
+  if (inAndroid) updateRemotePip(peerLive ? remote.screen : remoteState.cam ? remote.cam : null);
 
   stage.classList.toggle("has-stream", Boolean(owner));
   streamTile.classList.toggle("hidden", !owner);
@@ -1266,7 +1267,7 @@ async function startLive(key = currentQuality()) {
   let display;
   if (nativeScreenAvailable() && active.local.screen) stopLive(false);
   try {
-    display = nativeScreenAvailable() ? await startNativeScreen(quality) : await navigator.mediaDevices.getDisplayMedia({
+    display = nativeScreenAvailable() ? await startNativeScreen(quality, audio) : await navigator.mediaDevices.getDisplayMedia({
       video: { width: { ideal: quality.width }, height: { ideal: quality.height }, frameRate: { ideal: quality.frameRate, max: quality.frameRate } },
       audio: true,
       systemAudio: "include",
@@ -1443,6 +1444,7 @@ function teardown(notifyPeer) {
   stopNativeScreen();
   call?.recovery?.close();
   document.documentElement.classList.remove("android-pip");
+  if (inAndroid) updateRemotePip(null);
   if (notifyPeer && call) socket?.emit("call-ended", { id: call.id, to: call.peerId });
   if (notifyPeer && call?.connected) sound.play("hangup");
   if (call) {
@@ -1477,7 +1479,7 @@ function syncAndroidCall() {
   if (!inAndroid) return;
   const active = call && (call.role === "caller" || call.accepted) ? call : null;
   const state = active ? { type: "call", active: true, id: active.peerId || "", name: active.name, media: active.media,
-    connected: active.connected, since: active.since || 0, mic: micOn(), screen: Boolean(active.local.screen), peerScreen: Boolean(active.remoteState.screen) }
+    connected: active.connected, since: active.since || 0, mic: micOn(), screen: Boolean(active.local.screen), peerScreen: Boolean(active.remoteState.screen), peerVideo: Boolean((active.remoteState.screen && active.remote.screen) || (active.remoteState.cam && active.remote.cam)) }
     : { type: "call", active: false, ringing: Boolean(call) };
   window.PotatoAndroid?.postMessage(JSON.stringify(state));
 }
@@ -1487,10 +1489,12 @@ window.potatoCall = (action, value) => {
   else if (action === "mute") toggleMic();
   else if (action === "network") call?.recovery?.request();
   else if (action === "pip") document.documentElement.classList.toggle("android-pip", value === true);
+  else if (action === "pip-unavailable") toast("A outra pessoa precisa enviar vídeo para abrir a miniatura.");
   else if (action === "background" && call?.local.cam) { call.camPaused = true; toggleCam(); }
   else if (action === "foreground" && call?.camPaused) { call.camPaused = false; toggleCam(); }
 };
 window.addEventListener("online", () => call?.recovery?.request());
+window.addEventListener("potato-screen-warning", ({ detail }) => toast(detail));
 $("#call-pip").classList.toggle("hidden", !inAndroid);
 $("#call-pip").addEventListener("click", () => window.PotatoAndroid?.postMessage(JSON.stringify({ type: "pip" })));
 

@@ -1,6 +1,7 @@
 // A captura fica no serviço Android. Esta conexão WebRTC é local ao aparelho e entrega
 // uma MediaStreamTrack real à chamada existente, sem imagens em base64 nem servidor intermediário.
 export const nativeScreenAvailable = () => Boolean(window.__potatoScreenCapture && window.PotatoAndroid);
+export const nativeScreenAudioAvailable = () => nativeScreenAvailable() && window.__potatoScreenAudio === true;
 let session = null;
 const send = (message) => window.PotatoAndroid?.postMessage(JSON.stringify(message));
 
@@ -15,10 +16,10 @@ export function stopNativeScreen() {
   send({ type: "screen-stop", id: active.id });
 }
 
-export async function startNativeScreen(quality) {
+export async function startNativeScreen(quality, audio = true) {
   stopNativeScreen();
   const peer = new RTCPeerConnection({ iceServers: [] });
-  const active = { id: crypto.randomUUID(), peer, stream: new MediaStream() };
+  const active = { id: crypto.randomUUID(), peer, stream: new MediaStream(), answered: false, audio: audio && nativeScreenAudioAvailable() };
   session = active;
   const result = new Promise((resolve, reject) => { active.resolve = resolve; active.reject = reject; });
   // Anexar o handler imediatamente: erros antes do await não viram rejeições não tratadas.
@@ -27,14 +28,14 @@ export async function startNativeScreen(quality) {
   peer.ontrack = ({ track }) => {
     if (session !== active) return;
     active.stream.addTrack(track);
-    clearTimeout(active.timer);
-    active.resolve(active.stream);
+    ready(active);
   };
   peer.onconnectionstatechange = () => {
     if (peer.connectionState === "failed") finish(active, "A captura da tela foi interrompida.");
   };
   try {
     peer.addTransceiver("video", { direction: "recvonly" });
+    if (active.audio) peer.addTransceiver("audio", { direction: "recvonly" });
     await peer.setLocalDescription(await peer.createOffer());
     await new Promise((resolve) => {
       if (peer.iceGatheringState === "complete") return resolve();
@@ -44,12 +45,19 @@ export async function startNativeScreen(quality) {
       peer.addEventListener("icegatheringstatechange", changed);
     });
     if (session !== active) throw new DOMException("Captura cancelada.", "AbortError");
-    send({ type: "screen-start", id: active.id, sdp: peer.localDescription.sdp, height: quality.height, fps: quality.frameRate });
+    send({ type: "screen-start", id: active.id, sdp: peer.localDescription.sdp, height: quality.height, fps: quality.frameRate, audio: active.audio });
     return await result;
   } catch (error) {
     if (session === active) stopNativeScreen();
     throw error;
   }
+}
+
+function ready(active) {
+  if (!active.answered || !active.stream.getTracks().some((track) => track.kind === "video")) return;
+  if (active.audio && !active.stream.getTracks().some((track) => track.kind === "audio")) return;
+  clearTimeout(active.timer);
+  active.resolve(active.stream);
 }
 
 function finish(active, message) {
@@ -65,7 +73,16 @@ window.addEventListener("potato-screen", async ({ detail }) => {
   const active = session;
   if (!active || detail?.id !== active.id) return;
   if (detail.event === "answer") {
-    try { await active.peer.setRemoteDescription({ type: "answer", sdp: detail.value }); }
+    try {
+      // O Android confirma se conseguiu abrir playback antes de entregarmos a stream à chamada.
+      active.audio = active.audio && detail.audio === true;
+      await active.peer.setRemoteDescription({ type: "answer", sdp: detail.value });
+      if (session !== active) return;
+      active.answered = true;
+      ready(active);
+    }
     catch { finish(active, "Não foi possível conectar a captura à chamada."); }
+  } else if (detail.event === "audio-error") {
+    window.dispatchEvent(new CustomEvent("potato-screen-warning", { detail: detail.value }));
   } else if (detail.event === "error" || detail.event === "stopped") finish(active, detail.value);
 });

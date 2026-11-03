@@ -4,10 +4,13 @@ import android.app.*
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.projection.MediaProjection
+import android.content.res.Configuration
+import android.view.WindowManager
 import android.os.*
 import androidx.core.app.NotificationCompat
 import org.json.JSONObject
 import org.webrtc.*
+import org.webrtc.audio.JavaAudioDeviceModule
 import java.util.concurrent.Executors
 
 /** Captura no Android e entrega uma faixa WebRTC ao site por uma conexão local, sem servidor de mídia. */
@@ -22,6 +25,14 @@ class ScreenShareService : Service() {
     private var helper: SurfaceTextureHelper? = null
     private var source: VideoSource? = null
     private var track: VideoTrack? = null
+    private var audio: PlaybackCapture? = null
+    private var audioDevice: JavaAudioDeviceModule? = null
+    private var audioSource: AudioSource? = null
+    private var audioTrack: AudioTrack? = null
+    private var captureSize = 1080
+    private var captureFps = 30
+    private var captureWidth = 0
+    private var captureHeight = 0
     @Volatile private var answered = false
     @Volatile private var closing = false
 
@@ -55,7 +66,7 @@ class ScreenShareService : Service() {
             if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
             else startForeground(NOTIFICATION_ID, notification)
             work {
-                runCatching { capture(permission, intent.getStringExtra("sdp").orEmpty(), intent.getIntExtra("height", 720), intent.getIntExtra("fps", 30)) }
+                runCatching { capture(permission, intent.getStringExtra("sdp").orEmpty(), intent.getIntExtra("height", 1080), intent.getIntExtra("fps", 30), intent.getBooleanExtra("audio", false)) }
                     .onFailure { fail("Não foi possível capturar a tela: ${it.message.orEmpty()}") }
             }
             main.postDelayed({ if (!answered) fail("A conexão local de captura não respondeu.") }, 25000)
@@ -63,24 +74,43 @@ class ScreenShareService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun capture(permission: Intent, offer: String, maxSize: Int, fps: Int) {
+    private fun capture(permission: Intent, offer: String, maxSize: Int, fps: Int, withAudio: Boolean) {
+        captureSize = maxSize.coerceIn(720, 1080)
+        captureFps = fps.coerceIn(15, 60)
         PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(applicationContext).createInitializationOptions())
         val context = EglBase.create().also { egl = it }.eglBaseContext
+        // O ADM desta conexão recebe só playback. O microfone continua na chamada do WebView.
+        val playback = PlaybackCapture { emit("audio-error", it) }.also { audio = it }
+        audioDevice = JavaAudioDeviceModule.builder(applicationContext)
+            .setSampleRate(48000).setUseStereoInput(true)
+            .setUseHardwareAcousticEchoCanceler(false).setUseHardwareNoiseSuppressor(false)
+            .setAudioBufferCallback { buffer, _, channels, rate, _, _ -> playback.read(buffer, channels, rate) }
+            .createAudioDeviceModule().also { it.setAudioRecordEnabled(false) }
         factory = PeerConnectionFactory.builder()
+            .setAudioDeviceModule(audioDevice)
             .setVideoEncoderFactory(DefaultVideoEncoderFactory(context, true, true))
             .setVideoDecoderFactory(DefaultVideoDecoderFactory(context)).createPeerConnectionFactory()
         source = factory!!.createVideoSource(true)
         helper = SurfaceTextureHelper.create("PotatoScreen", context)
         capturer = ScreenCapturerAndroid(permission, object : MediaProjection.Callback() {
             override fun onStop() { main.post { stopSelf() } }
+            override fun onCapturedContentResize(width: Int, height: Int) { work { resize(width, height) } }
         }).also { it.initialize(helper, applicationContext, source!!.capturerObserver) }
-        val metrics = resources.displayMetrics
-        val scale = minOf(1.0, maxSize.coerceIn(720, 1080).toDouble() / minOf(metrics.widthPixels, metrics.heightPixels))
-        val width = ((metrics.widthPixels * scale).toInt() / 2 * 2).coerceAtLeast(2)
-        val height = ((metrics.heightPixels * scale).toInt() / 2 * 2).coerceAtLeast(2)
-        source!!.adaptOutputFormat(width, height, fps.coerceIn(15, 60))
-        capturer!!.startCapture(width, height, fps)
+        val (width, height) = displaySize()
+        resize(width, height)
+        capturer!!.startCapture(captureWidth, captureHeight, captureFps)
         track = factory!!.createVideoTrack("potato-screen", source)
+        if (withAudio && Build.VERSION.SDK_INT >= 29) {
+            runCatching { playback.start(applicationContext, requireNotNull(capturer!!.mediaProjection)) }
+                .onSuccess {
+                    val constraints = MediaConstraints().apply {
+                        listOf("googEchoCancellation", "googAutoGainControl", "googNoiseSuppression", "googHighpassFilter")
+                            .forEach { mandatory.add(MediaConstraints.KeyValuePair(it, "false")) }
+                    }
+                    audioSource = factory!!.createAudioSource(constraints)
+                    audioTrack = factory!!.createAudioTrack("potato-screen-audio", audioSource)
+                }.onFailure { playback.stop(); playback.release(); emit("audio-error", "Não foi possível capturar o som interno. A tela continua sem esse áudio.") }
+        }
         val config = PeerConnection.RTCConfiguration(emptyList()).apply { sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN }
         peer = factory!!.createPeerConnection(config, object : PeerConnection.Observer {
             override fun onSignalingChange(state: PeerConnection.SignalingState?) {}
@@ -99,15 +129,50 @@ class ScreenShareService : Service() {
             override fun onRenegotiationNeeded() {}
         }) ?: error("WebRTC indisponível")
         peer!!.setRemoteDescription(sdp(onSet = {
-            val transceiver = peer!!.transceivers.firstOrNull() ?: error("Faixa de vídeo ausente")
+            val transceiver = peer!!.transceivers.firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO } ?: error("Faixa de vídeo ausente")
             transceiver.direction = RtpTransceiver.RtpTransceiverDirection.SEND_ONLY
             check(transceiver.sender.setTrack(track, false))
+            peer!!.transceivers.firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO }?.let {
+                it.direction = if (audioTrack != null) RtpTransceiver.RtpTransceiverDirection.SEND_ONLY else RtpTransceiver.RtpTransceiverDirection.INACTIVE
+                if (audioTrack != null) check(it.sender.setTrack(audioTrack, false))
+            }
             peer!!.createAnswer(sdp(onCreate = { answer ->
                 peer!!.setLocalDescription(sdp(onSet = {
+                    // A primeira passagem é local: preserve os pixels antes da codificação para a internet.
+                    val params = transceiver.sender.parameters
+                    params.degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION
+                    params.encodings.forEach { it.maxBitrateBps = 16000000; it.minBitrateBps = 4000000; it.maxFramerate = captureFps; it.scaleResolutionDownBy = 1.0 }
+                    check(transceiver.sender.setParameters(params))
+                    peer!!.setBitrate(4000000, 10000000, 16000000)
                     if (peer?.iceGatheringState() == PeerConnection.IceGatheringState.COMPLETE) answerReady()
                 }), answer)
             }), MediaConstraints())
         }), SessionDescription(SessionDescription.Type.OFFER, offer))
+    }
+
+    private fun displaySize(): Pair<Int, Int> {
+        val manager = getSystemService(WindowManager::class.java)
+        if (Build.VERSION.SDK_INT >= 30) return manager.maximumWindowMetrics.bounds.let { it.width() to it.height() }
+        val metrics = android.util.DisplayMetrics()
+        @Suppress("DEPRECATION") manager.defaultDisplay.getRealMetrics(metrics)
+        return metrics.widthPixels to metrics.heightPixels
+    }
+
+    private fun resize(width: Int, height: Int) {
+        if (width <= 0 || height <= 0) return
+        val scale = minOf(1.0, captureSize.toDouble() / minOf(width, height))
+        val w = ((width * scale).toInt() / 2 * 2).coerceAtLeast(2)
+        val h = ((height * scale).toInt() / 2 * 2).coerceAtLeast(2)
+        if (w == captureWidth && h == captureHeight) return
+        captureWidth = w; captureHeight = h
+        source?.adaptOutputFormat(w, h, captureFps)
+        capturer?.changeCaptureFormat(w, h, captureFps)
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // Android 14+ informa o tamanho do conteúdo escolhido; versões anteriores seguem o display.
+        if (Build.VERSION.SDK_INT < 34) work { val (w, h) = displaySize(); resize(w, h) }
     }
 
     private fun answerReady() {
@@ -125,7 +190,7 @@ class ScreenShareService : Service() {
     }
 
     private fun emit(event: String, value: String = "") {
-        val payload = JSONObject().put("id", id).put("event", event).put("value", value)
+        val payload = JSONObject().put("id", id).put("event", event).put("value", value).put("audio", audioTrack != null)
         main.post { ScreenShareBridge.page?.invoke(payload) }
     }
 
@@ -136,11 +201,14 @@ class ScreenShareService : Service() {
         main.removeCallbacksAndMessages(null)
         emit("stopped")
         worker.execute {
+            // Desbloqueia AudioRecord.read antes de o WebRTC aguardar sua thread de áudio.
+            audio?.stop()
             // Remover o callback e parar a projeção antes de liberar a thread de textura.
             runCatching { capturer?.stopCapture() }
             runCatching { capturer?.dispose() }
             peer?.close(); peer?.dispose()
-            track?.dispose(); source?.dispose(); helper?.dispose(); factory?.dispose(); egl?.release()
+            audioTrack?.dispose(); audioSource?.dispose()
+            track?.dispose(); source?.dispose(); helper?.dispose(); factory?.dispose(); audioDevice?.release(); audio?.release(); egl?.release()
         }
         worker.shutdown()
         stopForeground(STOP_FOREGROUND_REMOVE)

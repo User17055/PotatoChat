@@ -3,7 +3,8 @@ import { fx, effectFor, motion } from "./fx.js";
 import { io, apiUrl } from "./realtime.js";
 import { createPlayer } from "./music.js";
 import { createWatchPlayer } from "./watch.js";
-import { nativeScreenAvailable, startNativeScreen, stopNativeScreen } from "./native-screen.js";
+import { nativeScreenAvailable, nativeScreenAudioAvailable, startNativeScreen, stopNativeScreen } from "./native-screen.js";
+import { updateRemotePip } from "./remote-pip.js";
 import { createRtcRecovery } from "./rtc-recovery.js";
 import { createRtcConfigLoader } from "./rtc-config.js";
 import { createEmojiPicker } from "./emoji-picker.js";
@@ -5660,8 +5661,10 @@ function paintStage() {
   const { local, remote, remoteState } = call;
   const peerLive = Boolean(remoteState.screen && remote.screen);
 
-  // A transmissão da outra pessoa ocupa o palco; a sua aparece só como prévia no canto.
+  // Só a transmissão recebida aparece: exibir a própria tela cria um espelho infinito.
   stage.classList.toggle("has-stream", peerLive);
+  callPanel.classList.toggle("receiving-screen", peerLive);
+  if (!peerLive) callPanel.classList.remove("portrait-stream");
   streamTile.classList.toggle("hidden", !peerLive);
   if (peerLive) {
     const tracks = [remote.screen, remote.screenAudio].filter(Boolean);
@@ -5669,6 +5672,7 @@ function paintStage() {
     if (streamVideo.dataset.tracks !== ids) {
       streamVideo.srcObject = new MediaStream(tracks);
       streamVideo.dataset.tracks = ids;
+      streamVideo.play().catch(() => {});
     }
     $("#stream-owner").textContent = `Transmissão de ${call.name}`;
   } else if (streamVideo.srcObject) {
@@ -5676,8 +5680,10 @@ function paintStage() {
     streamVideo.srcObject = null;
     delete streamVideo.dataset.tracks;
   }
-  myStream.classList.toggle("hidden", !local.screen);
-  setVideo(myStreamVideo, local.screen);
+  myStream.classList.add("hidden");
+  setVideo(myStreamVideo, null);
+  if (inAndroid) updateRemotePip(peerLive ? remote.screen : remoteState.cam ? remote.cam : null);
+  $("#call-pip").disabled = !peerLive && !(remoteState.cam && remote.cam);
   const pill = $("#live-pill");
   pill.classList.toggle("hidden", !local.screen);
   pill.textContent = local.screen ? `Transmitindo · ${QUALITY_LABEL[call.quality] || "tela"}` : "";
@@ -5868,7 +5874,7 @@ async function startLive(key = currentQuality(), audio = shareAudio()) {
   let display;
   if (nativeScreenAvailable() && active.local.screen) stopLive(false);
   try {
-    display = nativeScreenAvailable() ? await startNativeScreen(quality) : await navigator.mediaDevices.getDisplayMedia({
+    display = nativeScreenAvailable() ? await startNativeScreen(quality, audio) : await navigator.mediaDevices.getDisplayMedia({
       video: { width: { ideal: quality.width }, height: { ideal: quality.height }, frameRate: { ideal: quality.frameRate, max: quality.frameRate } },
       audio,
       systemAudio: audio ? "include" : "exclude",
@@ -6224,7 +6230,7 @@ function syncAndroidCall() {
   if (!inAndroid) return;
   const active = call && (call.role === "caller" || call.accepted) ? call : null;
   const state = active
-    ? { type: "call", active: true, id: active.id || "", name: active.name, avatar: avatars.get(active.name) || "", media: active.media, connected: active.connected, since: active.since || 0, mic: micOn(), screen: Boolean(active.local.screen), peerScreen: Boolean(active.remoteState.screen) }
+    ? { type: "call", active: true, id: active.id || "", name: active.name, avatar: avatars.get(active.name) || "", media: active.media, connected: active.connected, since: active.since || 0, mic: micOn(), screen: Boolean(active.local.screen), peerScreen: Boolean(active.remoteState.screen), peerVideo: Boolean((active.remoteState.screen && active.remote.screen) || (active.remoteState.cam && active.remote.cam)) }
     : { type: "call", active: false, ringing: Boolean(call) };
   const json = JSON.stringify(state);
   if (json === androidCall) return;
@@ -6266,7 +6272,8 @@ window.potatoCall = (action, value = "", where = "") => {
     call?.recovery?.request();
   } else if (action === "pip") {
     document.documentElement.classList.toggle("android-pip", value === true);
-    if (value === true && call) showTab("chat");
+  } else if (action === "pip-unavailable") {
+    toast("A miniatura fica disponível quando a outra pessoa envia vídeo ou transmite a tela.");
   }
 };
 
@@ -6332,6 +6339,7 @@ function teardown(notifyPeer) {
   stopNativeScreen();
   call?.recovery?.close();
   document.documentElement.classList.remove("android-pip");
+  if (inAndroid) updateRemotePip(null);
   if (notifyPeer && call?.id) socket?.emit("call-leave", { to: call.peerId, id: call.id, lease: call.lease ?? 0 });
   if (notifyPeer && call?.connected) sound.play("hangup");
   if (call) {
@@ -6392,11 +6400,14 @@ function paintShare(quality) {
   shareSheet.dataset.choice = quality;
   shareSheet.querySelectorAll("[data-quality]").forEach((option) => option.setAttribute("aria-checked", String(option.dataset.quality === quality)));
   const audio = $("#share-audio");
-  audio.disabled = nativeScreenAvailable();
-  audio.title = nativeScreenAvailable() ? "No Android, a transmissão leva sua voz pelo microfone; áudio interno ainda não disponível." : "";
-  if (nativeScreenAvailable()) audio.querySelector("small").textContent = "No Android, sua voz vai pelo microfone; som interno ainda indisponível";
-  audio.classList.toggle("is-off", nativeScreenAvailable() || !shareAudio());
-  audio.setAttribute("aria-checked", String(!nativeScreenAvailable() && shareAudio()));
+  const unavailable = nativeScreenAvailable() && !nativeScreenAudioAvailable();
+  audio.disabled = unavailable;
+  audio.title = unavailable ? "O som interno precisa do app atualizado e de Android 10 ou superior." : "";
+  if (nativeScreenAvailable()) audio.querySelector("small").textContent = unavailable
+    ? "Atualize o app; som interno disponível a partir do Android 10"
+    : "Som dos apps que permitem captura; sua voz continua pelo microfone";
+  audio.classList.toggle("is-off", unavailable || !shareAudio());
+  audio.setAttribute("aria-checked", String(!unavailable && shareAudio()));
 }
 
 function onShareKey(event) {
@@ -6458,6 +6469,9 @@ $("#stream-pip").addEventListener("click", () => {
 watchShape(tileMe, tileMe.querySelector("video"));
 watchShape(tilePeer, tilePeer.querySelector("video"));
 watchShape(myStream, myStreamVideo);
+watchShape(streamTile, streamVideo);
+streamVideo.addEventListener("resize", () => callPanel.classList.toggle("portrait-stream", streamVideo.videoHeight > streamVideo.videoWidth));
+window.addEventListener("potato-screen-warning", ({ detail }) => toast(detail));
 $("#toggle-chat").addEventListener("click", () => {
   const hidden = chatView.classList.toggle("call-expanded");
   setToggle($("#toggle-chat"), !hidden, "Esconder o chat", "Mostrar o chat");
