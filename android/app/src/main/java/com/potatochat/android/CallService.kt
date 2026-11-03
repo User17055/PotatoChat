@@ -7,6 +7,8 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import androidx.core.content.ContextCompat
 
@@ -21,6 +23,13 @@ class CallService : Service() {
     data class State(val id: String, val name: String, val avatar: String?, val media: String, val connected: Boolean, val since: Long, val mic: Boolean)
 
     private var wakeLock: PowerManager.WakeLock? = null
+    private val handler = Handler(Looper.getMainLooper())
+    private val renewWakeLock = object : Runnable {
+        override fun run() {
+            wakeLock?.acquire(10 * 60 * 1000L)
+            handler.postDelayed(this, 5 * 60 * 1000L)
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -28,8 +37,9 @@ class CallService : Service() {
         CallNotifications.createChannels(this)
         wakeLock = getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PotatoChat:chamada").apply {
             setReferenceCounted(false)
-            acquire(6 * 60 * 60 * 1000L)
         }
+        // Renovação nativa durante a chamada; o timeout protege contra uma liberação perdida.
+        renewWakeLock.run()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -57,6 +67,7 @@ class CallService : Service() {
 
     override fun onDestroy() {
         running = false
+        handler.removeCallbacksAndMessages(null)
         wakeLock?.takeIf { it.isHeld }?.release()
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()

@@ -10,6 +10,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap" />
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/android-call.css" />
     <script>
       // Já logado: vai direto para o chat, sem piscar a tela de login.
       try { if (JSON.parse(localStorage.getItem("potato.session"))?.token) document.documentElement.classList.add("has-session"); } catch {}
@@ -255,6 +256,7 @@
                 <svg class="icon when-on"><use href="#i-message" /></svg>
                 <svg class="icon when-off"><use href="#i-message-off" /></svg>
               </button>
+              <button id="call-pip" class="round hidden" type="button" title="Abrir miniatura flutuante" aria-label="Abrir miniatura flutuante"><svg class="icon" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="17" rx="2"/><rect x="12" y="12" width="8" height="6" rx="1"/></svg></button>
               <button id="end-call" class="round hangup" type="button" title="Desligar" aria-label="Desligar">
                 <svg class="icon"><use href="#i-hangup" /></svg>
               </button>

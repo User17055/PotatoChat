@@ -1,12 +1,16 @@
 node_modules/
 .env
+versao-php/site/turn.config.php
+ops/.turn-secret
 data/*.json
 data/*.tmp
 npm-debug.log*
 android/.gradle/
+android/.kotlin/
 android/local.properties
 android/**/build/
 *.apk
+dist/
 
 data/.token-secret
 

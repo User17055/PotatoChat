@@ -3,6 +3,9 @@ import { fx, effectFor, motion } from "./fx.js";
 import { io, apiUrl } from "./realtime.js";
 import { createPlayer } from "./music.js";
 import { createWatchPlayer } from "./watch.js";
+import { nativeScreenAvailable, startNativeScreen, stopNativeScreen } from "./native-screen.js";
+import { createRtcRecovery } from "./rtc-recovery.js";
+import { createRtcConfigLoader } from "./rtc-config.js";
 
 const $ = (selector) => document.querySelector(selector);
 const loginView = $("#login-view");
@@ -35,7 +38,7 @@ const NAME_KEY = "potato.name";
 const NOTIFY_KEY = "potato.notify";
 const ROOM_KEY = "potato.room";
 const REACTIONS = ["❤️", "😂", "😮", "😢", "👍", "🔥"];
-const rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }] };
+const loadRtcConfig = createRtcConfigLoader(apiUrl("rtc-config"), () => socket?.auth.token || "");
 
 // Quando o site roda dentro do painel lateral da extensão, conversa com ela via postMessage.
 const parentOrigin = window.parent !== window ? (location.ancestorOrigins?.[0] || "") : "";
@@ -429,6 +432,7 @@ function connect(token, animate) {
     fx.hide(netBanner, { y: -10 });
     socket.emit("visibility", !document.hidden);
     for (const message of pending.values()) deliver(message);
+    if (call?.recovery) call.recovery.request();
   });
 
   socket.on("disconnect", (reason) => {
@@ -507,6 +511,9 @@ function connect(token, animate) {
   socket.on("webrtc-offer", receiveOffer);
   socket.on("webrtc-answer", receiveAnswer);
   socket.on("webrtc-ice", receiveIce);
+  socket.on("webrtc-restart", (message) => {
+    if (call && message.from === call.peerId && message.id === call.id) call.recovery?.receive(message);
+  });
   socket.on("call-state", receiveCallState);
   socket.on("call-ended", callEnded);
   // Atendida em outro aparelho seu: aqui para de tocar.
@@ -5352,7 +5359,7 @@ const QUALITY = {
   "1080p": { width: 1920, height: 1080, frameRate: 30, bitrate: 4_500_000, hint: "detail" },
   "1080p60": { width: 1920, height: 1080, frameRate: 60, bitrate: 8_000_000, hint: "motion" }
 };
-const canStream = Boolean(navigator.mediaDevices?.getDisplayMedia);
+const canStream = nativeScreenAvailable() || Boolean(navigator.mediaDevices?.getDisplayMedia);
 
 const stage = $("#stage");
 const streamTile = $("#stream-tile");
@@ -5365,7 +5372,7 @@ const myStreamVideo = myStream.querySelector("video");
 const shareSheet = $("#share-sheet");
 const SHARE_AUDIO_KEY = "potato.shareAudio";
 const QUALITY_LABEL = { "720p": "720p", "1080p": "1080p", "1080p60": "1080p 60fps" };
-const canPip = Boolean(document.pictureInPictureEnabled && streamVideo.requestPictureInPicture);
+const canPip = inAndroid || Boolean(document.pictureInPictureEnabled && streamVideo.requestPictureInPicture);
 const callInfo = $(".call-info");
 const SPEAKING_LEVEL = 0.025;
 
@@ -5402,11 +5409,11 @@ function myState() {
 
 // Avisa a outra pessoa o que está ligado (microfone, câmera, transmissão).
 function sendState() {
-  if (call?.slots) socket?.emit("call-state", { to: call.peerId, ...myState() });
+  if (call?.slots) socket?.emit("call-state", { id: call.id, to: call.peerId, ...myState() });
 }
 
 function receiveCallState(state) {
-  if (!call) return;
+  if (!call || (state.id && state.id !== call.id)) return;
   const before = call.remoteState;
   call.remoteState = { mic: Boolean(state.mic), cam: Boolean(state.cam), screen: Boolean(state.screen) };
   if (call.remoteState.screen && !before.screen) {
@@ -5510,31 +5517,45 @@ function openCallPanel(status) {
   scrollToLatest();
 }
 
-function createPeer() {
-  peerConnection = new RTCPeerConnection(rtcConfig);
-  peerConnection.onicecandidate = ({ candidate }) => candidate && socket.emit("webrtc-ice", { candidate, to: call?.peerId });
-  peerConnection.ontrack = ({ track, transceiver }) => {
-    if (!call) return;
-    const slot = SLOTS[peerConnection.getTransceivers().indexOf(transceiver)];
+async function createPeer() {
+  const active = call;
+  const settings = await loadRtcConfig();
+  if (call !== active) throw new Error("Chamada encerrada");
+  const peer = peerConnection = new RTCPeerConnection(settings.config);
+  active.recovery = createRtcRecovery({
+    peer, caller: active.role === "caller", loadConfig: loadRtcConfig, remoteReady: flushCandidates,
+    send: (message) => socket?.emit("webrtc-restart", { ...message, id: active.id, to: active.peerId }),
+    status: (text) => { if (call === active) callStatus.textContent = text || `Em chamada com ${active.name}`; },
+    failed: () => {
+      if (call !== active) return;
+      toast("Não foi possível recuperar a conexão. Verifique a internet e a configuração do servidor TURN.", "error");
+      teardown(true);
+    }
+  });
+  peer.onicecandidate = ({ candidate }) => {
+    if (candidate && call === active) socket.emit("webrtc-ice", { id: active.id, candidate, to: active.peerId });
+  };
+  peer.ontrack = ({ track, transceiver }) => {
+    if (call !== active) return;
+    const slot = SLOTS[peer.getTransceivers().indexOf(transceiver)];
     if (!slot) return;
     call.remote[slot] = track;
     if (slot === "mic") remoteAudio.srcObject = new MediaStream([track]);
     paintStage();
   };
-  peerConnection.onconnectionstatechange = () => {
-    const state = peerConnection?.connectionState;
+  peer.onconnectionstatechange = () => {
+    if (call !== active) return;
+    const state = peer.connectionState;
     if (state === "connected") {
       onConnected();
       if (call) callStatus.textContent = `Em chamada com ${call.name}`;
     }
     if (state === "disconnected") callStatus.textContent = "Conexão instável…";
     if (state === "failed") {
-      toast("A chamada caiu. Redes muito restritas podem precisar de um servidor TURN.", "error");
-      sound.play("error");
-      teardown(true);
+      callStatus.textContent = "Reconectando a chamada…";
     }
   };
-  return peerConnection;
+  return peer;
 }
 
 // Anel verde em volta de quem está falando.
@@ -5573,6 +5594,7 @@ function onConnected() {
     callTimer.textContent = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
   }, 1000);
   sendState();
+  call.recovery?.configure().catch(() => {});
   tuneScreen();
   watchSpeaking();
 }
@@ -5641,23 +5663,26 @@ async function tuneScreen() {
 // key = qualidade (QUALITY); audio = levar junto o som do que estiver tocando.
 async function startLive(key = currentQuality(), audio = shareAudio()) {
   const active = call;
-  if (!active || !canStream) return false;
+  if (!active || !canStream || active.sharePending) return false;
+  active.sharePending = true;
   const quality = QUALITY[key] || QUALITY["1080p"];
   let display;
+  if (nativeScreenAvailable() && active.local.screen) stopLive(false);
   try {
-    display = await navigator.mediaDevices.getDisplayMedia({
+    display = nativeScreenAvailable() ? await startNativeScreen(quality) : await navigator.mediaDevices.getDisplayMedia({
       video: { width: { ideal: quality.width }, height: { ideal: quality.height }, frameRate: { ideal: quality.frameRate, max: quality.frameRate } },
       audio,
       systemAudio: audio ? "include" : "exclude",
       surfaceSwitching: "include",
       selfBrowserSurface: "exclude"
     });
-  } catch {
-    toast(inExtension ? mediaDeniedText() : "Transmissão cancelada.");
+  } catch (error) {
+    toast(nativeScreenAvailable() ? error.message : inExtension ? mediaDeniedText() : "Transmissão cancelada.");
     return false;
-  }
+  } finally { active.sharePending = false; }
   if (active !== call) {
     display.getTracks().forEach((track) => track.stop());
+    stopNativeScreen();
     return false;
   }
   stopLive(false);
@@ -5678,6 +5703,7 @@ async function startLive(key = currentQuality(), audio = shareAudio()) {
 
 function stopLive(notify = true) {
   if (!call?.local.screen) return;
+  stopNativeScreen();
   call.local.screen.stop();
   call.local.screenAudio?.stop();
   call.local.screen = null;
@@ -5703,7 +5729,11 @@ async function startCall(media, share = {}) {
   }
   const active = call = newCall({ media, role: "caller", name: peerName, room });
   // A tela é escolhida primeiro, enquanto o clique ainda vale para o navegador.
-  if (media === "screen" && !(await startLive(share.quality, share.audio))) return teardown(false);
+  if (media === "screen") {
+    const started = await startLive(share.quality, share.audio);
+    if (active !== call) return;
+    if (!started) return teardown(false);
+  }
   if (active !== call) return;
   await acquireMic(active);
   if (media === "video") await toggleCam();
@@ -5742,7 +5772,7 @@ async function sendOffer({ id, from, state }) {
   sound.stopLoop();
   callStatus.textContent = "Conectando…";
   try {
-    const peer = createPeer();
+    const peer = await createPeer();
     active.slots = Object.fromEntries(SLOTS.map((slot) => [slot, peer.addTransceiver(SLOT_KIND[slot], { direction: "sendrecv" })]));
     await Promise.all(SLOTS.map(attach));
     await peer.setLocalDescription(await peer.createOffer());
@@ -5840,7 +5870,7 @@ async function receiveOffer({ id, description, from, state }) {
   active.peerId = from;
   if (state) active.remoteState = state;
   try {
-    const peer = createPeer();
+    const peer = await createPeer();
     await peer.setRemoteDescription(description);
     const transceivers = peer.getTransceivers();
     active.slots = Object.fromEntries(SLOTS.map((slot, index) => [slot, transceivers[index]]).filter(([, transceiver]) => transceiver));
@@ -5849,7 +5879,7 @@ async function receiveOffer({ id, description, from, state }) {
     await flushCandidates();
     await peer.setLocalDescription(await peer.createAnswer());
     if (active !== call) return;
-    socket.emit("webrtc-answer", { description: peer.localDescription, to: from, state: myState() });
+    socket.emit("webrtc-answer", { id: active.id, description: peer.localDescription, to: from, state: myState() });
     paintStage();
   } catch {
     if (active !== call) return;
@@ -5983,7 +6013,7 @@ function syncAndroidCall() {
   if (!inAndroid) return;
   const active = call && (call.role === "caller" || call.accepted) ? call : null;
   const state = active
-    ? { type: "call", active: true, id: active.id || "", name: active.name, avatar: avatars.get(active.name) || "", media: active.media, connected: active.connected, since: active.since || 0, mic: micOn() }
+    ? { type: "call", active: true, id: active.id || "", name: active.name, avatar: avatars.get(active.name) || "", media: active.media, connected: active.connected, since: active.since || 0, mic: micOn(), screen: Boolean(active.local.screen), peerScreen: Boolean(active.remoteState.screen) }
     : { type: "call", active: false, ringing: Boolean(call) };
   const json = JSON.stringify(state);
   if (json === androidCall) return;
@@ -6019,6 +6049,12 @@ window.potatoCall = (action, value = "", where = "") => {
     if (socket?.connected) runPendingDial();
   } else if (action === "background" || action === "foreground") {
     pauseCamera(action === "background");
+    if (action === "foreground" && peerConnection?.connectionState !== "connected") call?.recovery?.request();
+  } else if (action === "network") {
+    call?.recovery?.request();
+  } else if (action === "pip") {
+    document.documentElement.classList.toggle("android-pip", value === true);
+    if (value === true && call) showTab("chat");
   }
 };
 
@@ -6050,8 +6086,8 @@ function callFromHash() {
   else [pendingDial, pendingDialRoom = ""] = value.split(":");
 }
 
-async function receiveAnswer({ description, from, state }) {
-  if (call?.role !== "caller" || !peerConnection) return;
+async function receiveAnswer({ id, description, from, state }) {
+  if (call?.role !== "caller" || !peerConnection || (id && id !== call.id)) return;
   call.peerId = from;
   if (state) call.remoteState = state;
   sound.stopLoop();
@@ -6061,10 +6097,10 @@ async function receiveAnswer({ description, from, state }) {
   paintStage();
 }
 
-async function receiveIce({ candidate }) {
-  if (!call) return;
+async function receiveIce({ candidate, id, from }) {
+  if (!call || (id && id !== call.id) || (from && call.peerId && from !== call.peerId)) return;
   if (!peerConnection?.remoteDescription) pendingCandidates.push(candidate);
-  else await peerConnection.addIceCandidate(candidate).catch(() => {});
+  else await peerConnection.addIceCandidate(candidate).catch(() => { if (pendingCandidates.length < 200) pendingCandidates.push(candidate); });
 }
 
 async function flushCandidates() {
@@ -6072,6 +6108,9 @@ async function flushCandidates() {
 }
 
 function teardown(notifyPeer) {
+  stopNativeScreen();
+  call?.recovery?.close();
+  document.documentElement.classList.remove("android-pip");
   if (notifyPeer && call) socket?.emit("call-ended", { to: call.peerId, id: call.id });
   if (notifyPeer && call?.connected) sound.play("hangup");
   if (call) {
@@ -6131,8 +6170,11 @@ function paintShare(quality) {
   shareSheet.dataset.choice = quality;
   shareSheet.querySelectorAll("[data-quality]").forEach((option) => option.setAttribute("aria-checked", String(option.dataset.quality === quality)));
   const audio = $("#share-audio");
-  audio.classList.toggle("is-off", !shareAudio());
-  audio.setAttribute("aria-checked", String(shareAudio()));
+  audio.disabled = nativeScreenAvailable();
+  audio.title = nativeScreenAvailable() ? "No Android, a transmissão leva sua voz pelo microfone; áudio interno ainda não disponível." : "";
+  if (nativeScreenAvailable()) audio.querySelector("small").textContent = "No Android, sua voz vai pelo microfone; som interno ainda indisponível";
+  audio.classList.toggle("is-off", nativeScreenAvailable() || !shareAudio());
+  audio.setAttribute("aria-checked", String(!nativeScreenAvailable() && shareAudio()));
 }
 
 function onShareKey(event) {
@@ -6184,7 +6226,10 @@ $("#toggle-cam").addEventListener("click", toggleCam);
 $("#toggle-live").addEventListener("click", () => (call?.local.screen ? stopLive() : openShare()));
 $("#stop-stream").addEventListener("click", () => stopLive());
 $("#stream-pip").classList.toggle("hidden", !canPip);
+$("#call-pip").classList.toggle("hidden", !inAndroid);
+$("#call-pip").addEventListener("click", () => window.PotatoAndroid?.postMessage(JSON.stringify({ type: "pip" })));
 $("#stream-pip").addEventListener("click", () => {
+  if (inAndroid) return window.PotatoAndroid?.postMessage(JSON.stringify({ type: "pip" }));
   const request = document.pictureInPictureElement ? document.exitPictureInPicture() : streamVideo.requestPictureInPicture();
   request.catch(() => toast("Não deu para abrir a janelinha flutuante."));
 });
@@ -6206,6 +6251,7 @@ $("#decline-call").addEventListener("click", declineCall);
 window.addEventListener("beforeunload", () => {
   if (call && (call.role === "caller" || call.accepted)) socket?.emit("call-ended", { to: call.peerId, id: call.id });
 });
+window.addEventListener("online", () => call?.recovery?.request());
 
 // ---------- nosso cantinho ----------
 // Uma aba só nossa: o dia de cada um (hora em que acordou, refeições com foto, hábitos, humor, momentos e como foi o

@@ -395,6 +395,9 @@ try {
             respond(200, login(input(), (string) ($_SERVER['REMOTE_ADDR'] ?? '?')));
         case 'connect':
             respond(200, connect(input()));
+        case 'rtc-config':
+            $session = authenticate(input());
+            respond(200, rtc_config($session['name']));
         case 'ops':
             respond(200, ops(input()));
         case 'poll':

@@ -5,15 +5,23 @@ import android.app.DownloadManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.PictureInPictureParams
+import android.app.RemoteAction
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.drawable.Icon
+import android.media.projection.MediaProjectionManager
+import android.net.ConnectivityManager
+import android.net.Network
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
+import android.util.Rational
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.CookieManager
@@ -47,6 +55,28 @@ class MainActivity : ComponentActivity() {
     // A chamada aberta no site (null = nenhuma): enquanto ela existe, o CallService segura o microfone com o app fora da
     // tela, e o WebView não é pausado.
     private var callState: CallService.State? = null
+    private var screenActive = false
+    private var peerScreenActive = false
+    private var pendingScreen: JSONObject? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
+    private val screenPermission = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val request = pendingScreen ?: return@registerForActivityResult
+        pendingScreen = null
+        val id = request.optString("id")
+        if (result.resultCode != RESULT_OK || result.data == null) {
+            screenEvent(JSONObject().put("id", id).put("event", "error").put("value", "Compartilhamento de tela cancelado."))
+        } else {
+            runCatching {
+                ContextCompat.startForegroundService(this, Intent(this, ScreenShareService::class.java)
+                    .putExtra("id", id).putExtra("sdp", request.optString("sdp"))
+                    .putExtra("height", request.optInt("height", 720)).putExtra("fps", request.optInt("fps", 30))
+                    .putExtra("permission", result.data))
+            }.onFailure {
+                screenEvent(JSONObject().put("id", id).put("event", "error").put("value", "Não foi possível iniciar a captura."))
+            }
+        }
+    }
 
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (::webView.isInitialized) {
@@ -58,8 +88,8 @@ class MainActivity : ComponentActivity() {
         val request = mediaRequest ?: return@registerForActivityResult
         mediaRequest = null
         val resources = mutableListOf<String>()
-        if (result[Manifest.permission.RECORD_AUDIO] == true) resources += PermissionRequest.RESOURCE_AUDIO_CAPTURE
-        if (result[Manifest.permission.CAMERA] == true) resources += PermissionRequest.RESOURCE_VIDEO_CAPTURE
+        if (PermissionRequest.RESOURCE_AUDIO_CAPTURE in request.resources && checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) resources += PermissionRequest.RESOURCE_AUDIO_CAPTURE
+        if (PermissionRequest.RESOURCE_VIDEO_CAPTURE in request.resources && checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) resources += PermissionRequest.RESOURCE_VIDEO_CAPTURE
         if (resources.isEmpty()) request.deny() else request.grant(resources.toTypedArray())
         // A chamada começou antes da permissão do microfone: agora o serviço dela pode começar.
         callState?.let(::startCallService)
@@ -94,7 +124,13 @@ class MainActivity : ComponentActivity() {
         window.navigationBarColor = Color.rgb(18, 16, 13)
         createChannels()
         configureWebView()
-        CallBridge.page = { action -> webView.evaluateJavascript("window.potatoCall && window.potatoCall(${JSONObject.quote(action)})", null) }
+        CallBridge.page = { action -> runOnUiThread { js("window.potatoCall?.(${JSONObject.quote(action)})") } }
+        ScreenShareBridge.page = ::screenEvent
+        networkCallback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                runOnUiThread { if (callState != null) js("window.potatoCall?.('network')") }
+            }
+        }.also { getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(it) }
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.rgb(18, 16, 13))
             addView(webView)
@@ -103,10 +139,11 @@ class MainActivity : ComponentActivity() {
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             // Teclado aberto: o site encolhe até em cima dele. Sem isso o teclado cobria o fim da conversa.
-            val bottom = maxOf(bars.bottom, insets.getInsets(WindowInsetsCompat.Type.ime()).bottom)
+            val bottom = if (isInPictureInPictureMode) 0 else maxOf(bars.bottom, insets.getInsets(WindowInsetsCompat.Type.ime()).bottom)
+            val top = if (isInPictureInPictureMode) 0 else bars.top
             val params = webView.layoutParams as FrameLayout.LayoutParams
-            if (params.topMargin != bars.top || params.bottomMargin != bottom) {
-                params.topMargin = bars.top
+            if (params.topMargin != top || params.bottomMargin != bottom) {
+                params.topMargin = top
                 params.bottomMargin = bottom
                 webView.layoutParams = params
             }
@@ -119,7 +156,9 @@ class MainActivity : ComponentActivity() {
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (webView.canGoBack()) webView.goBack() else finish()
+                if (callState != null) {
+                    if (!enterCallPip()) moveTaskToBack(true)
+                } else if (webView.canGoBack()) webView.goBack() else finish()
             }
         })
 
@@ -192,7 +231,7 @@ class MainActivity : ComponentActivity() {
                 mediaPlaybackRequiresUserGesture = false
                 cacheMode = WebSettings.LOAD_DEFAULT
                 mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                userAgentString = "$userAgentString PotatoChatAndroid/2.0"
+                userAgentString = "$userAgentString PotatoChatAndroid/3.0"
             }
             CookieManager.getInstance().setAcceptCookie(true)
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
@@ -211,6 +250,7 @@ class MainActivity : ComponentActivity() {
                 override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
                     callState = null
                     CallService.stop(this@MainActivity)
+                    stopService(Intent(this@MainActivity, ScreenShareService::class.java))
                     recreate()
                     return true
                 }
@@ -252,7 +292,7 @@ class MainActivity : ComponentActivity() {
 
         if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
             WebViewCompat.addWebMessageListener(webView, "PotatoAndroid", setOf(SITE_ORIGIN)) { _, message, sourceOrigin, isMainFrame, _ ->
-                if (isMainFrame && sourceOrigin.toString().startsWith(SITE_ORIGIN)) handleBridgeMessage(message.data.orEmpty())
+                if (isMainFrame && sourceOrigin.toString().trimEnd('/') == SITE_ORIGIN) handleBridgeMessage(message.data.orEmpty())
             }
         }
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
@@ -296,6 +336,20 @@ class MainActivity : ComponentActivity() {
             )
             "permission" -> requestNotificationPermission()
             "call" -> onCallState(message)
+            "screen-start" -> {
+                if (pendingScreen != null) {
+                    screenEvent(JSONObject().put("id", message.optString("id")).put("event", "error").put("value", "Já existe uma solicitação de captura."))
+                } else if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+                    pendingScreen = message
+                    runCatching { screenPermission.launch(getSystemService(MediaProjectionManager::class.java).createScreenCaptureIntent()) }
+                        .onFailure { pendingScreen = null; screenEvent(JSONObject().put("id", message.optString("id")).put("event", "error").put("value", "Captura de tela indisponível.")) }
+                } else screenEvent(JSONObject().put("id", message.optString("id")).put("event", "error").put("value", "Abra o aplicativo para iniciar a transmissão."))
+            }
+            "screen-stop" -> {
+                if (pendingScreen?.optString("id") == message.optString("id")) pendingScreen = null
+                stopService(Intent(this, ScreenShareService::class.java))
+            }
+            "pip" -> enterCallPip()
             // O convite (Adicionar pessoa): a janela de compartilhar do Android (WhatsApp, Instagram…).
             "share" -> runCatching {
                 val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, message.optString("text"))
@@ -308,7 +362,13 @@ class MainActivity : ComponentActivity() {
     private fun onCallState(message: JSONObject) {
         if (!message.optBoolean("active")) {
             callState = null
+            screenActive = false
+            peerScreenActive = false
+            pendingScreen = null
+            stopService(Intent(this, ScreenShareService::class.java))
             CallService.stop(this)
+            updatePip()
+            if (isInPictureInPictureMode) moveTaskToBack(true)
             if (!message.optBoolean("ringing")) showOverLock(false)
             return
         }
@@ -317,7 +377,46 @@ class MainActivity : ComponentActivity() {
             message.optString("media"), message.optBoolean("connected"), message.optLong("since"), message.optBoolean("mic", true)
         )
         callState = state
+        screenActive = message.optBoolean("screen")
+        peerScreenActive = message.optBoolean("peerScreen")
         startCallService(state)
+        updatePip()
+    }
+
+    private fun screenEvent(payload: JSONObject) {
+        if (::webView.isInitialized) js("window.dispatchEvent(new CustomEvent('potato-screen', {detail: $payload}))")
+    }
+
+    private fun pipParams(): PictureInPictureParams {
+        val hangup = PendingIntent.getService(this, 73, Intent(this, CallService::class.java).setAction(CallService.ACTION_HANGUP), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val action = RemoteAction(Icon.createWithResource(this, R.drawable.ic_notification), "Desligar", "Encerrar chamada", hangup)
+        return PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).setActions(listOf(action)).apply {
+            if (Build.VERSION.SDK_INT >= 31) {
+                setAutoEnterEnabled(callState != null && (screenActive || peerScreenActive) && pendingScreen == null)
+                setSeamlessResizeEnabled(false)
+            }
+        }.build()
+    }
+
+    private fun updatePip() {
+        if (packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) runCatching { setPictureInPictureParams(pipParams()) }
+    }
+
+    private fun enterCallPip(): Boolean {
+        if (callState == null || pendingScreen != null || !packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) return false
+        if (isInPictureInPictureMode) return true
+        return runCatching { enterPictureInPictureMode(pipParams()) }.getOrDefault(false)
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (screenActive || peerScreenActive) enterCallPip()
+    }
+
+    override fun onPictureInPictureModeChanged(inPip: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(inPip, newConfig)
+        js("window.potatoCall?.('pip', $inPip)")
+        (webView.parent as? android.view.View)?.let { ViewCompat.requestApplyInsets(it) }
     }
 
     // O Android só deixa o microfone em segundo plano com a permissão dele já dada (senão o serviço nem começa).
@@ -338,9 +437,11 @@ class MainActivity : ComponentActivity() {
             (() => {
               if (window.__potatoNativeReady) return;
               window.__potatoNativeReady = true;
+              window.__potatoScreenCapture = true;
               const nativeStyle = document.createElement('style');
               nativeStyle.textContent = '@media (max-width:760px){.tabbar{padding-bottom:6px!important}}';
-              (document.head || document.documentElement).appendChild(nativeStyle);
+              if (document.head || document.documentElement) (document.head || document.documentElement).appendChild(nativeStyle);
+              else document.addEventListener('DOMContentLoaded', () => document.head.appendChild(nativeStyle), {once:true});
               let permission = '$initialPermission';
               const send = value => { try { window.PotatoAndroid?.postMessage(JSON.stringify(value)); } catch (_) {} };
               window.__potatoSetNotificationPermission = value => { permission = value; };
@@ -416,10 +517,16 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         stopService(Intent(this, ChatNotificationService::class.java))
         val notifications = getSystemService(NotificationManager::class.java)
-        notifications.cancelAll()
+        notifications.activeNotifications.filter { it.id != CallNotifications.ONGOING_ID && it.id != ScreenShareService.NOTIFICATION_ID }
+            .forEach { notifications.cancel(it.tag, it.id) }
+        callState?.let(::startCallService)
         ChatNotifications.clear(this)
         // O One UI cria um resumo automatico; limpa novamente depois que o servico termina.
-        webView.postDelayed({ notifications.cancelAll() }, 500)
+        webView.postDelayed({
+            // Não apagar as notificações dos serviços que mantêm a chamada e a captura ativas.
+            notifications.activeNotifications.filter { it.id != CallNotifications.ONGOING_ID && it.id != ScreenShareService.NOTIFICATION_ID }
+                .forEach { notifications.cancel(it.tag, it.id) }
+        }, 500)
         // De volta à tela no meio de uma chamada: a câmera que desligou ao sair volta.
         if (callState != null) js("window.potatoCall && window.potatoCall('foreground')")
     }
@@ -447,6 +554,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         CallBridge.page = null
+        ScreenShareBridge.page = null
+        networkCallback?.let { runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it) } }
+        stopService(Intent(this, ScreenShareService::class.java))
         CallService.stop(this)
         fileCallback?.onReceiveValue(null)
         mediaRequest?.deny()
@@ -459,7 +569,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val SITE_URL = BuildConfig.SITE_URL
-        val SITE_ORIGIN: String = SITE_URL.trimEnd('/')
+        val SITE_ORIGIN: String = Uri.parse(SITE_URL).let { "${it.scheme}://${it.encodedAuthority}" }
         val SITE_HOST: String = Uri.parse(SITE_URL).host.orEmpty()
         const val PREFS = "potato.webview"
         const val MESSAGE_CHANNEL = "potato_messages"

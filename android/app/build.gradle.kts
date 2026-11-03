@@ -11,13 +11,13 @@ android {
         applicationId = "com.potatochat.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
         // Endereço do site. Para testar com o PHP local: ./gradlew assembleDebug -PpotatoSite=http://localhost:8000/
         // (no emulador, antes: adb reverse tcp:8000 tcp:8000).
         buildConfigField("String", "SITE_URL", "\"${project.findProperty("potatoSite") ?: "https://potato.andrejrs.com.br/"}\"")
         // APK enxuto para aparelhos Android atuais; evita empacotar quatro cópias do WebRTC nativo.
-        ndk { abiFilters += "arm64-v8a" }
+        ndk { abiFilters += (project.findProperty("potatoAbis")?.toString() ?: "arm64-v8a").split(",") }
     }
 
     buildTypes {
@@ -41,4 +41,5 @@ dependencies {
     implementation("androidx.webkit:webkit:1.12.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("io.github.webrtc-sdk:android:150.7871.01")
 }

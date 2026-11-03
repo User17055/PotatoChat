@@ -60,9 +60,18 @@ function config(): array
         $file = getenv('POTATO_CONFIG') ?: dirname(__DIR__) . '/config.php';
         $custom = is_file($file) ? require $file : [];
         $custom = is_array($custom) ? $custom : [];
+        $turnFile = dirname($file) . '/turn.config.php';
+        $turn = is_file($turnFile) ? require $turnFile : [];
+        $turn = is_array($turn) ? array_intersect_key($turn, array_flip(['turn_urls', 'turn_secret', 'turn_username', 'turn_password', 'turn_ttl', 'turn_only'])) : [];
         $config = array_merge([
             'token_secret' => '',
             'poll_wait' => 20,
+            'turn_urls' => getenv('TURN_URLS') ?: [],
+            'turn_secret' => getenv('TURN_SECRET') ?: '',
+            'turn_username' => getenv('TURN_USERNAME') ?: '',
+            'turn_password' => getenv('TURN_PASSWORD') ?: '',
+            'turn_ttl' => (int) (getenv('TURN_TTL') ?: 3600),
+            'turn_only' => getenv('TURN_ONLY') === 'true',
             'giphy_key' => '',
             // Bot de música: chave da YouTube Data API (opcional; sem ela, a busca pelo nome lê a página de resultados do YouTube).
             'youtube_key' => '',
@@ -72,7 +81,7 @@ function config(): array
             'transcribe_model' => 'whisper-large-v3-turbo',
             // false = não consulta YouTube nem Spotify (só para os testes automáticos, que rodam sem internet).
             'music_lookup' => true,
-        ], $custom);
+        ], $custom, $turn);
         $config['db'] = array_merge([
             'host' => 'localhost',
             'port' => 3306,
@@ -99,6 +108,28 @@ function client_ttl_ms(): int
 {
     $wait = poll_wait();
     return ($wait > 0 ? $wait + 30 : 90) * 1000;
+}
+
+// Credenciais coturn REST: só a credencial temporária chega ao cliente, nunca o segredo compartilhado.
+function rtc_config(string $name): array
+{
+    $cfg = config();
+    $servers = [['urls' => 'stun:stun.l.google.com:19302'], ['urls' => 'stun:stun1.l.google.com:19302']];
+    $urls = $cfg['turn_urls'];
+    if (is_string($urls)) $urls = preg_split('/[\s,]+/', trim($urls));
+    $urls = array_values(array_filter(is_array($urls) ? $urls : [], fn($url) => is_string($url) && preg_match('/^turns?:[^\s]+$/', $url)));
+    $expires = 0;
+    $username = (string) $cfg['turn_username'];
+    $password = (string) $cfg['turn_password'];
+    if ($urls && $cfg['turn_secret'] !== '') {
+        $expires = time() + max(600, min(86400, (int) $cfg['turn_ttl']));
+        $username = $expires . ':' . substr(hash('sha256', $name), 0, 24);
+        $password = base64_encode(hash_hmac('sha1', $username, (string) $cfg['turn_secret'], true));
+    }
+    $configured = (bool) ($urls && $username !== '' && $password !== '');
+    if ($configured) $servers[] = ['urls' => $urls, 'username' => $username, 'credential' => $password];
+    return ['iceServers' => $servers, 'turnConfigured' => $configured, 'expiresAt' => $expires * 1000,
+        'iceTransportPolicy' => $configured && $cfg['turn_only'] ? 'relay' : 'all'];
 }
 
 // ---------- utilidades ----------
@@ -3098,8 +3129,17 @@ function drop(string $conn, bool $forever = false): void
 function sweep(): void
 {
     $now = now_ms();
-    $stale = query('SELECT conn FROM ' . t('clients') . ' WHERE ping < ?', [$now - client_ttl_ms()])->fetchAll(PDO::FETCH_COLUMN);
-    foreach ($stale as $conn) drop((string) $conn);
+    $stale = query('SELECT conn, ping FROM ' . t('clients') . ' WHERE ping < ?', [$now - client_ttl_ms()])->fetchAll();
+    $inCall = [];
+    foreach (all_calls() as $call) {
+        $inCall[$call['callerConn']] = true;
+        if ($call['calleeConn']) $inCall[$call['calleeConn']] = true;
+    }
+    foreach ($stale as $client) {
+        // Dá tempo para ICE restart/reconexão HTTP ao mudar de Wi-Fi para dados móveis.
+        if (isset($inCall[$client['conn']]) && $now - (int) $client['ping'] < max(180000, client_ttl_ms())) continue;
+        drop((string) $client['conn']);
+    }
     query('DELETE FROM ' . t('gone') . ' WHERE at < ?', [$now - EVENT_KEEP_MS]);
     query('DELETE FROM ' . t('events') . ' WHERE at < ? AND seq < ?', [$now - EVENT_KEEP_MS, last_seq()]);
     // Arquivo enviado que nunca virou mensagem (envio cancelado, aba fechada no meio).
@@ -3228,6 +3268,7 @@ function act(array $me, string $event, $data)
         case 'webrtc-offer':
         case 'webrtc-answer':
         case 'webrtc-ice':
+        case 'webrtc-restart':
         case 'call-state':
             $to = str($body['to'] ?? '');
             $paired = false;

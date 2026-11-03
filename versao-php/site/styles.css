@@ -2362,6 +2362,21 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
   .music-button.has-art { gap: 6px; padding: 0 9px 0 4px; }
   .mini-art { width: 23px; height: 23px; }
 }
+/* A miniatura é a Activity do Android em PiP. Mostra a outra pessoa e o estado da transmissão;
+   a prévia da própria tela fica escondida para evitar um espelho infinito na captura. */
+.android-pip body * { visibility: hidden !important; }
+.android-pip #call-panel, .android-pip #call-panel * { visibility: visible !important; }
+.android-pip #chat-view { transform: none !important; }
+.android-pip #call-panel { position: fixed !important; inset: 0 !important; width: 100vw !important; height: 100vh !important; max-height: none !important; margin: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; transform: none !important; display: flex !important; flex-direction: column; background: #12100d; z-index: 99999; }
+.android-pip #stage { flex: 1; min-height: 0; padding: 0; display: flex; }
+.android-pip #stage .tiles { flex: 1; display: flex; padding: 0; }
+.android-pip #tile-peer, .android-pip #stream-tile { flex: 1; margin: 0; border: 0; border-radius: 0; max-width: none; aspect-ratio: auto; }
+.android-pip #tile-me, .android-pip #my-stream, .android-pip .stream-tools, .android-pip .call-buttons, .android-pip .tile-name, .android-pip .mute-badge, .android-pip .live-badge { display: none !important; }
+.android-pip #stage.has-stream .tiles { display: none !important; }
+.android-pip .call-bar { flex: 0 0 auto; min-height: 0; padding: 5px 8px; }
+.android-pip .call-info { display: flex; flex-wrap: wrap; gap: 4px; font-size: 11px; }
+.android-pip .call-info #live-pill { font-size: 10px; }
+.android-pip #call-panel video { width: 100%; height: 100%; object-fit: contain; }
 @media (max-height: 560px) { .lead { display: none; } .hero-potato { width: 84px; } }
 @media (max-width: 480px) { .login-shell { padding: 12px; } }
 @media (prefers-reduced-motion: reduce) {

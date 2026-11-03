@@ -80,6 +80,11 @@ try {
   const thirdLogin = await login("Intrusa");
   assert.equal(firstLogin.response.status, 200);
   assert.equal(secondLogin.response.status, 200);
+  assert.equal((await fetch(`${baseUrl}/api/rtc-config`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).status, 401);
+  const rtc = await fetch(`${baseUrl}/api/rtc-config`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: firstLogin.body.token }) });
+  assert.equal(rtc.status, 200);
+  assert.equal(rtc.headers.get("cache-control"), "no-store");
+  assert.ok(Array.isArray((await rtc.json()).iceServers));
 
   const first = await connect(firstLogin.body.token);
   const second = await connect(secondLogin.body.token);
@@ -140,6 +145,25 @@ try {
   first.emit("webrtc-offer", { media: "audio", description: { type: "offer", sdp: "x" } });
   assert.equal((await offer).name, "Pessoa 1");
   await noSelfOffer;
+  const restart = next(second, "webrtc-restart");
+  const noSelfRestart = silent(firstExtension, "webrtc-restart");
+  first.emit("webrtc-restart", { kind: "request", to: second.id });
+  assert.equal((await restart).from, first.id);
+  await noSelfRestart;
+
+  // A sinalização reencontra o mesmo participante depois que o Socket.IO ganha outro ID.
+  const previousId = first.id;
+  first.disconnect();
+  const reconnected = await connect(firstLogin.body.token);
+  const resumed = next(second, "call-resume");
+  const noSelfResume = silent(firstExtension, "call-resume");
+  reconnected.emit("call-resume", { id: "chamada-de-teste", to: second.id });
+  const resume = await resumed;
+  assert.equal(resume.id, "chamada-de-teste");
+  assert.equal(resume.from, reconnected.id);
+  assert.notEqual(resume.from, previousId);
+  await noSelfResume;
+  reconnected.disconnect();
 
   first.disconnect();
   second.disconnect();

@@ -40,7 +40,7 @@ const transcriberServer = http.createServer((request, response) => {
 });
 await new Promise((resolve) => transcriberServer.listen(0, "127.0.0.1", resolve));
 const transcribeUrl = `http://127.0.0.1:${transcriberServer.address().port}/v1/audio/transcriptions`;
-await fs.writeFile(configFile, `<?php return ${phpValue({ token_secret: secret, db, poll_wait: 3, giphy_key: giphyKey, music_lookup: false, transcribe_key: "chave-de-transcricao", transcribe_url: transcribeUrl, transcribe_model: "modelo-de-teste" })};`);
+await fs.writeFile(configFile, `<?php return ${phpValue({ token_secret: secret, db, poll_wait: 3, giphy_key: giphyKey, music_lookup: false, transcribe_key: "chave-de-transcricao", transcribe_url: transcribeUrl, transcribe_model: "modelo-de-teste", turn_urls: ["turn:turn.example:3478?transport=udp", "turns:turn.example:5349?transport=tcp"], turn_secret: "segredo-turn-teste", turn_ttl: 600 })};`);
 
 function phpValue(value) {
   if (typeof value === "boolean") return value ? "true" : "false";
@@ -224,6 +224,14 @@ try {
   const firstLogin = await login("Pessoa 1", "senha-1", "senha-1");
   assert.equal(firstLogin.status, 200);
   assert.equal(firstLogin.body.created, true);
+  assert.equal((await api("rtc-config", {})).status, 401);
+  const rtc = await api("rtc-config", { token: firstLogin.body.token });
+  assert.equal(rtc.status, 200);
+  assert.equal(rtc.body.turnConfigured, true);
+  assert.ok(rtc.body.expiresAt > Date.now() && rtc.body.expiresAt <= Date.now() + 601000);
+  const turn = rtc.body.iceServers.at(-1);
+  assert.equal(turn.credential, crypto.createHmac("sha1", "segredo-turn-teste").update(turn.username).digest("base64"));
+  assert.ok(!JSON.stringify(rtc.body).includes("segredo-turn-teste"));
   assert.deepEqual(await welcome(), { open: 1 });
   const secondLogin = await login("Pessoa 2", "senha-2", "senha-2");
   assert.equal(secondLogin.status, 200);
@@ -1235,6 +1243,15 @@ try {
     caller.emit("webrtc-offer", { id: opened.call.id, to: phone.id, description: { type: "offer", sdp: "x" }, media: "audio" });
     assert.deepEqual([(await offer).from, (await offer).id], [caller.id, opened.call.id]);
     await notLaptop;
+    const restart = next(phone, "webrtc-restart");
+    const noOtherDevice = silent(laptop, "webrtc-restart", 1500);
+    caller.emit("webrtc-restart", { id: opened.call.id, to: phone.id, kind: "request" });
+    assert.deepEqual([(await restart).from, opened.call.id], [caller.id, opened.call.id]);
+    await noOtherDevice;
+    // O timeout normal de presença não encerra a chamada durante uma troca de rede.
+    sql(`UPDATE {p}clients SET ping = ${Date.now() - 70000} WHERE conn = '${caller.id}'`);
+    php("(function () { sweep(); return true; })()");
+    assert.equal((await withAck(phone, "call", { op: "get", id: opened.call.id })).call.id, opened.call.id);
 
     // Desligar: todos os aparelhos ficam sabendo, e a mensagem mostra que foi atendida (e quanto durou).
     const ended = next(laptop, "call-ended");

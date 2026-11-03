@@ -6,6 +6,8 @@ O app abre o site do Potato Chat (a versão PHP publicada em `https://potato.and
 - **Nosso cantinho** (com o app fechado): os **lembretes da rotina** chegam como notificação com **Responder** — "O que você almoçou?" se responde ali mesmo, e a resposta vai direto para o dia da pessoa. Na de acordar, dá para escrever a hora ou tocar em *Acordei agora*; na da rotina, *Fiz tudo*. Também chegam os lembretes dos compromissos da agenda e as novidades da outra pessoa (cartinha nova, compromisso marcado, sonho realizado, o que comeu). Tocar abre o app direto naquela parte. Os canais *Lembretes* e *Nosso cantinho* podem ser ajustados nas configurações de notificação do Android.
 - **Chamadas com o app fechado:** a chamada recebida toca com o toque do celular, também bloqueado (em tela cheia), com *Atender* e *Recusar*; recusar não abre o app. Depois de 1 minuto ela vira "está te esperando na chamada", com *Entrar*. Chamada perdida chega com *Ligar de volta*.
 - **Chamada em segundo plano:** saindo do app (ou desligando a tela) no meio de uma chamada, ela continua, com a notificação de chamada (tempo, *Silenciar* e desligar). A câmera desliga ao sair e volta sozinha ao voltar para o app (o Android não deixa a câmera em segundo plano).
+- **Transmitir a tela do celular:** captura nativa com MediaProjection, após a autorização do Android. O serviço de captura entrega uma faixa de vídeo ao WebRTC do site por uma conexão local no próprio aparelho. A voz continua pelo microfone; áudio interno de outros apps ainda não é capturado.
+- **Miniatura flutuante:** durante uma transmissão, Home abre o Picture-in-Picture automaticamente. O botão de miniatura também abre durante a chamada; Voltar mantém a chamada e tenta abrir a miniatura. A miniatura mostra a outra pessoa ou a transmissão recebida e permite desligar. A prévia da própria tela é escondida nela para evitar um espelho infinito.
 - **Sempre conectado:** a conexão em segundo plano volta sozinha depois de ligar o celular, e não tem mais o limite de 6 horas por dia do Android 15. No Samsung, se as chamadas não tocarem com o app fechado, tire o Potato Chat dos "apps em suspensão" (Configurações → Bateria).
 - **Permissões** de microfone e câmera (chamadas e mensagens de voz), de notificações e de arquivos (anexar e baixar).
 - **Teclado**: com ele aberto, o site encolhe até em cima dele, então o campo de mensagem fica sempre à vista; as abas de baixo saem só enquanto ele está aberto.
@@ -38,3 +40,9 @@ Em `localhost` o microfone e a câmera funcionam (o Android trata como endereço
 ## Produção
 
 Para distribuir, crie uma chave de assinatura e configure um build `release`.
+
+O APK 1.1.0 precisa dos arquivos atualizados de `versao-php/site/`, inclusive os módulos `native-screen.js`, `rtc-config.js` e `rtc-recovery.js`. A configuração privada de TURN fica em `turn.config.php`, ao lado de `config.php`, e não entra no Git. Veja [TURN](../ops/TURN.md).
+
+Para testar em emulador x86: `./gradlew.bat assembleDebug -PpotatoAbis=x86_64 -PpotatoSite=http://localhost:8311/`. A fixture `node ../tests/android-smoke.mjs` permite validar captura, encerramento, microfone e PiP sem usar contas reais (`adb reverse tcp:8311 tcp:8311`).
+
+Home e Voltar preservam a Activity da chamada. Forçar parada do app, encerrar seu processo ou destruir a Activity encerra a chamada. O Android também pode interromper a captura ao bloquear a tela; isso encerra a transmissão, mantendo a chamada de voz enquanto o processo continuar ativo. PiP depende de suporte e permissão nas configurações do Android.

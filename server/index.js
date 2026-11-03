@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 import { createServer } from "node:http";
 import { Server } from "socket.io";
+import { rtcConfig } from "./rtc-config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
@@ -181,6 +182,12 @@ const loginLimit = limiter(12, 5 * 60 * 1000);
 // ---------- HTTPS ----------
 
 app.get("/api/health", (_, res) => res.json({ ok: true, people: people().length }));
+app.post("/api/rtc-config", (req, res) => {
+  const session = verify(req.body?.token);
+  res.setHeader("Cache-Control", "no-store");
+  if (!session || !knownUser(session.name)) return res.status(401).json({ error: "Sessão inválida." });
+  res.json(rtcConfig(session.name));
+});
 
 app.post("/api/login", async (req, res) => {
   if (!loginLimit(req.ip)) return res.status(429).json({ error: "Muitas tentativas. Espere alguns minutos." });
@@ -344,12 +351,14 @@ io.on("connection", (socket) => {
     toMyOtherTabs(socket, "call-handled");
   });
   socket.on("webrtc-ice", (payload) => toPeer(socket, "webrtc-ice", { ...payload, from: socket.id }));
+  socket.on("webrtc-restart", (payload) => toPeer(socket, "webrtc-restart", { ...payload, from: socket.id }));
+  socket.on("call-resume", (payload) => toPeer(socket, "call-resume", { ...payload, from: socket.id }));
   socket.on("call-state", (payload) => toPeer(socket, "call-state", { ...payload, from: socket.id }));
   socket.on("call-declined", () => {
     toPeer(socket, "call-declined", { name });
     toMyOtherTabs(socket, "call-handled");
   });
-  socket.on("call-ended", () => toPeer(socket, "call-ended", { name }));
+  socket.on("call-ended", (payload) => toPeer(socket, "call-ended", { ...payload, from: socket.id, name }));
 
   socket.on("disconnect", () => {
     if (socket.data.client === "web") toPeer(socket, "peer-left", { id: socket.id, name });

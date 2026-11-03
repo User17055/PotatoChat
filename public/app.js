@@ -1,5 +1,8 @@
 import { sound } from "./sound.js";
 import { fx, effectFor, motion } from "./fx.js";
+import { nativeScreenAvailable, startNativeScreen, stopNativeScreen } from "./native-screen.js";
+import { createRtcRecovery } from "./rtc-recovery.js";
+import { createRtcConfigLoader } from "./rtc-config.js";
 
 const $ = (selector) => document.querySelector(selector);
 const loginView = $("#login-view");
@@ -30,7 +33,8 @@ const SESSION_KEY = "potato.session";
 const NAME_KEY = "potato.name";
 const NOTIFY_KEY = "potato.notify";
 const REACTIONS = ["❤️", "😂", "😮", "😢", "👍", "🔥"];
-const rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }] };
+const inAndroid = /PotatoChatAndroid/.test(navigator.userAgent);
+const loadRtcConfig = createRtcConfigLoader(new URL("/api/rtc-config", location.href), () => socket?.auth.token || "");
 
 // Quando o site roda dentro do painel lateral da extensão, conversa com ela via postMessage.
 const parentOrigin = window.parent !== window ? (location.ancestorOrigins?.[0] || "") : "";
@@ -289,6 +293,8 @@ function connect(token, animate) {
     fx.hide(netBanner, { y: -10 });
     socket.emit("visibility", !document.hidden);
     for (const message of pending.values()) deliver(message);
+    if (call?.id && (call.connected || call.accepted)) socket.emit("call-resume", { id: call.id });
+    call?.recovery?.request();
   });
 
   socket.on("disconnect", (reason) => {
@@ -349,6 +355,15 @@ function connect(token, animate) {
   socket.on("webrtc-offer", receiveOffer);
   socket.on("webrtc-answer", receiveAnswer);
   socket.on("webrtc-ice", receiveIce);
+  socket.on("webrtc-restart", (message) => {
+    if (call && message.from === call.peerId && message.id === call.id) call.recovery?.receive(message);
+  });
+  socket.on("call-resume", ({ id, from, reply }) => {
+    if (!call?.id || call.id !== id || (!call.connected && !call.accepted)) return;
+    call.peerId = from;
+    if (!reply) socket.emit("call-resume", { id, to: from, reply: true });
+    call.recovery?.request();
+  });
   socket.on("call-state", receiveCallState);
   socket.on("call-declined", ({ name }) => {
     if (call?.role !== "caller" || call.connected) return;
@@ -356,8 +371,8 @@ function connect(token, animate) {
     sound.play("hangup");
     teardown(false);
   });
-  socket.on("call-ended", () => {
-    if (!call) return;
+  socket.on("call-ended", ({ id } = {}) => {
+    if (!call || (id && id !== call.id)) return;
     if (call.role === "callee" && !call.accepted) toast(`Chamada perdida de ${call.name}.`);
     else toast("Chamada encerrada.");
     sound.play("hangup");
@@ -368,6 +383,7 @@ function connect(token, animate) {
   });
   socket.on("peer-left", ({ id }) => {
     if (call && (call.peerId === id || !call.peerId)) {
+      if (call.connected || call.accepted) return call.recovery?.request();
       toast("A outra pessoa saiu da chamada.");
       sound.play("hangup");
       teardown(false);
@@ -969,7 +985,7 @@ const QUALITY = {
   "1080p": { width: 1920, height: 1080, frameRate: 30, bitrate: 4_500_000, hint: "detail" },
   "1080p60": { width: 1920, height: 1080, frameRate: 60, bitrate: 8_000_000, hint: "motion" }
 };
-const canStream = Boolean(navigator.mediaDevices?.getDisplayMedia);
+const canStream = nativeScreenAvailable() || Boolean(navigator.mediaDevices?.getDisplayMedia);
 
 const stage = $("#stage");
 const streamTile = $("#stream-tile");
@@ -1014,11 +1030,11 @@ function myState() {
 
 // Avisa a outra pessoa o que está ligado (microfone, câmera, transmissão).
 function sendState() {
-  if (call?.slots) socket?.emit("call-state", { to: call.peerId, ...myState() });
+  if (call?.slots) socket?.emit("call-state", { id: call.id, to: call.peerId, ...myState() });
 }
 
 function receiveCallState(state) {
-  if (!call) return;
+  if (!call || (state.id && state.id !== call.id)) return;
   const before = call.remoteState;
   call.remoteState = { mic: Boolean(state.mic), cam: Boolean(state.cam), screen: Boolean(state.screen) };
   if (call.remoteState.screen && !before.screen) {
@@ -1052,6 +1068,7 @@ function paintStage() {
   const { local, remote, remoteState } = call;
   const peerLive = Boolean(remoteState.screen && remote.screen);
   const owner = peerLive ? "peer" : local.screen ? "me" : null;
+  document.documentElement.classList.toggle("pip-own", owner === "me");
 
   stage.classList.toggle("has-stream", Boolean(owner));
   streamTile.classList.toggle("hidden", !owner);
@@ -1076,6 +1093,7 @@ function paintStage() {
   setToggle($("#toggle-mic"), micOn(), "Silenciar microfone", "Ativar microfone");
   setToggle($("#toggle-cam"), Boolean(local.cam), "Desligar câmera", "Ligar câmera");
   setToggle($("#toggle-live"), Boolean(local.screen), "Parar transmissão", "Transmitir tela");
+  syncAndroidCall();
 }
 
 function openCallPanel(status) {
@@ -1098,31 +1116,45 @@ function openCallPanel(status) {
   scrollToLatest();
 }
 
-function createPeer() {
-  peerConnection = new RTCPeerConnection(rtcConfig);
-  peerConnection.onicecandidate = ({ candidate }) => candidate && socket.emit("webrtc-ice", { candidate, to: call?.peerId });
-  peerConnection.ontrack = ({ track, transceiver }) => {
-    if (!call) return;
-    const slot = SLOTS[peerConnection.getTransceivers().indexOf(transceiver)];
+async function createPeer() {
+  const active = call;
+  const settings = await loadRtcConfig();
+  if (active !== call) throw new Error("Chamada encerrada");
+  const peer = peerConnection = new RTCPeerConnection(settings.config);
+  active.recovery = createRtcRecovery({
+    peer, caller: active.role === "caller", loadConfig: loadRtcConfig, remoteReady: flushCandidates,
+    send: (message) => socket?.emit("webrtc-restart", { ...message, id: active.id, to: active.peerId }),
+    status: (text) => { if (call === active) callStatus.textContent = text || `Em chamada com ${active.name}`; },
+    failed: () => {
+      if (call !== active) return;
+      toast("Não foi possível recuperar a conexão. Verifique a internet e o servidor TURN.", "error");
+      teardown(true);
+    }
+  });
+  peer.onicecandidate = ({ candidate }) => {
+    if (candidate && call === active) socket.emit("webrtc-ice", { id: active.id, candidate, to: active.peerId });
+  };
+  peer.ontrack = ({ track, transceiver }) => {
+    if (call !== active) return;
+    const slot = SLOTS[peer.getTransceivers().indexOf(transceiver)];
     if (!slot) return;
     call.remote[slot] = track;
     if (slot === "mic") remoteAudio.srcObject = new MediaStream([track]);
     paintStage();
   };
-  peerConnection.onconnectionstatechange = () => {
-    const state = peerConnection?.connectionState;
+  peer.onconnectionstatechange = () => {
+    if (call !== active) return;
+    const state = peer.connectionState;
     if (state === "connected") {
       onConnected();
       if (call) callStatus.textContent = `Em chamada com ${call.name}`;
     }
     if (state === "disconnected") callStatus.textContent = "Conexão instável…";
     if (state === "failed") {
-      toast("A chamada caiu. Redes muito restritas podem precisar de um servidor TURN.", "error");
-      sound.play("error");
-      teardown(true);
+      callStatus.textContent = "Reconectando a chamada…";
     }
   };
-  return peerConnection;
+  return peer;
 }
 
 // Anel verde em volta de quem está falando.
@@ -1154,7 +1186,9 @@ function onConnected() {
   sound.play("connected");
   tilePeer.classList.remove("ringing");
   callInfo.classList.add("live");
-  const started = Date.now();
+  const started = call.since = Date.now();
+  syncAndroidCall();
+  call.recovery?.configure().catch(() => {});
   call.clock = setInterval(() => {
     const seconds = Math.floor((Date.now() - started) / 1000);
     callTimer.textContent = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
@@ -1227,23 +1261,26 @@ async function tuneScreen() {
 
 async function startLive(key = currentQuality()) {
   const active = call;
-  if (!active || !canStream) return false;
+  if (!active || !canStream || active.sharePending) return false;
+  active.sharePending = true;
   const quality = QUALITY[key] || QUALITY["1080p"];
   let display;
+  if (nativeScreenAvailable() && active.local.screen) stopLive(false);
   try {
-    display = await navigator.mediaDevices.getDisplayMedia({
+    display = nativeScreenAvailable() ? await startNativeScreen(quality) : await navigator.mediaDevices.getDisplayMedia({
       video: { width: { ideal: quality.width }, height: { ideal: quality.height }, frameRate: { ideal: quality.frameRate, max: quality.frameRate } },
       audio: true,
       systemAudio: "include",
       surfaceSwitching: "include",
       selfBrowserSurface: "exclude"
     });
-  } catch {
-    toast(inExtension ? mediaDeniedText() : "Transmissão cancelada.");
+  } catch (error) {
+    toast(nativeScreenAvailable() ? error.message : inExtension ? mediaDeniedText() : "Transmissão cancelada.");
     return false;
-  }
+  } finally { active.sharePending = false; }
   if (active !== call) {
     display.getTracks().forEach((track) => track.stop());
+    stopNativeScreen();
     return false;
   }
   stopLive(false);
@@ -1264,6 +1301,7 @@ async function startLive(key = currentQuality()) {
 
 function stopLive(notify = true) {
   if (!call?.local.screen) return;
+  stopNativeScreen();
   call.local.screen.stop();
   call.local.screenAudio?.stop();
   call.local.screen = null;
@@ -1286,9 +1324,13 @@ async function startCall(media) {
     sound.play("error");
     return toast(`${peerName || "A outra pessoa"} não está online agora.`);
   }
-  const active = call = newCall({ media, role: "caller", name: peerName });
+  const active = call = newCall({ id: uid(), media, role: "caller", name: peerName });
   // A tela é escolhida primeiro, enquanto o clique ainda vale para o navegador.
-  if (media === "screen" && !(await startLive())) return teardown(false);
+  if (media === "screen") {
+    const started = await startLive();
+    if (active !== call) return;
+    if (!started) return teardown(false);
+  }
   if (active !== call) return;
   await acquireMic(active);
   if (media === "video") await toggleCam();
@@ -1296,11 +1338,11 @@ async function startCall(media) {
 
   openCallPanel(`Chamando ${active.name}…`);
   try {
-    const peer = createPeer();
+    const peer = await createPeer();
     active.slots = Object.fromEntries(SLOTS.map((slot) => [slot, peer.addTransceiver(SLOT_KIND[slot], { direction: "sendrecv" })]));
     await Promise.all(SLOTS.map(attach));
     await peer.setLocalDescription(await peer.createOffer());
-    socket.emit("webrtc-offer", { description: peer.localDescription, media, state: myState() });
+    socket.emit("webrtc-offer", { id: active.id, description: peer.localDescription, media, state: myState() });
   } catch {
     sound.play("error");
     toast("Não foi possível iniciar a chamada.", "error");
@@ -1316,12 +1358,12 @@ async function startCall(media) {
   }, 45000);
 }
 
-function receiveOffer({ description, media, name, from, state }) {
+function receiveOffer({ id, description, media, name, from, state }) {
   if (call) {
     socket.emit("call-declined", { to: from });
     return;
   }
-  call = newCall({ media, role: "callee", peerId: from, offer: description, name });
+  call = newCall({ id, media, role: "callee", peerId: from, offer: description, name });
   call.remoteState = state || { mic: true, cam: media === "video", screen: media === "screen" };
   paintAvatar($("#incoming-face"), name);
   $("#incoming-title").textContent = `${name} está ligando`;
@@ -1354,7 +1396,7 @@ async function acceptCall() {
     if (active.media === "video") await toggleCam();
     if (active !== call) return;
     openCallPanel("Conectando…");
-    const peer = createPeer();
+    const peer = await createPeer();
     await peer.setRemoteDescription(active.offer);
     const transceivers = peer.getTransceivers();
     active.slots = Object.fromEntries(SLOTS.map((slot, index) => [slot, transceivers[index]]).filter(([, transceiver]) => transceiver));
@@ -1362,7 +1404,7 @@ async function acceptCall() {
     await Promise.all(SLOTS.map(attach));
     await flushCandidates();
     await peer.setLocalDescription(await peer.createAnswer());
-    socket.emit("webrtc-answer", { description: peer.localDescription, to: active.peerId, state: myState() });
+    socket.emit("webrtc-answer", { id: active.id, description: peer.localDescription, to: active.peerId, state: myState() });
   } catch {
     sound.play("error");
     toast(inExtension ? mediaDeniedText() : "Não foi possível entrar na chamada.", "error");
@@ -1377,8 +1419,8 @@ function declineCall() {
   teardown(false);
 }
 
-async function receiveAnswer({ description, from, state }) {
-  if (call?.role !== "caller" || !peerConnection) return;
+async function receiveAnswer({ id, description, from, state }) {
+  if (call?.role !== "caller" || !peerConnection || (id && id !== call.id)) return;
   call.peerId = from;
   if (state) call.remoteState = state;
   sound.stopLoop();
@@ -1388,10 +1430,10 @@ async function receiveAnswer({ description, from, state }) {
   paintStage();
 }
 
-async function receiveIce({ candidate }) {
-  if (!call) return;
+async function receiveIce({ candidate, id, from }) {
+  if (!call || (id && id !== call.id) || (from && call.peerId && from !== call.peerId)) return;
   if (!peerConnection?.remoteDescription) pendingCandidates.push(candidate);
-  else await peerConnection.addIceCandidate(candidate).catch(() => {});
+  else await peerConnection.addIceCandidate(candidate).catch(() => { if (pendingCandidates.length < 200) pendingCandidates.push(candidate); });
 }
 
 async function flushCandidates() {
@@ -1399,7 +1441,10 @@ async function flushCandidates() {
 }
 
 function teardown(notifyPeer) {
-  if (notifyPeer && call) socket?.emit("call-ended", { to: call.peerId });
+  stopNativeScreen();
+  call?.recovery?.close();
+  document.documentElement.classList.remove("android-pip");
+  if (notifyPeer && call) socket?.emit("call-ended", { id: call.id, to: call.peerId });
   if (notifyPeer && call?.connected) sound.play("hangup");
   if (call) {
     clearTimeout(call.timeout);
@@ -1426,7 +1471,29 @@ function teardown(notifyPeer) {
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   fx.hide(callPanel, { y: -20, scale: 0.97 });
   requestAnimationFrame(() => scrollToLatest());
+  syncAndroidCall();
 }
+
+function syncAndroidCall() {
+  if (!inAndroid) return;
+  const active = call && (call.role === "caller" || call.accepted) ? call : null;
+  const state = active ? { type: "call", active: true, id: active.peerId || "", name: active.name, media: active.media,
+    connected: active.connected, since: active.since || 0, mic: micOn(), screen: Boolean(active.local.screen), peerScreen: Boolean(active.remoteState.screen) }
+    : { type: "call", active: false, ringing: Boolean(call) };
+  window.PotatoAndroid?.postMessage(JSON.stringify(state));
+}
+
+window.potatoCall = (action, value) => {
+  if (action === "hangup") teardown(true);
+  else if (action === "mute") toggleMic();
+  else if (action === "network") call?.recovery?.request();
+  else if (action === "pip") document.documentElement.classList.toggle("android-pip", value === true);
+  else if (action === "background" && call?.local.cam) { call.camPaused = true; toggleCam(); }
+  else if (action === "foreground" && call?.camPaused) { call.camPaused = false; toggleCam(); }
+};
+window.addEventListener("online", () => call?.recovery?.request());
+$("#call-pip").classList.toggle("hidden", !inAndroid);
+$("#call-pip").addEventListener("click", () => window.PotatoAndroid?.postMessage(JSON.stringify({ type: "pip" })));
 
 function paintQualityMenu() {
   qualityMenu.querySelectorAll("[data-quality]").forEach((option) => option.classList.toggle("selected", option.dataset.quality === currentQuality()));
@@ -1469,7 +1536,7 @@ $("#stream-volume").addEventListener("input", (event) => { streamVideo.volume = 
 $("#end-call").addEventListener("click", () => teardown(true));
 $("#accept-call").addEventListener("click", acceptCall);
 $("#decline-call").addEventListener("click", declineCall);
-window.addEventListener("beforeunload", () => { if (call) socket?.emit("call-ended", { to: call.peerId }); });
+window.addEventListener("beforeunload", () => { if (call) socket?.emit("call-ended", { id: call.id, to: call.peerId }); });
 
 // ---------- ponte com a extensão ----------
 
