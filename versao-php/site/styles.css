@@ -2369,6 +2369,60 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
 }
 /* A miniatura é a Activity do Android em PiP. Mostra a outra pessoa e o estado da transmissão;
    a prévia da própria tela fica escondida para evitar um espelho infinito na captura. */
+/* A faixa da chamada pertence ao app inteiro, independentemente da aba aberta. */
+.app-shell.has-call-dock { --call-dock-height: 68px; padding-top: var(--call-dock-height); }
+.has-call-dock > :is(.conversation, .profile-view, .us-view) { height: calc(100dvh - var(--call-dock-height)); }
+.call-dock { position: absolute; inset: 0 0 auto; z-index: 20; height: var(--call-dock-height, 68px); display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-bottom: 1px solid color-mix(in srgb, var(--speak) 35%, var(--line)); background: color-mix(in srgb, var(--surface) 93%, var(--speak)); box-shadow: 0 4px 18px #0003; }
+.call-dock-open { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--ink); text-align: left; border-radius: 10px; }
+.call-dock-icon { display: grid; flex: none; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: color-mix(in srgb, var(--speak) 16%, transparent); color: var(--speak); }
+.call-dock-icon .icon { width: 22px; height: 22px; }
+.call-dock-copy { display: grid; gap: 5px; min-width: 0; }
+.call-dock-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 650; }
+.call-dock-copy > span { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 11px; color: var(--muted); }
+#call-dock-status { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.call-dock.connected .call-dot { background: var(--speak); box-shadow: 0 0 0 3px color-mix(in srgb, var(--speak) 15%, transparent); }
+.call-dock:not(.connected) .call-dot { background: var(--accent); }
+.call-dock-timer, .call-dock .call-timer { flex: none; }
+.call-dock-arrow { flex: none; width: 18px; height: 18px; margin-left: auto; color: var(--muted); }
+.call-dock-actions { display: flex; flex: none; gap: 7px; }
+.call-dock .round { width: 42px; height: 42px; }
+.call-dock .hangup { width: 48px; }
+#call-dock-mic.is-off { background: #ff6b5e26; color: var(--danger); }
+.call-minimized #call-panel { display: none !important; }
+.call-head { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--line-soft); }
+.call-heading { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--muted); font-size: 11px; font-weight: 650; }
+.call-heading .icon { width: 16px; height: 16px; color: var(--speak); }
+.call-minimize { display: flex; align-items: center; justify-content: center; gap: 5px; min-height: 32px; padding: 5px 8px; border: 0; border-radius: 8px; background: #ffffff0c; color: var(--muted); font-size: 11px; }
+.call-minimize:hover { background: #ffffff1a; color: var(--ink); }
+.call-minimize .icon { width: 16px; height: 16px; }
+@media (max-width: 760px) {
+  .call-dock { gap: 6px; padding-inline: 10px; }
+  .call-dock-open { gap: 8px; }
+  .call-dock-icon { width: 32px; height: 36px; border-radius: 10px; }
+  .call-dock-arrow { display: none; }
+  .call-dock-copy strong { font-size: 12px; }
+  .call-dock-copy > span { gap: 6px; font-size: 10px; }
+  .call-panel { border-radius: 18px; }
+  .call-panel.voice-only { height: auto; }
+  .voice-only .stage { flex: none; height: 132px; min-height: 0; padding: 12px; }
+  .voice-only .tiles { flex-direction: row; gap: 10px; }
+  .voice-only .tile.person-tile { flex: 1; width: auto; height: 108px; aspect-ratio: auto; border-radius: 14px; }
+  .voice-only .tile .avatar.big { width: 46px; font-size: 20px; margin-bottom: 13px; }
+  .voice-only .tile-name { left: 50%; bottom: 7px; transform: translateX(-50%); max-width: calc(100% - 10px); padding: 2px 6px; background: transparent; font-size: 11px; }
+  .call-bar { gap: 10px; padding: 10px; }
+  .call-buttons { width: 100%; justify-content: center; gap: 8px; }
+  .call-info { gap: 6px; font-size: 11px; flex-wrap: wrap; }
+  #call-status { max-width: 100%; }
+  .round { width: 42px; height: 42px; }
+  .round.hangup { width: 54px; }
+}
+@media (max-width: 350px) {
+  .call-dock-icon { display: none; }
+  .call-buttons { gap: 5px; }
+  .call-buttons .round { width: 38px; height: 40px; }
+  .call-buttons .hangup { width: 48px; }
+}
+
 /* No celular, dar mais altura à tela recebida; no PC o palco já ocupa a coluna inteira. */
 @media (max-width: 760px) {
   .call-panel.receiving-screen { height: min(70dvh, 900px); }

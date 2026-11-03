@@ -3111,6 +3111,7 @@ function paintTabs() {
     if (active) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
   });
+  paintCallDock();
 }
 
 function paintUnread() {
@@ -5385,6 +5386,8 @@ const SHARE_AUDIO_KEY = "potato.shareAudio";
 const QUALITY_LABEL = { "720p": "720p", "1080p": "1080p", "1080p60": "1080p 60fps" };
 const canPip = inAndroid || Boolean(document.pictureInPictureEnabled && streamVideo.requestPictureInPicture);
 const callInfo = $(".call-info");
+const callDock = $("#call-dock");
+const dockMic = $("#call-dock-mic");
 const SPEAKING_LEVEL = 0.025;
 const availableCalls = new Map();
 const replacedCalls = store.get("sessionStorage", "potato.replacedCalls");
@@ -5427,6 +5430,7 @@ function paintAvailableCall() {
   if (activeHere && current?.waitingUntil && !otherParticipant(current)) {
     callStatus.textContent = `Aguardando ${call.name} · ${waitLabel(current.waitingUntil)}`;
   }
+  paintCallDock();
 }
 setInterval(paintAvailableCall, 1000);
 $("#join-available-call").addEventListener("click", () => {
@@ -5598,6 +5602,50 @@ function newCall(fields) {
 const micOn = () => Boolean(call?.local.mic?.enabled);
 const currentQuality = () => call?.quality || store.get("localStorage", QUALITY_KEY) || "1080p";
 
+// A faixa fica fora da conversa: permanece acessível no perfil, no cantinho e em outros chats.
+function paintCallDock() {
+  const active = call && (call.role === "caller" || call.accepted) ? call : null;
+  const focused = Boolean(active && tab === "chat" && room === active.room && !active.minimized);
+  const docked = Boolean(active && !focused);
+  callDock.classList.toggle("hidden", !docked);
+  chatView.classList.toggle("has-call-dock", docked);
+  chatView.classList.toggle("call-minimized", Boolean(active && !focused));
+  chatView.classList.toggle("in-call", focused);
+  if (!active) return;
+  callDock.classList.toggle("connected", active.connected && peerConnection?.connectionState === "connected");
+  $("#call-dock-name").textContent = `Chamada com ${active.name}`;
+  $("#call-dock-status").textContent = callStatus.textContent.startsWith("Em chamada com") ? "Em chamada · Toque para voltar" : callStatus.textContent;
+  $("#call-dock-timer").textContent = callTimer.textContent;
+  $("#call-dock-open").setAttribute("aria-label", `Voltar à chamada com ${active.name}`);
+  setToggle(dockMic, micOn(), "Silenciar microfone", "Ativar microfone");
+  dockMic.setAttribute("aria-label", dockMic.title);
+}
+
+async function returnToCall() {
+  const active = call;
+  if (!active) return;
+  if (room !== active.room && !await openRoom(active.room)) return;
+  if (call !== active) return;
+  active.minimized = false;
+  showTab("chat");
+  setMenu(false);
+  paintCallDock();
+  $("#call-minimize").focus({ preventScroll: true });
+}
+
+$("#call-dock-open").addEventListener("click", returnToCall);
+$("#call-dock-mic").addEventListener("click", toggleMic);
+$("#call-dock-leave").addEventListener("click", () => teardown(true));
+$("#call-minimize").addEventListener("click", () => {
+  if (!call) return;
+  call.minimized = true;
+  chatView.classList.remove("call-expanded");
+  setToggle($("#toggle-chat"), true, "Esconder o chat", "Mostrar o chat");
+  paintCallDock();
+  $("#call-dock-open").focus({ preventScroll: true });
+  requestAnimationFrame(() => scrollToLatest());
+});
+
 function myState() {
   return { mic: micOn(), cam: Boolean(call?.local.cam), screen: Boolean(call?.local.screen) };
 }
@@ -5660,6 +5708,9 @@ function paintStage() {
   if (!call) return;
   const { local, remote, remoteState } = call;
   const peerLive = Boolean(remoteState.screen && remote.screen);
+  const hasCamera = Boolean(local.cam || (remoteState.cam && remote.cam));
+  callPanel.classList.toggle("voice-only", !hasCamera && !peerLive);
+  $("#call-heading").textContent = peerLive || local.screen ? "Transmissão de tela" : hasCamera ? "Chamada de vídeo" : "Chamada de voz";
 
   // Só a transmissão recebida aparece: exibir a própria tela cria um espelho infinito.
   stage.classList.toggle("has-stream", peerLive);
@@ -5683,7 +5734,7 @@ function paintStage() {
   myStream.classList.add("hidden");
   setVideo(myStreamVideo, null);
   if (inAndroid) updateRemotePip(peerLive ? remote.screen : remoteState.cam ? remote.cam : null);
-  $("#call-pip").disabled = !peerLive && !(remoteState.cam && remote.cam);
+  $("#call-pip").classList.toggle("hidden", !inAndroid || (!peerLive && !(remoteState.cam && remote.cam)));
   const pill = $("#live-pill");
   pill.classList.toggle("hidden", !local.screen);
   pill.textContent = local.screen ? `Transmitindo · ${QUALITY_LABEL[call.quality] || "tela"}` : "";
@@ -5696,9 +5747,11 @@ function paintStage() {
   setToggle($("#toggle-live"), Boolean(local.screen), "Parar transmissão", "Transmitir tela");
   rememberCall();
   syncAndroidCall();
+  paintCallDock();
 }
 
 function openCallPanel(status) {
+  call.minimized = false;
   const peer = call.name || peerName;
   callStatus.textContent = status;
   callInfo.classList.remove("live");
@@ -5797,6 +5850,7 @@ function onConnected() {
   call.clock = setInterval(() => {
     const seconds = Math.floor((Date.now() - started) / 1000);
     callTimer.textContent = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+    paintCallDock();
   }, 1000);
   sendState();
   call.recovery?.configure().catch(() => {});

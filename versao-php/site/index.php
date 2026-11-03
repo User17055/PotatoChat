@@ -268,6 +268,19 @@ function asset(string $file): string
 
     <!-- ===================== CHAT ===================== -->
     <main id="chat-view" class="app-shell hidden" data-tab="chat">
+      <section id="call-dock" class="call-dock hidden" aria-label="Chamada em andamento">
+        <button id="call-dock-open" class="call-dock-open" type="button" aria-controls="call-panel" aria-expanded="false">
+          <span class="call-dock-icon" aria-hidden="true"><svg class="icon"><use href="#i-headphones" /></svg></span>
+          <span class="call-dock-copy"><strong id="call-dock-name"></strong><span><i class="call-dot" aria-hidden="true"></i><span id="call-dock-status">Voltar à chamada</span><time id="call-dock-timer" class="call-timer"></time></span></span>
+          <svg class="icon call-dock-arrow" aria-hidden="true"><use href="#i-chevron-right" /></svg>
+        </button>
+        <div class="call-dock-actions">
+          <button id="call-dock-mic" class="round swap" type="button" aria-label="Silenciar microfone">
+            <svg class="icon when-on"><use href="#i-mic" /></svg><svg class="icon when-off"><use href="#i-mic-off" /></svg>
+          </button>
+          <button id="call-dock-leave" class="round hangup" type="button" title="Sair da chamada" aria-label="Sair da chamada"><svg class="icon"><use href="#i-hangup" /></svg></button>
+        </div>
+      </section>
       <!-- Barra lateral: as conversas (os contatos e o Adicionar pessoa), as partes do Nosso cantinho (só do casal) e o
            perfil. No celular, vira uma gaveta (botão de menu). -->
       <aside id="sidebar" class="sidebar" aria-label="Menu">
@@ -342,6 +355,10 @@ function asset(string $file): string
 
         <!-- Chamada (estilo Discord) -->
         <div id="call-panel" class="call-panel hidden">
+          <div class="call-head">
+            <span class="call-heading"><svg class="icon" aria-hidden="true"><use href="#i-headphones" /></svg><span id="call-heading">Chamada de voz</span></span>
+            <button id="call-minimize" class="call-minimize" type="button" title="Recolher chamada e continuar navegando" aria-label="Recolher chamada" aria-controls="call-panel"><span>Recolher</span><svg class="icon" aria-hidden="true"><use href="#i-chevron-down" /></svg></button>
+          </div>
           <div id="stage" class="stage">
             <div id="stream-tile" class="tile stream hidden">
               <video id="stream-video" autoplay playsinline></video>
@@ -374,7 +391,7 @@ function asset(string $file): string
                 <span class="tile-name"><svg class="icon"><use href="#i-mic-off" /></svg><span id="peer-tile-name"></span><b class="live-tag">AO VIVO</b></span>
               </div>
             </div>
-            <!-- Sua transmissão: prévia pequena no canto (para conferir o que a outra pessoa está vendo). -->
+            <!-- A própria transmissão permanece oculta para evitar espelho infinito. -->
             <div id="my-stream" class="my-stream hidden">
               <video autoplay playsinline muted></video>
               <span class="live-badge"><i></i>VOCÊ AO VIVO</span>
