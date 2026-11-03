@@ -356,7 +356,6 @@ function asset(string $file): string
         <!-- Chamada (estilo Discord) -->
         <div id="call-panel" class="call-panel hidden">
           <div class="call-head">
-            <div class="call-info"><span id="call-status">Preparando chamada…</span><span id="call-timer" class="call-timer"></span><span id="live-pill" class="live-pill hidden"></span></div>
             <button id="call-minimize" class="call-minimize" type="button" title="Recolher chamada e continuar navegando" aria-label="Recolher chamada" aria-controls="call-panel"><svg class="icon" aria-hidden="true"><use href="#i-chevron-down" /></svg><span>Recolher</span></button>
           </div>
           <div id="stage" class="stage">
@@ -400,6 +399,7 @@ function asset(string $file): string
           </div>
           <audio id="remote-audio" autoplay></audio>
           <div class="call-bar">
+            <div class="call-info"><span id="call-status">Preparando chamada…</span><span id="call-timer" class="call-timer"></span><span id="live-pill" class="live-pill hidden"></span></div>
             <div class="call-buttons">
               <button id="toggle-mic" class="round swap" type="button" title="Silenciar microfone" aria-label="Microfone">
                 <svg class="icon when-on"><use href="#i-mic" /></svg>
