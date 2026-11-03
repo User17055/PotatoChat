@@ -6152,8 +6152,7 @@ function declineCall() {
   teardown(false);
 }
 
-// Fim da chamada (o servidor avisa todos os aparelhos). reason: hangup, declined, missed (ninguém entrou) ou dropped
-// (a conexão de alguém caiu).
+// Fim da chamada em todos os aparelhos, incluindo sala vazia e prazo de espera vencido.
 function callEnded({ id, reason, name } = {}) {
   if (id) closedCallIds.add(id);
   availableCalls.delete(id);
@@ -6165,7 +6164,7 @@ function callEnded({ id, reason, name } = {}) {
     // Recusada em outro aparelho seu: aqui só para de tocar.
     if (reason !== "declined") toast(`Chamada perdida de ${active.name}.`);
   } else if (active.role === "caller" && !active.peerId) {
-    toast(reason === "declined" ? `${name || active.name} recusou a chamada.` : reason === "missed" ? `${active.name} não entrou na chamada.` : "A chamada caiu.");
+    toast(reason === "declined" ? `${name || active.name} recusou a chamada.` : reason === "empty" ? "Chamada encerrada." : reason === "missed" ? `${active.name} não entrou na chamada.` : "A chamada caiu.");
   } else {
     toast(reason === "timeout" ? "A chamada encerrou após 5 minutos de espera." : reason === "dropped" ? "A chamada caiu." : "Chamada encerrada.");
   }
@@ -6537,7 +6536,7 @@ $("#stream-volume").addEventListener("input", (event) => { streamVideo.volume = 
 $("#end-call").addEventListener("click", () => teardown(true));
 $("#accept-call").addEventListener("click", acceptCall);
 $("#decline-call").addEventListener("click", declineCall);
-// Fechar/recarregar sai desta conexão, preservando a sala e os dados para reentrar por até cinco minutos.
+// Fechar/recarregar sai desta conexão; a sala só fica disponível se outra pessoa permanecer nela.
 window.addEventListener("beforeunload", () => {
   if (call?.id && (call.role === "caller" || call.accepted)) {
     rememberCall();

@@ -277,19 +277,27 @@ try {
   await a.unroute("**/api.php?action=ops");
   await a.locator("#end-call").click();
   await until(() => getCall(id).callerConn === null);
-  const firstDeadline = getCall(id).waitingUntil;
   await b.locator("#end-call").click();
-  await until(() => getCall(id).calleeConn === null);
-  assert.equal(getCall(id).waitingUntil, firstDeadline);
-  await b.locator("#join-available-call").click();
-  await until(() => getCall(id).calleeConn !== null);
-  expire(id);
-  await Promise.all([a.waitForSelector("#available-call", { state: "hidden" }), b.waitForSelector("#call-panel", { state: "hidden" })]);
-  assert.equal(getCall(id), null);
+  await until(() => getCall(id) === null);
+  await Promise.all([a.waitForSelector("#available-call", { state: "hidden" }), b.waitForSelector("#available-call", { state: "hidden" })]);
   await a.reload();
   await a.waitForSelector("#emoji-panel", { state: "attached" });
   assert.ok(await a.locator("#call-panel").isHidden());
+  assert.ok(await a.locator("#available-call").isHidden(), "sala vazia não reaparece ao recarregar");
   assert.equal(php(`query("SELECT COUNT(*) FROM " . t('messages') . " WHERE source = 'call'")->fetchColumn()`), 1);
+  console.log("A última pessoa saiu: sala removida imediatamente e nenhuma reentrada automática em sala vazia.");
+
+  await a.locator("#video-call").click();
+  await b.waitForSelector("#incoming:not(.hidden)");
+  await b.locator("#accept-call").click({ force: true });
+  await Promise.all([connected(a), connected(b)]);
+  const waitingId = await a.evaluate(() => JSON.parse(localStorage.getItem("potato.callResume")).id);
+  assert.notEqual(waitingId, id);
+  await a.locator("#end-call").click();
+  await until(() => getCall(waitingId).callerConn === null);
+  expire(waitingId);
+  await Promise.all([a.waitForSelector("#available-call", { state: "hidden" }), b.waitForSelector("#call-panel", { state: "hidden" })]);
+  assert.equal(getCall(waitingId), null, "uma pessoa esperando ainda respeita o prazo de cinco minutos");
   await a.locator("#audio-call").click();
   await b.waitForSelector("#incoming:not(.hidden)");
   const newId = await a.evaluate(() => JSON.parse(localStorage.getItem("potato.callResume")).id);
@@ -298,7 +306,7 @@ try {
   expire(newId);
   await b.waitForSelector("#incoming", { state: "hidden" });
   assert.deepEqual(errors, []);
-  console.log("Reentrada manual, saída dos dois e expiração com uma pessoa esperando aprovadas; sala expirada não volta.");
+  console.log("Reentrada manual, encerramento de sala vazia e expiração com uma pessoa esperando aprovados.");
 } catch (error) {
   console.error("Teste de reentrada falhou:", error.message);
   if (browser) {

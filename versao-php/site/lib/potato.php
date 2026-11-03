@@ -3115,7 +3115,7 @@ function drop(string $conn, bool $forever = false): void
     $client = find_client($conn);
     if (!$client) return;
     query('DELETE FROM ' . t('clients') . ' WHERE conn = ?', [$conn]);
-    // A conexão saiu; a sala continua disponível por cinco minutos para reentrar.
+    // A conexão saiu; só há espera para reentrar enquanto outra pessoa permanecer na sala.
     foreach (all_calls() as $call) {
         if (in_array($conn, [$call['callerConn'], $call['calleeConn']], true)) {
             call_leave($call, $client['name'], $conn, $forever ? now_ms() : (int) $client['ping']);
@@ -3310,7 +3310,8 @@ function act(array $me, string $event, $data)
 // Estilo Discord: ligar não depende de a outra pessoa estar online. Cada conversa tem no máximo uma chamada aberta, em
 // settings (name = 'call:<conversa>'): quem ligou e de qual conexão, para quem, o tipo, quando começou e quem atendeu
 // (a conexão) e quando. Ela toca CALL_RING_MS nos aparelhos da outra pessoa (o site aberto e o serviço do app do
-// Android). Sem o par completo, fica disponível por CALL_WAIT_MS; entradas renovam a espera e o par completo a cancela.
+// Android). Com uma pessoa, fica disponível por CALL_WAIT_MS; entradas renovam a espera e o par completo a cancela.
+// Sem participantes, encerra imediatamente.
 // Atendeu, quem ligou manda a oferta WebRTC direto para a conexão que atendeu. Cada um fica numa chamada por vez. Cada
 // chamada também vira uma mensagem na conversa (source 'call', media {call: {...}}): tocando, acontecendo, quanto durou,
 // recusada ou perdida.
@@ -3348,7 +3349,8 @@ function save_call(array $call): void
 function call_sweep(): void
 {
     foreach (all_calls() as $call) {
-        if ($call['waitingUntil'] !== null && $call['waitingUntil'] <= now_ms()) call_finish($call, 'timeout', null, (int) $call['waitingUntil']);
+        if (!$call['callerConn'] && !$call['calleeConn']) call_finish($call, 'empty');
+        elseif ($call['waitingUntil'] !== null && $call['waitingUntil'] <= now_ms()) call_finish($call, 'timeout', null, (int) $call['waitingUntil']);
     }
 }
 
@@ -3365,6 +3367,12 @@ function call_leave(array $call, string $name, string $conn, ?int $at = null, ?i
     if ($lease !== null && $lease !== (int) ($call['leases'][$role] ?? 0)) return;
     $call[$role . 'Conn'] = null;
     $call['generation'] = (int) ($call['generation'] ?? 0) + 1;
+    if (!$call['callerConn'] && !$call['calleeConn']) {
+        // O horário de presença pode anteceder a última resposta por alguns milissegundos.
+        $endedAt = max($at ?? now_ms(), (int) ($call['answeredAt'] ?? $call['startedAt']));
+        call_finish($call, 'empty', $name, $endedAt);
+        return;
+    }
     // Sair de uma sala já em espera não estende o prazo; uma entrada real pode renová-lo.
     $deadline = ($at ?? now_ms()) + CALL_WAIT_MS;
     $call['waitingUntil'] = $call['waitingUntil'] === null ? $deadline : min($call['waitingUntil'], $deadline);
@@ -3427,8 +3435,8 @@ function call_label(array $call): string
     return CALL_NAMES[$call['media'] ?? ''] ?? 'Chamada';
 }
 
-// Fim definitivo: timeout (cinco minutos sem completar o par) ou declined (recusa explícita).
-// Uma saída comum passa por call_leave e mantém a sala. O histórico usa a hora real do vencimento.
+// Fim definitivo: sala vazia, timeout (cinco minutos com uma pessoa esperando) ou recusa explícita.
+// O histórico usa a hora da saída da última pessoa ou a hora real do vencimento.
 function call_finish(array $call, string $reason, ?string $by = null, ?int $endedAt = null): void
 {
     query('DELETE FROM ' . t('settings') . ' WHERE name = ?', ['call:' . $call['room']]);

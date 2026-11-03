@@ -418,7 +418,7 @@ function asset(string $file): string
                 <svg class="icon when-off"><use href="#i-message-off" /></svg>
               </button>
               <button id="call-pip" class="round hidden" type="button" title="Abrir miniatura flutuante" aria-label="Abrir miniatura flutuante"><svg class="icon"><use href="#i-pip" /></svg></button>
-              <button id="end-call" class="round hangup" type="button" title="Sair da chamada (disponível por 5 minutos)" aria-label="Sair da chamada">
+              <button id="end-call" class="round hangup" type="button" title="Sair da chamada" aria-label="Sair da chamada">
                 <svg class="icon"><use href="#i-hangup" /></svg>
               </button>
             </div>

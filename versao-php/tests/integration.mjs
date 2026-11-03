@@ -43,6 +43,7 @@ const transcribeUrl = `http://127.0.0.1:${transcriberServer.address().port}/v1/a
 await fs.writeFile(configFile, `<?php return ${phpValue({ token_secret: secret, db, poll_wait: 3, giphy_key: giphyKey, music_lookup: false, transcribe_key: "chave-de-transcricao", transcribe_url: transcribeUrl, transcribe_model: "modelo-de-teste", turn_urls: ["turn:turn.example:3478?transport=udp", "turns:turn.example:5349?transport=tcp"], turn_secret: "segredo-turn-teste", turn_ttl: 600 })};`);
 
 function phpValue(value) {
+  if (value === null) return "null";
   if (typeof value === "boolean") return value ? "true" : "false";
   if (typeof value === "string") return `'${value.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`;
   if (typeof value === "number") return String(value);
@@ -1256,7 +1257,7 @@ try {
     assert.equal((await withAck(phone, "call", { op: "get", id: opened.call.id })).call.id, opened.call.id);
     assert.equal((await withAck(caller, "call", { op: "resume", id: opened.call.id })).ok, true);
 
-    // Recarregar/sair não encerra a sala. A pessoa volta com outra conexão, no mesmo ID de chamada.
+    // Recarregar/sair mantém a sala enquanto outra pessoa fica; a reentrada usa o mesmo ID.
     const oldCaller = caller;
     const oldConn = caller.id;
     const waitingUpdate = until(phone, "call-update", (item) => item.id === opened.call.id && item.participants.length === 1);
@@ -1285,30 +1286,39 @@ try {
       ops: [{ event: "call-leave", data: { id: opened.call.id }, room: phone.history.room }] });
     assert.equal((await withAck(phone, "call", { op: "get", id: opened.call.id })).call.from, caller.id);
 
-    // Sair mantém cinco minutos de espera; o segundo a sair não renova o prazo.
+    // Uma pessoa esperando mantém cinco minutos; a saída da última encerra imediatamente.
     const left = until(phone, "call-update", (item) => item.id === opened.call.id && item.participants.length === 1);
     caller.emit("call-ended", { id: opened.call.id });
     const deadline = (await left).waitingUntil;
+    assert.equal((await withAck(phone, "call", { op: "get", id: opened.call.id })).call.participants.length, 1);
+    assert.equal((await withAck(phone, "call", { op: "leave", id: opened.call.id, lease: 0 })).call.participants.length, 1, "saída atrasada não pode encerrar a sala de quem permaneceu");
+    const emptyEnded = until(laptop, "call-ended", (item) => item.id === opened.call.id);
+    const lastExitAt = Date.now();
     const alone = await withAck(phone, "call", { op: "leave", id: opened.call.id });
-    assert.equal(alone.call.waitingUntil, deadline);
-    assert.deepEqual(alone.call.participants, []);
-    const rejoined = await withAck(phone, "call", { op: "join", id: opened.call.id });
-    assert.equal(rejoined.ok, true);
-    assert.ok(rejoined.call.waitingUntil >= deadline);
-    assert.equal(rejoined.call.participants.length, 1);
-    assert.equal((await withAck(phone, "call", { op: "join", id: opened.call.id })).call.waitingUntil, rejoined.call.waitingUntil);
+    assert.equal(alone.call, null);
+    assert.deepEqual([(await emptyEnded).reason, (await withAck(phone, "call", { op: "get", id: opened.call.id })).call], ["empty", null]);
+    assert.equal((await withAck(phone, "call", { op: "join", id: opened.call.id })).ok, false, "sala vazia encerrada não pode ser reaberta");
+    const firstLog = sql("SELECT media FROM {p}messages WHERE source = 'call' ORDER BY n").map((row) => JSON.parse(row.media).call).find((item) => item.id === opened.call.id);
+    assert.equal(firstLog.status, "ended");
+    assert.ok(firstLog.endedAt >= lastExitAt && firstLog.endedAt < deadline, "o tempo para na saída, sem somar cinco minutos vazios");
 
     // O servidor encerra no prazo, mesmo com alguém ainda aguardando na sala.
-    const ended = next(laptop, "call-ended");
-    const finished = until(phone, "message:update", (item) => item.call?.status === "ended");
-    php(`(function () { $call = find_call('${opened.call.id}'); $call['waitingUntil'] = now_ms() - 1; save_call($call); return true; })()`);
+    const timeoutCall = (await withAck(caller, "call", { op: "start", media: "audio" })).call;
+    await withAck(phone, "call", { op: "accept", id: timeoutCall.id });
+    await withAck(caller, "call", { op: "leave", id: timeoutCall.id });
+    const waitingCall = (await withAck(phone, "call", { op: "get", id: timeoutCall.id })).call;
+    assert.equal(waitingCall.participants.length, 1);
+    assert.equal((await withAck(phone, "call", { op: "join", id: timeoutCall.id })).call.waitingUntil, waitingCall.waitingUntil);
+    const ended = until(laptop, "call-ended", (item) => item.id === timeoutCall.id);
+    const finished = until(phone, "message:update", (item) => item.call?.id === timeoutCall.id && item.call.status === "ended");
+    php(`(function () { $call = find_call('${timeoutCall.id}'); $call['waitingUntil'] = now_ms() - 1; save_call($call); return true; })()`);
     await fetch(`${baseUrl}/api.php?action=health`);
     const end = await ended;
-    assert.deepEqual([end.id, end.reason, end.result], [opened.call.id, "timeout", "answered"]);
+    assert.deepEqual([end.id, end.reason, end.result], [timeoutCall.id, "timeout", "answered"]);
     const log = (await finished).call;
     assert.equal(log.result, "answered");
     assert.ok(log.endedAt >= log.answeredAt && log.answeredAt >= log.startedAt);
-    assert.equal((await withAck(phone, "call", { op: "get", id: opened.call.id })).call, null);
+    assert.equal((await withAck(phone, "call", { op: "get", id: timeoutCall.id })).call, null);
 
     // Recusar: quem ligou fica sabendo, e a mensagem diz que foi recusada.
     const rang = next(phone, "call-ring");
@@ -1320,18 +1330,15 @@ try {
     const no = await refused;
     assert.deepEqual([no.reason, no.result, no.name], ["declined", "declined", "Pessoa 2"]);
 
-    // Quem ligou saiu antes de atenderem: a chamada fica disponível e só vira perdida ao vencer o prazo.
+    // Quem ligou saiu antes de atenderem: não sobra uma sala vazia disponível.
     const third = (await withAck(caller, "call", { op: "start", media: "audio" })).call;
-    const roomWaiting = until(phone, "call-update", (item) => item.id === third.id && item.participants.length === 0);
-    caller.disconnect();
-    assert.equal((await roomWaiting).id, third.id);
     const lost = until(phone, "call-ended", (item) => item.id === third.id);
-    php(`(function () { $call = find_call('${third.id}'); $call['waitingUntil'] = now_ms() - 1; save_call($call); return true; })()`);
-    await fetch(`${baseUrl}/api.php?action=health`);
+    caller.disconnect();
     const gone = await lost;
-    assert.deepEqual([gone.id, gone.reason, gone.result], [third.id, "timeout", "missed"]);
+    assert.deepEqual([gone.id, gone.reason, gone.result], [third.id, "empty", "missed"]);
+    assert.equal((await withAck(phone, "call", { op: "get", id: third.id })).call, null);
 
-    // Sem ninguém entrar, os mesmos cinco minutos valem desde a abertura da chamada.
+    // Só quem ligou permanece: os cinco minutos valem desde a abertura da chamada.
     const waiting = await connect(firstLogin.body.token);
     const fourth = (await withAck(waiting, "call", { op: "start", media: "audio" })).call;
     assert.equal((await withAck(phone, "call", { op: "get", id: fourth.id })).call.id, fourth.id);
@@ -1341,9 +1348,10 @@ try {
     const gaveUp = await hungUp;
     assert.deepEqual([gaveUp.reason, gaveUp.result], ["timeout", "missed"]);
 
-    // A conversa guardou as quatro (a citação de uma resposta diz como ela ficou); chamada não conta no perfil.
+    // A conversa guardou as cinco; uma sala vazia antiga também é removida na próxima consulta.
+    assert.equal(php(`(function () { $call = ${phpValue(opened.call)}; $call['id'] = 'legacy-empty-test'; $call['callerConn'] = null; $call['calleeConn'] = null; $call['state'] = clean_call_state(null); $call['message'] = ''; save_call($call); call_sweep(); return find_call('legacy-empty-test') === null; })()`), true);
     const calls = sql("SELECT media FROM {p}messages WHERE source = 'call' ORDER BY n").map((row) => JSON.parse(row.media).call);
-    assert.deepEqual(calls.map((item) => [item.media, item.status, item.result]), [["audio", "ended", "answered"], ["video", "ended", "declined"], ["audio", "ended", "missed"], ["audio", "ended", "missed"]]);
+    assert.deepEqual(calls.map((item) => [item.media, item.status, item.result]), [["audio", "ended", "answered"], ["audio", "ended", "answered"], ["video", "ended", "declined"], ["audio", "ended", "missed"], ["audio", "ended", "missed"]]);
     assert.equal(php("call_label(['media' => 'audio', 'result' => 'missed'])"), "Chamada perdida");
     assert.equal(php("call_label(['media' => 'video', 'result' => 'answered'])"), "Chamada de vídeo");
     assert.equal(sql("SELECT COUNT(*) AS total FROM {p}settings WHERE name LIKE 'call:%'")[0].total, 0);
@@ -1427,13 +1435,10 @@ try {
     assert.equal(busy.call.room, fresh);
     two.auth.room = accepted.room;
     assert.equal((await withAck(two, "call", { op: "start", media: "audio" })).error, "Pessoa 3 está em outra chamada agora.");
-    const waitingRoom = until(three, "call-update", (item) => item.id === busy.call.id && item.participants.length === 0);
-    one.emit("call-ended", { id: busy.call.id });
-    await waitingRoom;
-    php(`(function () { $call = find_call('${busy.call.id}'); $call['waitingUntil'] = now_ms() - 1; save_call($call); return true; })()`);
     const expiredRoom = until(three, "call-ended", (item) => item.id === busy.call.id);
-    await fetch(`${baseUrl}/api.php?action=health`);
-    await expiredRoom;
+    one.emit("call-ended", { id: busy.call.id });
+    assert.equal((await expiredRoom).reason, "empty");
+    assert.equal((await withAck(three, "call", { op: "get", id: busy.call.id })).call, null);
     one.disconnect();
     two.disconnect();
     three.disconnect();
