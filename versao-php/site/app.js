@@ -5615,7 +5615,7 @@ function paintCallDock() {
   callDock.classList.toggle("connected", active.connected && peerConnection?.connectionState === "connected");
   paintAvatar($("#call-dock-avatar"), active.name);
   $("#call-dock-name").textContent = active.name;
-  $("#call-dock-status").textContent = callStatus.textContent.startsWith("Em chamada com") ? "Em chamada" : callStatus.textContent;
+  $("#call-dock-status").textContent = callStatus.textContent.startsWith("Em chamada") ? "Em chamada" : callStatus.textContent;
   $("#call-dock-timer").textContent = callTimer.textContent;
   $("#call-dock-open").setAttribute("aria-label", `Voltar à chamada com ${active.name}`);
   setToggle(dockMic, micOn(), "Silenciar microfone", "Ativar microfone");
@@ -5783,7 +5783,7 @@ async function createPeer(expectedGeneration = call?.generation) {
   active.recovery = createRtcRecovery({
     peer, caller: active.role === "caller", loadConfig: loadRtcConfig, remoteReady: flushCandidates,
     send: (message) => socket?.emit("webrtc-restart", { ...message, id: active.id, to: active.peerId, generation: expectedGeneration }),
-    status: (text) => { if (call === active) callStatus.textContent = text || `Em chamada com ${active.name}`; },
+    status: (text) => { if (call === active) callStatus.textContent = text || "Em chamada"; },
     failed: () => {
       if (call !== active || peerConnection !== peer) return;
       toast("Não foi possível recuperar a conexão. Verifique a internet e a configuração do servidor TURN.", "error");
@@ -5806,7 +5806,7 @@ async function createPeer(expectedGeneration = call?.generation) {
     const state = peer.connectionState;
     if (state === "connected") {
       onConnected();
-      if (call) callStatus.textContent = `Em chamada com ${call.name}`;
+      if (call) callStatus.textContent = "Em chamada";
     }
     if (state === "disconnected") callStatus.textContent = "Conexão instável…";
     if (state === "failed") {

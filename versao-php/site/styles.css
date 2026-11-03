@@ -2396,9 +2396,8 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
 .call-dock .hangup:hover { background: var(--live); color: #fff; }
 #call-dock-mic.is-off { background: #ff6b5e26; color: var(--danger); }
 .call-minimized #call-panel { display: none !important; }
-.call-head { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--line-soft); background: color-mix(in srgb, var(--surface) 55%, transparent); }
+.call-head { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 12px; }
 .call-heading { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--muted); font-size: 11px; font-weight: 650; }
-.call-heading .icon { width: 16px; height: 16px; color: var(--speak); }
 .call-minimize { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); box-shadow: 0 2px 5px #0002; color: var(--ink); font-size: 11px; font-weight: 600; transition: background .18s, border-color .18s; }
 .call-minimize:hover { background: var(--surface-3); border-color: var(--muted); }
 .call-minimize .icon { width: 16px; height: 16px; color: var(--muted); }
