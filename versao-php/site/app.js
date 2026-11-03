@@ -6,6 +6,7 @@ import { createWatchPlayer } from "./watch.js";
 import { nativeScreenAvailable, startNativeScreen, stopNativeScreen } from "./native-screen.js";
 import { createRtcRecovery } from "./rtc-recovery.js";
 import { createRtcConfigLoader } from "./rtc-config.js";
+import { createEmojiPicker } from "./emoji-picker.js";
 
 const $ = (selector) => document.querySelector(selector);
 const loginView = $("#login-view");
@@ -1094,10 +1095,10 @@ function uploadFile(message) {
   xhr.send(upload.blob);
 }
 
-// Celular: tocar no enviar (ou num emoji rápido) não tira o foco do campo. Assim o teclado continua aberto,
+// Celular: tocar no enviar não tira o foco do campo. Assim o teclado continua aberto,
 // a tela não pula para baixo e o primeiro toque já envia.
 messageForm.addEventListener("mousedown", (event) => {
-  if (document.activeElement === messageInput && event.target.closest(".send, .quick-emojis button")) event.preventDefault();
+  if (document.activeElement === messageInput && event.target.closest(".send")) event.preventDefault();
 });
 
 messageForm.addEventListener("submit", (event) => {
@@ -1151,12 +1152,11 @@ function stopTyping() {
   socket?.emit("typing", false);
 }
 
-document.querySelectorAll("[data-emoji]").forEach((button) => button.addEventListener("click", () => {
-  send(button.dataset.emoji);
-  const box = button.getBoundingClientRect();
-  fx.burst(box.left + box.width / 2, box.top, [button.dataset.emoji], 8);
-  fx.press(button);
-}));
+const emojiPicker = createEmojiPicker({
+  button: $("#emoji-button"), input: messageInput,
+  beforeOpen: () => { closeGifs(); closeAttach(); commandMenu.classList.add("hidden"); },
+  onLimit: () => toast("A mensagem chegou ao limite de caracteres.")
+});
 
 // ---------- GIFs (busca do GIPHY) ----------
 
@@ -1945,6 +1945,8 @@ function voiceFileName(type) {
 }
 
 function paintRecorder() {
+  $("#emoji-button").disabled = Boolean(rec);
+  if (rec) emojiPicker.close();
   const review = rec?.mode === "review";
   const locked = rec?.mode === "locked" || review;
   const playing = Boolean(rec?.audio && !rec.audio.paused);

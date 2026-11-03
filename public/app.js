@@ -3,6 +3,7 @@ import { fx, effectFor, motion } from "./fx.js";
 import { nativeScreenAvailable, startNativeScreen, stopNativeScreen } from "./native-screen.js";
 import { createRtcRecovery } from "./rtc-recovery.js";
 import { createRtcConfigLoader } from "./rtc-config.js";
+import { createEmojiPicker } from "./emoji-picker.js";
 
 const $ = (selector) => document.querySelector(selector);
 const loginView = $("#login-view");
@@ -696,12 +697,10 @@ function stopTyping() {
   socket?.emit("typing", false);
 }
 
-document.querySelectorAll("[data-emoji]").forEach((button) => button.addEventListener("click", () => {
-  send(button.dataset.emoji);
-  const box = button.getBoundingClientRect();
-  fx.burst(box.left + box.width / 2, box.top, [button.dataset.emoji], 8);
-  fx.press(button);
-}));
+createEmojiPicker({
+  button: $("#emoji-button"), input: messageInput,
+  onLimit: () => toast("A mensagem chegou ao limite de caracteres.")
+});
 
 // Ações sobre as mensagens (delegação de eventos).
 messagesEl.addEventListener("click", (event) => {

@@ -10,6 +10,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap" />
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/emoji-picker.css" />
     <link rel="stylesheet" href="/android-call.css" />
     <script>
       // Já logado: vai direto para o chat, sem piscar a tela de login.
@@ -288,8 +289,8 @@
         </div>
 
         <form id="message-form" class="composer">
-          <div class="quick-emojis" role="group" aria-label="Enviar emoji rápido">
-            <button type="button" data-emoji="❤️" title="Enviar ❤️">❤️</button><button type="button" data-emoji="😂" title="Enviar 😂">😂</button><button type="button" data-emoji="🥔" title="Enviar 🥔">🥔</button>
+          <div class="quick-emojis">
+            <button id="emoji-button" type="button" title="Escolher emojis" aria-label="Escolher emojis" aria-haspopup="dialog" aria-expanded="false" aria-controls="emoji-panel"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 14a4.5 4.5 0 0 0 8 0"/><path d="M8.5 9h.01M15.5 9h.01" stroke-linecap="round" stroke-width="2.5"/></svg></button>
           </div>
           <textarea id="message-input" rows="1" maxlength="2000" placeholder="Escreva uma mensagem…" aria-label="Mensagem"></textarea>
           <button class="send" type="submit" aria-label="Enviar mensagem" title="Enviar">

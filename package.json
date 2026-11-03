@@ -10,6 +10,7 @@
     "check": "node --check server/index.js && node --check public/app.js && node --check public/fx.js && node --check public/sound.js && node --check extension/background.js && node --check extension/sidepanel.js && node --check extension/options.js",
     "test": "node tests/integration.mjs",
     "test:rtc": "node --test tests/rtc.mjs",
+    "test:emojis": "node tests/emoji-picker-browser.mjs",
     "test:turn": "node tests/turn-live.mjs"
   },
   "engines": {

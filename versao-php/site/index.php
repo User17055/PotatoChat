@@ -26,6 +26,7 @@ function asset(string $file): string
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&family=Caveat:wght@400;700&family=Dancing+Script:wght@400;700&family=Patrick+Hand&family=Special+Elite&display=swap" />
     <link rel="stylesheet" href="<?= asset('styles.css') ?>" />
+    <link rel="stylesheet" href="<?= asset('emoji-picker.css') ?>" />
     <script>
       // Já logado: vai direto para o chat, sem piscar a tela de login.
       try { if (JSON.parse(localStorage.getItem("potato.session"))?.token) document.documentElement.classList.add("has-session"); } catch {}
@@ -543,8 +544,8 @@ function asset(string $file): string
             </div>
             <p class="gif-credit">Powered by GIPHY</p>
           </div>
-          <div class="quick-emojis" role="group" aria-label="Enviar emoji rápido">
-            <button type="button" data-emoji="❤️" title="Enviar ❤️">❤️</button><button type="button" data-emoji="😂" title="Enviar 😂">😂</button><button type="button" data-emoji="🥔" title="Enviar 🥔">🥔</button>
+          <div class="quick-emojis">
+            <button id="emoji-button" type="button" title="Escolher emojis" aria-label="Escolher emojis" aria-haspopup="dialog" aria-expanded="false" aria-controls="emoji-panel"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 14a4.5 4.5 0 0 0 8 0"/><path d="M8.5 9h.01M15.5 9h.01" stroke-linecap="round" stroke-width="2.5"/></svg></button>
           </div>
           <div id="command-menu" class="command-menu hidden" role="listbox" aria-label="Comandos"></div>
           <!-- Fotos e arquivos: o menu escolhe entre a galeria (foto/vídeo, com câmera no celular) e qualquer arquivo. -->
