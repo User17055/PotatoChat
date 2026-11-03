@@ -1211,11 +1211,12 @@ try {
   // Chamadas (estilo Discord): tocam mesmo com a outra pessoa offline, o primeiro aparelho que atende entra (a oferta vai
   // só para ele) e a conversa guarda como a chamada ficou.
   {
-    const caller = await connect(firstLogin.body.token);
+    let caller = await connect(firstLogin.body.token);
     const opened = await withAck(caller, "call", { op: "start", media: "audio", state: { mic: true } });
     assert.deepEqual([opened.ok, opened.online], [true, false]);
     assert.deepEqual([opened.call.caller, opened.call.callee, opened.call.media, opened.call.answered, opened.call.from], ["Pessoa 1", "Pessoa 2", "audio", false, caller.id]);
     assert.equal(opened.call.ringUntil - opened.call.startedAt, 60000);
+    assert.equal(opened.call.waitingUntil - opened.call.startedAt, 300000);
     assert.equal((await withAck(caller, "call", { op: "start", media: "video" })).error, "Você já está ligando de outro aparelho.");
 
     // Quem abre o chat depois vê a chamada tocando (e a mensagem dela na conversa).
@@ -1234,6 +1235,7 @@ try {
     assert.equal((await withAck(phone, "call", { op: "accept", id: opened.call.id, state: { mic: false } })).ok, true);
     const answer = await accepted;
     assert.deepEqual([answer.from, answer.state.mic], [phone.id, false]);
+    assert.equal((await withAck(phone, "call", { op: "get", id: opened.call.id })).call.waitingUntil, null);
     assert.equal((await handled).id, opened.call.id);
     await live;
     assert.equal((await withAck(laptop, "call", { op: "accept", id: opened.call.id })).error, "Você já atendeu em outro aparelho.");
@@ -1252,13 +1254,57 @@ try {
     sql(`UPDATE {p}clients SET ping = ${Date.now() - 70000} WHERE conn = '${caller.id}'`);
     php("(function () { sweep(); return true; })()");
     assert.equal((await withAck(phone, "call", { op: "get", id: opened.call.id })).call.id, opened.call.id);
+    assert.equal((await withAck(caller, "call", { op: "resume", id: opened.call.id })).ok, true);
 
-    // Desligar: todos os aparelhos ficam sabendo, e a mensagem mostra que foi atendida (e quanto durou).
+    // Recarregar/sair não encerra a sala. A pessoa volta com outra conexão, no mesmo ID de chamada.
+    const oldCaller = caller;
+    const oldConn = caller.id;
+    const waitingUpdate = until(phone, "call-update", (item) => item.id === opened.call.id && item.participants.length === 1);
+    oldCaller.disconnect();
+    const waitingInfo = await waitingUpdate;
+    assert.ok(waitingInfo.waitingUntil > Date.now() && waitingInfo.waitingUntil <= Date.now() + 301000);
+    caller = await connect(firstLogin.body.token);
+    assert.ok(caller.history.calls[0].joined.includes("Pessoa 1"));
+    const resumed = await withAck(caller, "call", { op: "resume", id: opened.call.id });
+    assert.equal(resumed.ok, true);
+    assert.equal(resumed.call.id, opened.call.id);
+    assert.equal(resumed.call.from, caller.id);
+    assert.equal(resumed.call.waitingUntil, null);
+    assert.ok(resumed.call.generation > waitingInfo.generation);
+    assert.equal((await withAck(laptop, "call", { op: "join", id: opened.call.id })).ok, false);
+    assert.equal((await api("connect", { token: secondLogin.body.token, conn: caller.id })).status, 403);
+    const oldLease = resumed.call.participants.find((item) => item.name === "Pessoa 1").lease;
+    const renewed = await withAck(caller, "call", { op: "join", id: opened.call.id, renegotiate: true });
+    assert.ok(renewed.call.participants.find((item) => item.name === "Pessoa 1").lease > oldLease);
+    await api("ops", { token: firstLogin.body.token, conn: caller.id, attach: false,
+      ops: [{ event: "call-leave", data: { id: opened.call.id, lease: oldLease }, room: phone.history.room }] });
+    assert.equal((await withAck(phone, "call", { op: "get", id: opened.call.id })).call.from, caller.id);
+
+    // Um aviso atrasado da conexão anterior não pode retirar quem já reconectou.
+    await api("ops", { token: firstLogin.body.token, conn: oldConn, attach: false,
+      ops: [{ event: "call-leave", data: { id: opened.call.id }, room: phone.history.room }] });
+    assert.equal((await withAck(phone, "call", { op: "get", id: opened.call.id })).call.from, caller.id);
+
+    // Sair mantém cinco minutos de espera; o segundo a sair não renova o prazo.
+    const left = until(phone, "call-update", (item) => item.id === opened.call.id && item.participants.length === 1);
+    caller.emit("call-ended", { id: opened.call.id });
+    const deadline = (await left).waitingUntil;
+    const alone = await withAck(phone, "call", { op: "leave", id: opened.call.id });
+    assert.equal(alone.call.waitingUntil, deadline);
+    assert.deepEqual(alone.call.participants, []);
+    const rejoined = await withAck(phone, "call", { op: "join", id: opened.call.id });
+    assert.equal(rejoined.ok, true);
+    assert.ok(rejoined.call.waitingUntil >= deadline);
+    assert.equal(rejoined.call.participants.length, 1);
+    assert.equal((await withAck(phone, "call", { op: "join", id: opened.call.id })).call.waitingUntil, rejoined.call.waitingUntil);
+
+    // O servidor encerra no prazo, mesmo com alguém ainda aguardando na sala.
     const ended = next(laptop, "call-ended");
     const finished = until(phone, "message:update", (item) => item.call?.status === "ended");
-    caller.emit("call-ended", { id: opened.call.id, to: phone.id });
+    php(`(function () { $call = find_call('${opened.call.id}'); $call['waitingUntil'] = now_ms() - 1; save_call($call); return true; })()`);
+    await fetch(`${baseUrl}/api.php?action=health`);
     const end = await ended;
-    assert.deepEqual([end.id, end.reason, end.result, end.name], [opened.call.id, "hangup", "answered", "Pessoa 1"]);
+    assert.deepEqual([end.id, end.reason, end.result], [opened.call.id, "timeout", "answered"]);
     const log = (await finished).call;
     assert.equal(log.result, "answered");
     assert.ok(log.endedAt >= log.answeredAt && log.answeredAt >= log.startedAt);
@@ -1274,23 +1320,26 @@ try {
     const no = await refused;
     assert.deepEqual([no.reason, no.result, no.name], ["declined", "declined", "Pessoa 2"]);
 
-    // Quem ligou saiu (fechou a aba): a chamada acaba, perdida.
+    // Quem ligou saiu antes de atenderem: a chamada fica disponível e só vira perdida ao vencer o prazo.
     const third = (await withAck(caller, "call", { op: "start", media: "audio" })).call;
-    const lost = until(phone, "call-ended", (item) => item.id === third.id);
+    const roomWaiting = until(phone, "call-update", (item) => item.id === third.id && item.participants.length === 0);
     caller.disconnect();
+    assert.equal((await roomWaiting).id, third.id);
+    const lost = until(phone, "call-ended", (item) => item.id === third.id);
+    php(`(function () { $call = find_call('${third.id}'); $call['waitingUntil'] = now_ms() - 1; save_call($call); return true; })()`);
+    await fetch(`${baseUrl}/api.php?action=health`);
     const gone = await lost;
-    assert.deepEqual([gone.id, gone.reason, gone.result], [third.id, "dropped", "missed"]);
+    assert.deepEqual([gone.id, gone.reason, gone.result], [third.id, "timeout", "missed"]);
 
-    // Ninguém entrou: a chamada continua aberta esperando (sem limite, como no Discord) até quem ligou desligar.
+    // Sem ninguém entrar, os mesmos cinco minutos valem desde a abertura da chamada.
     const waiting = await connect(firstLogin.body.token);
     const fourth = (await withAck(waiting, "call", { op: "start", media: "audio" })).call;
-    php(`(function () { $call = find_call('${fourth.id}'); $call['startedAt'] -= 3 * 3600000; save_call($call); return true; })()`);
-    await fetch(`${baseUrl}/api.php?action=health`);
     assert.equal((await withAck(phone, "call", { op: "get", id: fourth.id })).call.id, fourth.id);
     const hungUp = until(phone, "call-ended", (item) => item.id === fourth.id);
-    waiting.emit("call-ended", { id: fourth.id });
+    php(`(function () { $call = find_call('${fourth.id}'); $call['waitingUntil'] = now_ms() - 1; save_call($call); return true; })()`);
+    await fetch(`${baseUrl}/api.php?action=health`);
     const gaveUp = await hungUp;
-    assert.deepEqual([gaveUp.reason, gaveUp.result], ["hangup", "missed"]);
+    assert.deepEqual([gaveUp.reason, gaveUp.result], ["timeout", "missed"]);
 
     // A conversa guardou as quatro (a citação de uma resposta diz como ela ficou); chamada não conta no perfil.
     const calls = sql("SELECT media FROM {p}messages WHERE source = 'call' ORDER BY n").map((row) => JSON.parse(row.media).call);
@@ -1378,8 +1427,13 @@ try {
     assert.equal(busy.call.room, fresh);
     two.auth.room = accepted.room;
     assert.equal((await withAck(two, "call", { op: "start", media: "audio" })).error, "Pessoa 3 está em outra chamada agora.");
+    const waitingRoom = until(three, "call-update", (item) => item.id === busy.call.id && item.participants.length === 0);
     one.emit("call-ended", { id: busy.call.id });
-    await until(three, "call-ended", (item) => item.id === busy.call.id);
+    await waitingRoom;
+    php(`(function () { $call = find_call('${busy.call.id}'); $call['waitingUntil'] = now_ms() - 1; save_call($call); return true; })()`);
+    const expiredRoom = until(three, "call-ended", (item) => item.id === busy.call.id);
+    await fetch(`${baseUrl}/api.php?action=health`);
+    await expiredRoom;
     one.disconnect();
     two.disconnect();
     three.disconnect();

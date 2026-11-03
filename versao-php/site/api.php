@@ -96,7 +96,7 @@ function ops(array $input): array
     return transaction(function () use ($input, $list) {
         $session = authenticate($input);
         $conn = conn_id($input);
-        // O aviso de fim de chamada enviado ao fechar a aba não deve recriar a conexão.
+        // O aviso de saída da chamada ao fechar a aba não deve recriar a conexão.
         $current = find_client($conn);
         $attached = $current || ($input['attach'] ?? true) !== false;
         if ($attached) attach($conn, $session['name'], $input);
@@ -106,7 +106,7 @@ function ops(array $input): array
             $event = is_array($op) ? str($op['event'] ?? '') : '';
             // Cada ação vale na conversa que estava aberta quando foi feita (o navegador manda junto).
             $me = ['conn' => $conn, 'name' => $session['name'], 'client' => $client, 'room' => pick_room($session['name'], is_array($op) ? str($op['room'] ?? '') : '')];
-            $results[] = $attached || $event === 'call-ended' ? act($me, $event, $op['data'] ?? null) : null;
+            $results[] = $attached || in_array($event, ['call-ended', 'call-leave'], true) ? act($me, $event, $op['data'] ?? null) : null;
         }
         return ['results' => $results];
     });

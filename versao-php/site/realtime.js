@@ -183,7 +183,7 @@ class Connection extends Emitter {
   send(event, data = null, ack = null, timeout = 0) {
     const room = this.auth.room || "";
     // Fim de chamada sai na hora, sem fila, e chega mesmo se a aba estiver fechando.
-    if (event === "call-ended") {
+    if (event === "call-ended" || event === "call-leave") {
       if (this.active) this.request("ops", { attach: false, ops: [{ event, data, room }] }, { keepalive: true }).catch(() => {});
       return;
     }

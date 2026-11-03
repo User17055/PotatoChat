@@ -36,6 +36,7 @@ const WALLPAPER_MAX = 650000;
 const MUSIC_QUEUE_MAX = 50;
 // Chamada: quanto tempo ela toca nos aparelhos da outra pessoa (depois, continua aberta esperando). Veja "chamadas".
 const CALL_RING_MS = 60000;
+const CALL_WAIT_MS = 300000;
 const CALL_NAMES = ['audio' => 'Chamada de voz', 'video' => 'Chamada de vídeo', 'screen' => 'Transmissão de tela'];
 // Mesma lista do app.js (THEMES). O primeiro é o padrão.
 const THEMES = ['escuro', 'preto', 'rosa', 'roxo', 'azul', 'verde', 'claro'];
@@ -3020,6 +3021,7 @@ function emit_us(array $data, string $scope = 'all', ?array $from = null): void
 
 function event_for(array $event, string $conn, array $client): bool
 {
+    if (!empty($event['to_conn']) && $event['to_conn'] !== $conn) return false;
     if (!empty($event['room']) && !room_member(find_room((string) $event['room']), $client['name'])) return false;
     if ($event['scope'] === 'peer') {
         return $client['client'] === 'web' && $client['name'] !== $event['from_name'] && (empty($event['to_conn']) || $event['to_conn'] === $conn);
@@ -3092,6 +3094,7 @@ function attach(string $conn, string $name, array $input): bool
         throw new HttpError(410, 'Conexão encerrada.');
     }
     $current = find_client($conn);
+    if ($current && $current['name'] !== $name) throw new HttpError(403, 'Essa conexão pertence a outra pessoa.');
     if ($current && $current['name'] === $name) {
         query('UPDATE ' . t('clients') . ' SET ping = ? WHERE conn = ?', [now_ms(), $conn]);
         return false;
@@ -3112,9 +3115,11 @@ function drop(string $conn, bool $forever = false): void
     $client = find_client($conn);
     if (!$client) return;
     query('DELETE FROM ' . t('clients') . ' WHERE conn = ?', [$conn]);
-    // Quem estava numa chamada (ou ligando) saiu: ela acaba.
+    // A conexão saiu; a sala continua disponível por cinco minutos para reentrar.
     foreach (all_calls() as $call) {
-        if (in_array($conn, [$call['callerConn'], $call['calleeConn']], true)) call_finish($call, 'dropped', $client['name']);
+        if (in_array($conn, [$call['callerConn'], $call['calleeConn']], true)) {
+            call_leave($call, $client['name'], $conn, $forever ? now_ms() : (int) $client['ping']);
+        }
     }
     if ($client['client'] === 'web') {
         if (!web_online($client['name'])) {
@@ -3130,16 +3135,10 @@ function sweep(): void
 {
     $now = now_ms();
     $stale = query('SELECT conn, ping FROM ' . t('clients') . ' WHERE ping < ?', [$now - client_ttl_ms()])->fetchAll();
-    $inCall = [];
-    foreach (all_calls() as $call) {
-        $inCall[$call['callerConn']] = true;
-        if ($call['calleeConn']) $inCall[$call['calleeConn']] = true;
-    }
     foreach ($stale as $client) {
-        // Dá tempo para ICE restart/reconexão HTTP ao mudar de Wi-Fi para dados móveis.
-        if (isset($inCall[$client['conn']]) && $now - (int) $client['ping'] < max(180000, client_ttl_ms())) continue;
         drop((string) $client['conn']);
     }
+    call_sweep();
     query('DELETE FROM ' . t('gone') . ' WHERE at < ?', [$now - EVENT_KEEP_MS]);
     query('DELETE FROM ' . t('events') . ' WHERE at < ? AND seq < ?', [$now - EVENT_KEEP_MS, last_seq()]);
     // Arquivo enviado que nunca virou mensagem (envio cancelado, aba fechada no meio).
@@ -3274,7 +3273,16 @@ function act(array $me, string $event, $data)
             $paired = false;
             foreach (all_calls() as $call) {
                 $ends = [$call['callerConn'], $call['calleeConn']];
-                if ($to !== '' && in_array($me['conn'], $ends, true) && in_array($to, $ends, true) && $to !== $me['conn']) $paired = true;
+                if ($to !== '' && in_array($me['conn'], $ends, true) && in_array($to, $ends, true) && $to !== $me['conn']
+                    && (!isset($body['id']) || $body['id'] === $call['id'])
+                    && (!isset($body['generation']) || (int) $body['generation'] === (int) ($call['generation'] ?? 0))) {
+                    $paired = true;
+                    if ($event === 'call-state') {
+                        $role = $me['conn'] === $call['callerConn'] ? 'caller' : 'callee';
+                        $call['states'][$role] = clean_call_state($body);
+                        save_call($call);
+                    }
+                }
             }
             if (!$paired) return null;
             emit($event, array_merge($body, ['from' => $me['conn'], 'name' => $name]), 'peer', $me, $to);
@@ -3285,12 +3293,13 @@ function act(array $me, string $event, $data)
         case 'call':
             return call_act($me, $body);
 
-        // Desligar (também vem da aba fechando, sem a conexão). Sem id: a chamada em que esta conexão está.
+        // Sair (inclusive recarregar/fechar a página): só desprende esta conexão e preserva a sala.
         case 'call-ended':
+        case 'call-leave':
             $id = str($body['id'] ?? '');
             foreach (all_calls() as $call) {
                 $mine = $id !== '' ? $call['id'] === $id : in_array($me['conn'], [$call['callerConn'], $call['calleeConn']], true);
-                if ($mine && in_array($name, [$call['caller'], $call['callee']], true)) call_finish($call, 'hangup', $name);
+                if ($mine && in_array($name, [$call['caller'], $call['callee']], true)) call_leave($call, $name, $me['conn'], null, isset($body['lease']) ? (int) $body['lease'] : null);
             }
             return null;
     }
@@ -3301,7 +3310,7 @@ function act(array $me, string $event, $data)
 // Estilo Discord: ligar não depende de a outra pessoa estar online. Cada conversa tem no máximo uma chamada aberta, em
 // settings (name = 'call:<conversa>'): quem ligou e de qual conexão, para quem, o tipo, quando começou e quem atendeu
 // (a conexão) e quando. Ela toca CALL_RING_MS nos aparelhos da outra pessoa (o site aberto e o serviço do app do
-// Android) e continua aberta, esperando, até quem ligou desligar: quem abrir o chat nesse meio-tempo ainda entra.
+// Android). Sem o par completo, fica disponível por CALL_WAIT_MS; entradas renovam a espera e o par completo a cancela.
 // Atendeu, quem ligou manda a oferta WebRTC direto para a conexão que atendeu. Cada um fica numa chamada por vez. Cada
 // chamada também vira uma mensagem na conversa (source 'call', media {call: {...}}): tocando, acontecendo, quanto durou,
 // recusada ou perdida.
@@ -3311,7 +3320,16 @@ function all_calls(): array
     $calls = [];
     foreach (query('SELECT value FROM ' . t('settings') . " WHERE name LIKE 'call:%'")->fetchAll(PDO::FETCH_COLUMN) as $raw) {
         $call = json_decode((string) $raw, true);
-        if (is_array($call) && isset($call['id'], $call['room'])) $calls[] = $call;
+        if (is_array($call) && isset($call['id'], $call['room'])) {
+            // Compatibilidade com as salas abertas antes da atualização.
+            $calls[] = $call + [
+                'generation' => 0,
+                'waitingUntil' => $call['callerConn'] && $call['calleeConn'] ? null : $call['startedAt'] + CALL_WAIT_MS,
+                'joined' => $call['answeredAt'] !== null ? [$call['caller'], $call['callee']] : [$call['caller']],
+                'states' => ['caller' => $call['state'], 'callee' => clean_call_state(null)],
+                'leases' => ['caller' => 0, 'callee' => 0],
+            ];
+        }
     }
     return $calls;
 }
@@ -3327,15 +3345,50 @@ function save_call(array $call): void
     query('INSERT INTO ' . t('settings') . ' (name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)', ['call:' . $call['room'], encode($call)]);
 }
 
+function call_sweep(): void
+{
+    foreach (all_calls() as $call) {
+        if ($call['waitingUntil'] !== null && $call['waitingUntil'] <= now_ms()) call_finish($call, 'timeout', null, (int) $call['waitingUntil']);
+    }
+}
+
+function call_changed(array $call): void
+{
+    update_call_log($call);
+    emit('call-update', call_public($call), 'all', null, null, $call['room']);
+}
+
+function call_leave(array $call, string $name, string $conn, ?int $at = null, ?int $lease = null): void
+{
+    $role = $call['caller'] === $name ? 'caller' : ($call['callee'] === $name ? 'callee' : '');
+    if ($role === '' || $call[$role . 'Conn'] !== $conn) return;
+    if ($lease !== null && $lease !== (int) ($call['leases'][$role] ?? 0)) return;
+    $call[$role . 'Conn'] = null;
+    $call['generation'] = (int) ($call['generation'] ?? 0) + 1;
+    // Sair de uma sala já em espera não estende o prazo; uma entrada real pode renová-lo.
+    $deadline = ($at ?? now_ms()) + CALL_WAIT_MS;
+    $call['waitingUntil'] = $call['waitingUntil'] === null ? $deadline : min($call['waitingUntil'], $deadline);
+    save_call($call);
+    call_changed($call);
+    if ($role === 'caller' && $call['answeredAt'] === null) emit('call-handled', ['id' => $call['id']], 'all', null, null, $call['room']);
+}
+
 // O que os aparelhos sabem de uma chamada: from = a conexão de quem ligou; ringUntil no relógio do servidor; state = o
 // que quem ligou tem ligado (microfone, câmera, tela).
 function call_public(?array $call): ?array
 {
     if (!$call) return null;
+    $participants = [];
+    foreach (['caller', 'callee'] as $role) {
+        if ($call[$role . 'Conn']) $participants[] = ['name' => $call[$role], 'conn' => $call[$role . 'Conn'], 'state' => $call['states'][$role] ?? clean_call_state(null), 'lease' => (int) ($call['leases'][$role] ?? 0)];
+    }
     return [
         'id' => $call['id'], 'room' => $call['room'], 'caller' => $call['caller'], 'callee' => $call['callee'], 'media' => $call['media'],
-        'from' => $call['callerConn'], 'state' => $call['state'], 'startedAt' => $call['startedAt'], 'ringUntil' => $call['startedAt'] + CALL_RING_MS,
+        'from' => $call['callerConn'], 'state' => $call['states']['caller'] ?? $call['state'], 'startedAt' => $call['startedAt'],
+        'ringUntil' => $call['callerConn'] && $call['answeredAt'] === null ? $call['startedAt'] + CALL_RING_MS : 0,
         'answered' => $call['answeredAt'] !== null,
+        'answeredAt' => $call['answeredAt'], 'participants' => $participants, 'joined' => $call['joined'] ?? [$call['caller']],
+        'waitingUntil' => $call['waitingUntil'] ?? null, 'generation' => (int) ($call['generation'] ?? 0),
     ];
 }
 
@@ -3350,8 +3403,9 @@ function call_log(array $call, array $changes = []): array
 {
     return array_merge([
         'id' => $call['id'], 'media' => $call['media'], 'caller' => $call['caller'], 'callee' => $call['callee'],
-        'status' => $call['answeredAt'] === null ? 'ringing' : 'live', 'result' => null,
+        'status' => $call['callerConn'] && $call['calleeConn'] ? 'live' : ($call['answeredAt'] === null && $call['callerConn'] && count($call['joined'] ?? []) === 1 ? 'ringing' : 'waiting'), 'result' => null,
         'startedAt' => $call['startedAt'], 'answeredAt' => $call['answeredAt'], 'endedAt' => null,
+        'waitingUntil' => $call['waitingUntil'] ?? null,
     ], $changes);
 }
 
@@ -3373,18 +3427,19 @@ function call_label(array $call): string
     return CALL_NAMES[$call['media'] ?? ''] ?? 'Chamada';
 }
 
-// Fim da chamada. reason: hangup (alguém desligou), declined (recusou), missed (ninguém entrou) ou dropped (a conexão
-// de alguém caiu). Avisa os aparelhos dos dois (o que ainda tocava para de tocar) e a mensagem mostra como foi.
-function call_finish(array $call, string $reason, ?string $by = null): void
+// Fim definitivo: timeout (cinco minutos sem completar o par) ou declined (recusa explícita).
+// Uma saída comum passa por call_leave e mantém a sala. O histórico usa a hora real do vencimento.
+function call_finish(array $call, string $reason, ?string $by = null, ?int $endedAt = null): void
 {
     query('DELETE FROM ' . t('settings') . ' WHERE name = ?', ['call:' . $call['room']]);
     $result = $call['answeredAt'] !== null ? 'answered' : ($reason === 'declined' ? 'declined' : 'missed');
-    update_call_log($call, ['status' => 'ended', 'result' => $result, 'endedAt' => now_ms()]);
+    update_call_log($call, ['status' => 'ended', 'result' => $result, 'endedAt' => $endedAt ?? now_ms(), 'waitingUntil' => null]);
     emit('call-ended', ['id' => $call['id'], 'room' => $call['room'], 'name' => $by, 'reason' => $reason, 'result' => $result, 'caller' => $call['caller'], 'media' => $call['media']], 'all', null, null, $call['room']);
 }
 
 function call_act(array $me, array $body): array
 {
+    call_sweep();
     $op = str($body['op'] ?? '');
     $name = $me['name'];
     if ($op === 'get') {
@@ -3397,12 +3452,10 @@ function call_act(array $me, array $body): array
         $room = $me['room'];
         $peer = room_peer($room, $name);
         foreach (all_calls() as $open) {
-            // Sobrou de uma conexão que já saiu: não segura a próxima.
-            if (!find_client($open['callerConn']) || ($open['calleeConn'] && !find_client($open['calleeConn']))) {
-                call_finish($open, 'dropped');
-                continue;
-            }
-            $people = [$open['caller'], $open['callee']];
+            $people = [];
+            if ($open['callerConn']) $people[] = $open['caller'];
+            if ($open['calleeConn']) $people[] = $open['callee'];
+            elseif ($open['answeredAt'] === null && $open['callerConn']) $people[] = $open['callee'];
             if ($open['room'] === $room['id']) {
                 if ($open['answeredAt'] !== null) return ['ok' => false, 'error' => 'Já tem uma chamada acontecendo.'];
                 return ['ok' => false, 'error' => $open['caller'] === $peer ? "$peer já está te ligando." : 'Você já está ligando de outro aparelho.'];
@@ -3411,9 +3464,13 @@ function call_act(array $me, array $body): array
             if (in_array($peer, $people, true)) return ['ok' => false, 'error' => "$peer está em outra chamada agora."];
         }
         $media = in_array($body['media'] ?? '', array_keys(CALL_NAMES), true) ? $body['media'] : 'audio';
+        $startedAt = now_ms();
         $call = [
             'id' => uuid(), 'room' => $room['id'], 'caller' => $name, 'callerConn' => $me['conn'], 'callee' => $peer, 'media' => $media,
-            'state' => clean_call_state($body['state'] ?? null), 'startedAt' => now_ms(), 'answeredAt' => null, 'calleeConn' => null, 'message' => null,
+            'state' => clean_call_state($body['state'] ?? null), 'startedAt' => $startedAt, 'answeredAt' => null, 'calleeConn' => null, 'message' => null,
+            'waitingUntil' => $startedAt + CALL_WAIT_MS, 'generation' => 0, 'joined' => [$name],
+            'states' => ['caller' => clean_call_state($body['state'] ?? null), 'callee' => clean_call_state(null)],
+            'leases' => ['caller' => 0, 'callee' => 0],
         ];
         $row = [
             'id' => uuid(), 'client_id' => null, 'sender' => $name, 'text' => '', 'created_at' => iso(), 'reply_to' => null,
@@ -3425,28 +3482,49 @@ function call_act(array $me, array $body): array
         save_call($call);
         emit_message('message', to_message($row));
         emit('call-ring', call_public($call), 'peer', $me, null, $room['id']);
+        emit('call-update', call_public($call), 'all', null, null, $room['id']);
         return ['ok' => true, 'call' => call_public($call), 'online' => web_online($peer)];
     }
 
     $call = find_call(str($body['id'] ?? ''));
     if (!$call) return ['ok' => false, 'error' => 'Essa chamada já terminou.'];
-    if ($call['callee'] !== $name) return ['ok' => false, 'error' => 'Essa chamada não é para você.'];
+    if (!in_array($name, [$call['caller'], $call['callee']], true)) return ['ok' => false, 'error' => 'Essa chamada não é para você.'];
 
     switch ($op) {
         // Só a primeira conexão que atende entra; as outras (o site em outro aparelho, o app) param de tocar.
         case 'accept':
-            if ($call['answeredAt'] !== null) return ['ok' => false, 'error' => 'Você já atendeu em outro aparelho.'];
-            $call['answeredAt'] = now_ms();
-            $call['calleeConn'] = $me['conn'];
+        case 'join':
+        case 'resume':
+            if ($op === 'accept' && $call['callee'] !== $name) return ['ok' => false, 'error' => 'Essa chamada não é para você.'];
+            $role = $call['caller'] === $name ? 'caller' : 'callee';
+            $previous = $call[$role . 'Conn'];
+            if ($previous === $me['conn'] && empty($body['renegotiate'])) return ['ok' => true, 'call' => call_public($call)];
+            if ($previous && $previous !== $me['conn'] && find_client($previous) && $op !== 'resume') return ['ok' => false, 'error' => $op === 'accept' ? 'Você já atendeu em outro aparelho.' : 'Você já está nessa chamada em outro aparelho.'];
+            foreach (all_calls() as $other) {
+                if ($other['id'] !== $call['id'] && (($other['caller'] === $name && $other['callerConn']) || ($other['callee'] === $name && $other['calleeConn']))) return ['ok' => false, 'error' => 'Você já está em outra chamada.'];
+            }
+            $call[$role . 'Conn'] = $me['conn'];
+            $call['states'][$role] = clean_call_state($body['state'] ?? null);
+            $call['joined'] = array_values(array_unique(array_merge($call['joined'], [$name])));
+            $call['generation']++;
+            $call['leases'][$role] = $call['generation'];
+            $paired = $call['callerConn'] && $call['calleeConn'];
+            if ($paired && $call['answeredAt'] === null) $call['answeredAt'] = now_ms();
+            $call['waitingUntil'] = $paired ? null : now_ms() + CALL_WAIT_MS;
             save_call($call);
-            update_call_log($call);
-            emit('call-accepted', ['id' => $call['id'], 'room' => $call['room'], 'from' => $me['conn'], 'name' => $name, 'state' => clean_call_state($body['state'] ?? null)], 'peer', $me, $call['callerConn'], $call['room']);
+            if ($previous && $previous !== $me['conn']) emit('call-replaced', ['id' => $call['id']], 'self', $me, $previous, $call['room']);
+            call_changed($call);
+            if ($paired) emit('call-accepted', ['id' => $call['id'], 'room' => $call['room'], 'from' => $call['calleeConn'], 'name' => $call['callee'], 'state' => $call['states']['callee'], 'generation' => $call['generation']], 'all', null, $call['callerConn'], $call['room']);
             emit('call-handled', ['id' => $call['id']], 'self', $me);
             return ['ok' => true, 'call' => call_public($call)];
 
         case 'decline':
-            if ($call['answeredAt'] === null) call_finish($call, 'declined', $name);
+            if ($call['callee'] !== $name) return ['ok' => false, 'error' => 'Essa chamada não é para você.'];
+            if ($call['answeredAt'] === null && !$call['calleeConn']) call_finish($call, 'declined', $name);
             return ['ok' => true];
+        case 'leave':
+            call_leave($call, $name, $me['conn'], null, isset($body['lease']) ? (int) $body['lease'] : null);
+            return ['ok' => true, 'call' => call_public(find_call($call['id']))];
     }
     return ['ok' => false, 'error' => 'Ação desconhecida.'];
 }

@@ -396,6 +396,11 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
 @keyframes typing-dot { 0%, 60%, 100% { translate: 0 0; scale: .8; opacity: .45; } 30% { translate: 0 -5px; scale: 1.15; opacity: 1; background: var(--accent); } }
 @keyframes typing-breathe { 0%, 100% { scale: 1; } 50% { scale: 1.05; } }
 
+.available-call { display: flex; flex: none; align-items: center; gap: 10px; margin: 8px 14px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); font-size: 12px; }
+.available-call > .icon { flex: none; color: var(--ok); }
+.available-call > span { flex: 1; min-width: 0; }
+.available-call button { flex: none; padding: 8px 12px; }
+@media (max-width: 420px) { .available-call { gap: 7px; margin-inline: 8px; } .available-call button { font-size: 11px; padding-inline: 9px; } }
 .reply-bar { margin: 0 max(14px, calc((100% - 850px) / 2)); display: flex; align-items: center; gap: 12px; padding: 8px 10px 8px 14px; border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 14px 14px 4px 4px; background: var(--surface); }
 .reply-bar .reply-icon { width: 18px; height: 18px; color: var(--accent); }
 .reply-bar div { flex: 1; min-width: 0; }

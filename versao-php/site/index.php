@@ -334,6 +334,12 @@ function asset(string $file): string
 
         <div id="net-banner" class="net-banner hidden"><span class="spinner"></span><span id="net-text">Reconectando…</span></div>
 
+        <div id="available-call" class="available-call hidden" role="region" aria-label="Chamada disponível para reentrar">
+          <svg class="icon" aria-hidden="true"><use href="#i-phone" /></svg>
+          <span id="available-call-text">Chamada disponível</span>
+          <button id="join-available-call" type="button" class="pill small">Entrar novamente</button>
+        </div>
+
         <!-- Chamada (estilo Discord) -->
         <div id="call-panel" class="call-panel hidden">
           <div id="stage" class="stage">
@@ -396,7 +402,7 @@ function asset(string $file): string
                 <svg class="icon when-off"><use href="#i-message-off" /></svg>
               </button>
               <button id="call-pip" class="round hidden" type="button" title="Abrir miniatura flutuante" aria-label="Abrir miniatura flutuante"><svg class="icon"><use href="#i-pip" /></svg></button>
-              <button id="end-call" class="round hangup" type="button" title="Desligar" aria-label="Desligar">
+              <button id="end-call" class="round hangup" type="button" title="Sair da chamada (disponível por 5 minutos)" aria-label="Sair da chamada">
                 <svg class="icon"><use href="#i-hangup" /></svg>
               </button>
             </div>

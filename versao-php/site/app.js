@@ -508,12 +508,20 @@ function connect(token, animate) {
   });
 
   socket.on("call-ring", ring);
+  socket.on("call-update", receiveCallUpdate);
+  socket.on("call-replaced", ({ id }) => {
+    if (call?.id !== id) return;
+    resumeSuppressed.add(id);
+    store.set("sessionStorage", "potato.replacedCalls", [...resumeSuppressed]);
+    teardown(false);
+    toast("A chamada foi aberta em outro aparelho ou aba.");
+  });
   socket.on("call-accepted", sendOffer);
   socket.on("webrtc-offer", receiveOffer);
   socket.on("webrtc-answer", receiveAnswer);
   socket.on("webrtc-ice", receiveIce);
   socket.on("webrtc-restart", (message) => {
-    if (call && message.from === call.peerId && message.id === call.id) call.recovery?.receive(message);
+    if (call && message.from === call.peerId && message.id === call.id && (message.generation ?? 0) === call.generation) call.recovery?.receive(message);
   });
   socket.on("call-state", receiveCallState);
   socket.on("call-ended", callEnded);
@@ -5377,6 +5385,190 @@ const QUALITY_LABEL = { "720p": "720p", "1080p": "1080p", "1080p60": "1080p 60fp
 const canPip = inAndroid || Boolean(document.pictureInPictureEnabled && streamVideo.requestPictureInPicture);
 const callInfo = $(".call-info");
 const SPEAKING_LEVEL = 0.025;
+const availableCalls = new Map();
+const replacedCalls = store.get("sessionStorage", "potato.replacedCalls");
+const resumeSuppressed = new Set(Array.isArray(replacedCalls) ? replacedCalls : []);
+const closedCallIds = new Set();
+const resumeSuppressedRooms = new Set();
+const callTab = store.get("sessionStorage", "potato.callTab") || uid();
+store.set("sessionStorage", "potato.callTab", callTab);
+const availableCall = $("#available-call");
+const waitLabel = (until) => {
+  const seconds = Math.max(0, Math.ceil((until - serverNow()) / 1000));
+  return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+};
+const ownParticipant = (info) => info?.participants?.find((item) => item.name === me);
+const otherParticipant = (info) => info?.participants?.find((item) => item.name !== me);
+
+function rememberCall(active = call) {
+  if (!active?.id || (active.role === "callee" && !active.accepted)) return;
+  store.set("localStorage", "potato.callResume", { id: active.id, account: me, tab: callTab, room: active.room, mic: micOn(), cam: Boolean(active.local.cam) });
+}
+
+function forgetCall(id) {
+  const saved = store.get("localStorage", "potato.callResume");
+  if (saved?.account === me && saved.id === id) store.remove("localStorage", "potato.callResume");
+}
+
+function paintAvailableCall() {
+  const info = [...availableCalls.values()].find((item) => item.room === room);
+  const activeHere = call && (call.role === "caller" || call.accepted);
+  availableCall.classList.toggle("hidden", !info || Boolean(activeHere));
+  if (info && !activeHere) {
+    const elsewhere = ownParticipant(info)?.conn && ownParticipant(info).conn !== socket?.id;
+    $("#available-call-text").textContent = elsewhere ? "Chamada em outro aparelho" : info.waitingUntil
+      ? `Chamada disponível · ${waitLabel(info.waitingUntil)}` : "Chamada em andamento";
+    const button = $("#join-available-call");
+    button.disabled = Boolean(elsewhere || (info.waitingUntil && info.waitingUntil <= serverNow()));
+    button.textContent = info.joined?.includes(me) ? "Entrar novamente" : "Entrar";
+  }
+  const current = availableCalls.get(call?.id);
+  if (activeHere && current?.waitingUntil && !otherParticipant(current)) {
+    callStatus.textContent = `Aguardando ${call.name} · ${waitLabel(current.waitingUntil)}`;
+  }
+}
+setInterval(paintAvailableCall, 1000);
+$("#join-available-call").addEventListener("click", () => {
+  const info = [...availableCalls.values()].find((item) => item.room === room);
+  if (info) joinExistingCall(info);
+});
+
+function callRequest(op, id, data = {}) {
+  return new Promise((resolve, reject) => socket.timeout(15000).emit("call", { op, id, ...data }, (error, result) => {
+    if (error || !result?.ok) reject(new Error(result?.error || "Não foi possível entrar na chamada agora."));
+    else resolve(result.call);
+  }));
+}
+
+// Fecha só o transporte antigo. Microfone/câmera/tela locais continuam disponíveis enquanto a outra pessoa volta.
+function resetPeer(active) {
+  active.recovery?.close();
+  active.recovery = null;
+  const peer = peerConnection;
+  peerConnection = null;
+  if (peer) { peer.onconnectionstatechange = peer.ontrack = peer.onicecandidate = null; peer.close(); }
+  pendingCandidates = [];
+  active.slots = null;
+  active.peerId = null;
+  active.offered = false;
+  active.connected = false;
+  active.remote = {};
+  active.remoteState = { mic: false, cam: false, screen: false };
+  clearInterval(active.clock);
+  cancelAnimationFrame(active.frame);
+  remoteAudio.srcObject = null;
+  callInfo.classList.remove("live");
+  paintStage();
+}
+
+async function resumeCurrentCall(active) {
+  if (active.joining || !socket?.connected) return;
+  active.joining = true;
+  try {
+    const info = await callRequest("resume", active.id, { state: myState() });
+    if (call !== active) return;
+    active.conn = socket.id;
+    active.joining = false;
+    receiveCallUpdate(info);
+  } catch (error) {
+    if (call !== active) return;
+    active.joining = false;
+    callStatus.textContent = "Aguardando conexão para voltar à chamada…";
+  }
+}
+
+function applyCallInfo(info) {
+  const active = call;
+  if (!active || active.id !== info.id || active.joining || (active.role === "callee" && !active.accepted)) return;
+  const mine = ownParticipant(info);
+  if (mine?.conn !== socket?.id) {
+    if (!mine || mine.conn === active.conn) resumeCurrentCall(active);
+    else {
+      resumeSuppressed.add(info.id);
+      teardown(false);
+      toast("A chamada está em outro aparelho.");
+    }
+    return;
+  }
+  active.conn = socket.id;
+  active.lease = mine.lease;
+  if (info.answeredAt && !active.since) active.since = Date.now() - Math.max(0, serverNow() - info.answeredAt);
+  const peer = otherParticipant(info);
+  if (active.generation !== info.generation || active.peerId !== (peer?.conn || null)) {
+    resetPeer(active);
+    active.generation = info.generation;
+    if (peer) {
+      if (active.role === "caller") sendOffer({ id: info.id, from: peer.conn, state: peer.state, generation: info.generation });
+      else { active.peerId = peer.conn; active.remoteState = peer.state; callStatus.textContent = "Reconectando a chamada…"; }
+    }
+  }
+  if (active.role === "callee" && active.pendingOffer?.generation === info.generation) {
+    const offer = active.pendingOffer;
+    active.pendingOffer = null;
+    receiveOffer(offer);
+  }
+  rememberCall(active);
+  paintStage();
+  paintAvailableCall();
+}
+
+function receiveCallUpdate(info) {
+  if (!info?.id || closedCallIds.has(info.id)) return;
+  const previous = availableCalls.get(info.id);
+  if (previous && previous.generation > info.generation) info = previous;
+  availableCalls.set(info.id, info);
+  if (call?.id === info.id && call.role === "callee" && !call.accepted && (!info.from || info.answered)) teardown(false);
+  applyCallInfo(info);
+  paintAvailableCall();
+  if (!call) maybeResumeCall();
+}
+
+function maybeResumeCall() {
+  if (call || !socket?.connected) return;
+  const saved = store.get("localStorage", "potato.callResume");
+  const candidates = [...availableCalls.values()].filter((info) => info.joined?.includes(me) && !resumeSuppressed.has(info.id)
+    && !resumeSuppressedRooms.has(info.room)
+    && (!info.waitingUntil || info.waitingUntil > serverNow()));
+  candidates.sort((a, b) => Number(b.id === saved?.id) - Number(a.id === saved?.id) || b.startedAt - a.startedAt);
+  const info = candidates.find((item) => !ownParticipant(item) || ownParticipant(item).conn === socket.id
+    || (saved?.account === me && saved.id === item.id && saved.tab === callTab));
+  if (info) joinExistingCall(info, true);
+}
+
+async function joinExistingCall(info, automatic = false, desiredMedia = "") {
+  if (call && (call.role === "caller" || call.accepted)) return;
+  if (call) teardown(false);
+  if (!automatic) {
+    resumeSuppressed.delete(info.id);
+    resumeSuppressedRooms.delete(info.room);
+    store.set("sessionStorage", "potato.replacedCalls", [...resumeSuppressed]);
+  }
+  const saved = store.get("localStorage", "potato.callResume");
+  const active = call = newCall({ id: info.id, room: info.room, media: info.media, role: info.caller === me ? "caller" : "callee",
+    name: info.caller === me ? info.callee : info.caller, accepted: true, joining: true, generation: info.generation });
+  try {
+    if (room !== info.room) await openRoom(info.room);
+    if (call !== active) return;
+    await acquireMic(active);
+    if (call !== active) return;
+    if (saved?.account === me && saved.id === info.id && saved.mic === false && active.local.mic) active.local.mic.enabled = false;
+    if (desiredMedia === "video" || (!automatic && !info.joined?.includes(me) && info.media === "video") || (saved?.account === me && saved.id === info.id && saved.cam)) await toggleCam();
+    if (call !== active) return;
+    openCallPanel(automatic ? "Voltando à chamada…" : "Entrando na chamada…");
+    const joined = await callRequest(automatic ? "resume" : "join", info.id, { state: myState(), renegotiate: true });
+    if (call !== active) return;
+    active.joining = false;
+    active.conn = socket.id;
+    rememberCall(active);
+    receiveCallUpdate(joined);
+    if (automatic) toast("Você voltou à chamada.", "ok");
+  } catch (error) {
+    if (call !== active) return;
+    resumeSuppressed.add(info.id);
+    toast(error.message, "error");
+    teardown(false);
+  }
+}
 
 function setToggle(button, on, titleOn, titleOff) {
   button.classList.toggle("is-off", !on);
@@ -5411,7 +5603,7 @@ function myState() {
 
 // Avisa a outra pessoa o que está ligado (microfone, câmera, transmissão).
 function sendState() {
-  if (call?.slots) socket?.emit("call-state", { id: call.id, to: call.peerId, ...myState() });
+  if (call?.slots) socket?.emit("call-state", { id: call.id, to: call.peerId, generation: call.generation, ...myState() });
 }
 
 function receiveCallState(state) {
@@ -5447,6 +5639,7 @@ function setVideo(element, track) {
   const id = track?.id || "";
   if (element.dataset.track === id) return;
   element.srcObject = track ? new MediaStream([track]) : null;
+  if (track) element.play().catch(() => {});
   element.dataset.track = id;
 }
 
@@ -5495,6 +5688,7 @@ function paintStage() {
   setToggle($("#toggle-mic"), micOn(), "Silenciar microfone", "Ativar microfone");
   setToggle($("#toggle-cam"), Boolean(local.cam), "Desligar câmera", "Ligar câmera");
   setToggle($("#toggle-live"), Boolean(local.screen), "Parar transmissão", "Transmitir tela");
+  rememberCall();
   syncAndroidCall();
 }
 
@@ -5515,30 +5709,32 @@ function openCallPanel(status) {
   showTab("chat");
   chatView.classList.add("in-call");
   paintStage();
+  // Uma reentrada rápida cancela a animação de saída anterior antes de reutilizar o painel.
+  window.gsap?.killTweensOf(callPanel);
   fx.show(callPanel, { y: -20, scale: 0.97 });
   scrollToLatest();
 }
 
-async function createPeer() {
+async function createPeer(expectedGeneration = call?.generation) {
   const active = call;
   const settings = await loadRtcConfig();
-  if (call !== active) throw new Error("Chamada encerrada");
+  if (call !== active || active.generation !== expectedGeneration) throw new Error("Conexão substituída");
   const peer = peerConnection = new RTCPeerConnection(settings.config);
   active.recovery = createRtcRecovery({
     peer, caller: active.role === "caller", loadConfig: loadRtcConfig, remoteReady: flushCandidates,
-    send: (message) => socket?.emit("webrtc-restart", { ...message, id: active.id, to: active.peerId }),
+    send: (message) => socket?.emit("webrtc-restart", { ...message, id: active.id, to: active.peerId, generation: expectedGeneration }),
     status: (text) => { if (call === active) callStatus.textContent = text || `Em chamada com ${active.name}`; },
     failed: () => {
-      if (call !== active) return;
+      if (call !== active || peerConnection !== peer) return;
       toast("Não foi possível recuperar a conexão. Verifique a internet e a configuração do servidor TURN.", "error");
       teardown(true);
     }
   });
   peer.onicecandidate = ({ candidate }) => {
-    if (candidate && call === active) socket.emit("webrtc-ice", { id: active.id, candidate, to: active.peerId });
+    if (candidate && call === active && peerConnection === peer) socket.emit("webrtc-ice", { id: active.id, candidate, to: active.peerId, generation: expectedGeneration });
   };
   peer.ontrack = ({ track, transceiver }) => {
-    if (call !== active) return;
+    if (call !== active || peerConnection !== peer) return;
     const slot = SLOTS[peer.getTransceivers().indexOf(transceiver)];
     if (!slot) return;
     call.remote[slot] = track;
@@ -5546,7 +5742,7 @@ async function createPeer() {
     paintStage();
   };
   peer.onconnectionstatechange = () => {
-    if (call !== active) return;
+    if (call !== active || peerConnection !== peer) return;
     const state = peer.connectionState;
     if (state === "connected") {
       onConnected();
@@ -5589,7 +5785,8 @@ function onConnected() {
   sound.play("connected");
   tilePeer.classList.remove("ringing");
   callInfo.classList.add("live");
-  const started = call.since = Date.now();
+  clearInterval(call.clock);
+  const started = call.since ||= Date.now();
   syncAndroidCall();
   call.clock = setInterval(() => {
     const seconds = Math.floor((Date.now() - started) / 1000);
@@ -5729,7 +5926,10 @@ async function startCall(media, share = {}) {
     sound.play("error");
     return toast(peerName ? "Sem conexão agora. Tente de novo em instantes." : "Dá para ligar quando a outra pessoa criar a conta dela.", "error");
   }
-  const active = call = newCall({ media, role: "caller", name: peerName, room });
+  const available = [...availableCalls.values()].find((info) => info.room === room);
+  if (available) return joinExistingCall(available, false, media);
+  resumeSuppressedRooms.delete(room);
+  const active = call = newCall({ media, role: "caller", name: peerName, room, generation: 0, conn: socket.id });
   // A tela é escolhida primeiro, enquanto o clique ainda vale para o navegador.
   if (media === "screen") {
     const started = await startLive(share.quality, share.audio);
@@ -5745,7 +5945,10 @@ async function startCall(media, share = {}) {
   sound.loop("ringback");
   // A oferta WebRTC só sai quando alguém atender (sendOffer), direto para o aparelho que atendeu.
   socket.timeout(10000).emit("call", { op: "start", media, state: myState() }, (error, result) => {
-    if (active !== call) return;
+    if (active !== call) {
+      if (result?.call?.id) socket.emit("call-leave", { id: result.call.id, lease: 0 });
+      return;
+    }
     if (error || !result?.ok) {
       sound.play("error");
       toast(result?.error || "Não foi possível iniciar a chamada.", "error");
@@ -5753,8 +5956,10 @@ async function startCall(media, share = {}) {
       return teardown(Boolean(error));
     }
     active.id = result.call.id;
+    rememberCall(active);
+    receiveCallUpdate(result.call);
     if (!result.online) callStatus.textContent = `Chamando ${active.name}… (offline: a chamada fica esperando)`;
-    // Depois de tocar, para de chamar e continua esperando a pessoa entrar (o servidor fecha em 10 minutos).
+    // O toque dura um minuto; a sala aguarda entrada por até cinco minutos, controlados no servidor.
     active.timeout = setTimeout(() => {
       if (call !== active || active.peerId) return;
       sound.stopLoop();
@@ -5765,24 +5970,25 @@ async function startCall(media, share = {}) {
 }
 
 // Atenderam (from = a conexão que atendeu): a oferta vai direto para ela.
-async function sendOffer({ id, from, state }) {
+async function sendOffer({ id, from, state, generation = 0 }) {
   const active = call;
   if (active?.role !== "caller" || active.id !== id || active.peerId) return;
+  active.generation = generation;
   active.peerId = from;
   if (state) active.remoteState = state;
   clearTimeout(active.timeout);
   sound.stopLoop();
   callStatus.textContent = "Conectando…";
   try {
-    const peer = await createPeer();
+    const peer = await createPeer(generation);
     active.slots = Object.fromEntries(SLOTS.map((slot) => [slot, peer.addTransceiver(SLOT_KIND[slot], { direction: "sendrecv" })]));
     await Promise.all(SLOTS.map(attach));
     await peer.setLocalDescription(await peer.createOffer());
-    if (active !== call) return;
-    socket.emit("webrtc-offer", { id, to: from, description: peer.localDescription, media: active.media, state: myState() });
+    if (active !== call || active.generation !== generation || peerConnection !== peer) return;
+    socket.emit("webrtc-offer", { id, to: from, description: peer.localDescription, media: active.media, state: myState(), generation });
     paintStage();
   } catch {
-    if (active !== call) return;
+    if (active !== call || active.generation !== generation) return;
     sound.play("error");
     toast("Não foi possível iniciar a chamada.", "error");
     teardown(true);
@@ -5792,10 +5998,11 @@ async function sendOffer({ id, from, state }) {
 // Chamada para você (o aviso call-ring, ou a aberta que veio com o histórico ao conectar): a janela de atender.
 // Toca até ringUntil; depois a chamada continua aberta e a janela fica sem tocar ("está te esperando").
 function ring(info) {
-  if (!info || info.callee !== me || info.answered || call?.id === info.id) return;
+  if (info?.id && (!availableCalls.has(info.id) || availableCalls.get(info.id).generation <= info.generation)) availableCalls.set(info.id, info);
+  if (!info || !info.from || info.callee !== me || info.answered || call?.id === info.id) return;
   // A daqui ficou para trás (o servidor só tem uma chamada aberta por vez): vale a nova.
   if (call) teardown(false);
-  const active = call = newCall({ id: info.id, media: info.media, role: "callee", peerId: info.from, name: info.caller, ringUntil: info.ringUntil, room: info.room });
+  const active = call = newCall({ id: info.id, media: info.media, role: "callee", peerId: info.from, name: info.caller, ringUntil: info.ringUntil, room: info.room, generation: info.generation });
   active.remoteState = info.state || { mic: true, cam: info.media === "video", screen: info.media === "screen" };
   paintAvatar($("#incoming-face"), info.caller);
   $("#incoming-kind").textContent = mediaLabel[info.media] || "Chamada";
@@ -5844,35 +6051,22 @@ function paintIncoming(active) {
 
 async function acceptCall() {
   if (!call || call.role !== "callee" || call.accepted) return;
-  const active = call;
-  active.accepted = true;
-  clearTimeout(active.timeout);
-  sound.stopLoop();
-  incoming.classList.add("hidden");
-  // A chamada é de outra conversa: ela abre (o painel da chamada fica na conversa).
-  if (active.room && active.room !== room) await openRoom(active.room);
-  if (active !== call) return;
-  await acquireMic(active);
-  if (active.media === "video") await toggleCam();
-  if (active !== call) return;
-  openCallPanel("Conectando…");
-  // Quem ligou manda a oferta (receiveOffer) assim que o servidor confirmar que foi esta conexão que atendeu.
-  socket.timeout(10000).emit("call", { op: "accept", id: active.id, state: myState() }, (error, result) => {
-    if (active !== call || (!error && result?.ok)) return;
-    sound.play("error");
-    toast(result?.error || "Não foi possível entrar na chamada.", "error");
-    teardown(Boolean(error));
-  });
+  const info = availableCalls.get(call.id);
+  if (info) return joinExistingCall(info);
 }
 
-async function receiveOffer({ id, description, from, state }) {
+async function receiveOffer({ id, description, from, state, generation = 0 }) {
   const active = call;
-  if (active?.role !== "callee" || !active.accepted || active.id !== id || active.offered) return;
+  if (active?.id === id && active.role === "callee" && active.accepted && active.joining) {
+    active.pendingOffer = { id, description, from, state, generation };
+    return;
+  }
+  if (active?.role !== "callee" || !active.accepted || active.id !== id || active.offered || active.generation !== generation) return;
   active.offered = true;
   active.peerId = from;
   if (state) active.remoteState = state;
   try {
-    const peer = await createPeer();
+    const peer = await createPeer(generation);
     await peer.setRemoteDescription(description);
     const transceivers = peer.getTransceivers();
     active.slots = Object.fromEntries(SLOTS.map((slot, index) => [slot, transceivers[index]]).filter(([, transceiver]) => transceiver));
@@ -5880,11 +6074,11 @@ async function receiveOffer({ id, description, from, state }) {
     await Promise.all(SLOTS.map(attach));
     await flushCandidates();
     await peer.setLocalDescription(await peer.createAnswer());
-    if (active !== call) return;
-    socket.emit("webrtc-answer", { id: active.id, description: peer.localDescription, to: from, state: myState() });
+    if (active !== call || active.generation !== generation || peerConnection !== peer) return;
+    socket.emit("webrtc-answer", { id: active.id, description: peer.localDescription, to: from, state: myState(), generation });
     paintStage();
   } catch {
-    if (active !== call) return;
+    if (active !== call || active.generation !== generation) return;
     sound.play("error");
     toast(inExtension ? mediaDeniedText() : "Não foi possível entrar na chamada.", "error");
     teardown(true);
@@ -5901,6 +6095,10 @@ function declineCall() {
 // Fim da chamada (o servidor avisa todos os aparelhos). reason: hangup, declined, missed (ninguém entrou) ou dropped
 // (a conexão de alguém caiu).
 function callEnded({ id, reason, name } = {}) {
+  if (id) closedCallIds.add(id);
+  availableCalls.delete(id);
+  forgetCall(id);
+  paintAvailableCall();
   const active = call;
   if (!active || (id && active.id !== id)) return;
   if (active.role === "callee" && !active.accepted) {
@@ -5909,7 +6107,7 @@ function callEnded({ id, reason, name } = {}) {
   } else if (active.role === "caller" && !active.peerId) {
     toast(reason === "declined" ? `${name || active.name} recusou a chamada.` : reason === "missed" ? `${active.name} não entrou na chamada.` : "A chamada caiu.");
   } else {
-    toast(reason === "dropped" ? "A chamada caiu." : "Chamada encerrada.");
+    toast(reason === "timeout" ? "A chamada encerrou após 5 minutos de espera." : reason === "dropped" ? "A chamada caiu." : "Chamada encerrada.");
   }
   sound.play("hangup");
   teardown(false);
@@ -5918,17 +6116,29 @@ function callEnded({ id, reason, name } = {}) {
 // As chamadas abertas com você segundo o servidor, ao conectar (e a cada reconexão, que pode ter perdido avisos): a
 // daqui que acabou nesse meio-tempo some; a que é para você toca (ou espera você entrar).
 function syncCall(calls) {
+  const previous = new Map(availableCalls);
+  availableCalls.clear();
+  calls = calls.filter((info) => !closedCallIds.has(info.id)).map((info) => previous.get(info.id)?.generation > info.generation ? previous.get(info.id) : info);
+  for (const info of calls) availableCalls.set(info.id, info);
   const info = calls.find((item) => item.id === call?.id);
-  if (call?.id && (!info || (call.role === "callee" && !call.accepted && info.answered))) {
-    if (call.role === "caller" || call.accepted) toast("A chamada caiu.");
+  if (call?.id && (!info || (call.role === "callee" && !call.accepted && (info.answered || !info.from)))) {
+    if (!info) forgetCall(call.id);
     teardown(false);
   }
+  if (info) applyCallInfo(info);
   if (pendingAccept && !calls.some((item) => item.id === pendingAccept)) {
     pendingAccept = "";
     toast("Essa chamada já terminou.");
   }
-  const waiting = calls.find((item) => item.callee === me && !item.answered);
-  if (waiting) ring(waiting);
+  const requested = calls.find((item) => item.id === pendingAccept);
+  if (requested && (!call || (call.id === requested.id && !call.accepted))) {
+    pendingAccept = "";
+    joinExistingCall(requested);
+  }
+  maybeResumeCall();
+  const waiting = calls.find((item) => item.callee === me && !item.answered && item.from && !item.joined?.includes(me));
+  if (!call && waiting) ring(waiting);
+  paintAvailableCall();
 }
 
 // Chamada na conversa, como no Discord: uma linha só, com o ícone do telefone, o que aconteceu e quanto durou
@@ -5948,8 +6158,8 @@ function callCard(message) {
   const lasted = info.endedAt - (lost ? info.startedAt : info.answeredAt || info.startedAt);
   if (open) {
     const live = info.status === "live";
-    long.append(name(info.caller), live ? " está numa chamada." : " iniciou uma chamada.");
-    short.append(name(info.caller), live ? " está numa chamada" : " está ligando");
+    long.append(name(info.caller), live ? " está numa chamada." : info.status === "waiting" ? " deixou a chamada disponível por 5 minutos." : " iniciou uma chamada.");
+    short.append(name(info.caller), live ? " está numa chamada" : info.status === "waiting" ? " · chamada disponível" : " está ligando");
   } else if (info.result === "declined") {
     long.append(...(mine ? [name(info.callee), " recusou a sua chamada."] : ["Você recusou uma chamada de ", name(info.caller), "."]));
     short.append(...(mine ? [name(info.callee), " recusou a chamada"] : ["Você recusou a chamada"]));
@@ -5962,7 +6172,7 @@ function callCard(message) {
     else short.append(name(info.caller), ` iniciou uma chamada · ${callDurationShort(lasted)}`);
   }
   line.append(long, short);
-  if (open && !mine && info.status === "ringing" && !call?.accepted) {
+  if (open && !(call?.id === info.id && (call.role === "caller" || call.accepted))) {
     const join = el("button", "call-line-join", "Entrar");
     join.type = "button";
     join.dataset.callAction = "join";
@@ -5992,11 +6202,10 @@ function callDurationShort(ms) {
 function callCardAction(action, info) {
   if (action !== "join") return;
   // Entrar: a janela de atender já está aberta para ela, ou o servidor diz se ela ainda está aberta.
-  if (call?.id === info.id) return acceptCall();
+  if (call?.id === info.id && (call.role === "caller" || call.accepted)) return;
   socket?.timeout(8000).emit("call", { op: "get", id: info.id }, (error, result) => {
-    if (error || result?.call?.id !== info.id || result.call.answered) return toast("Essa chamada já terminou.");
-    pendingAccept = info.id;
-    ring(result.call);
+    if (error || result?.call?.id !== info.id) return toast("Essa chamada já terminou.");
+    joinExistingCall(result.call);
   });
 }
 
@@ -6037,6 +6246,7 @@ function pauseCamera(hidden) {
 window.potatoCall = (action, value = "", where = "") => {
   if (action === "accept") {
     if (call?.id === value) acceptCall();
+    else if (availableCalls.has(value)) joinExistingCall(availableCalls.get(value));
     else pendingAccept = value;
   } else if (action === "decline") {
     if (call?.id === value) declineCall();
@@ -6088,8 +6298,8 @@ function callFromHash() {
   else [pendingDial, pendingDialRoom = ""] = value.split(":");
 }
 
-async function receiveAnswer({ id, description, from, state }) {
-  if (call?.role !== "caller" || !peerConnection || (id && id !== call.id)) return;
+async function receiveAnswer({ id, description, from, state, generation = 0 }) {
+  if (call?.role !== "caller" || !peerConnection || (id && id !== call.id) || generation !== call.generation || peerConnection.signalingState !== "have-local-offer") return;
   call.peerId = from;
   if (state) call.remoteState = state;
   sound.stopLoop();
@@ -6099,21 +6309,30 @@ async function receiveAnswer({ id, description, from, state }) {
   paintStage();
 }
 
-async function receiveIce({ candidate, id, from }) {
-  if (!call || (id && id !== call.id) || (from && call.peerId && from !== call.peerId)) return;
+async function receiveIce({ candidate, id, from, generation = 0 }) {
+  if (!call || (id && id !== call.id) || generation !== call.generation || (from && call.peerId && from !== call.peerId)) return;
   if (!peerConnection?.remoteDescription) pendingCandidates.push(candidate);
   else await peerConnection.addIceCandidate(candidate).catch(() => { if (pendingCandidates.length < 200) pendingCandidates.push(candidate); });
 }
 
 async function flushCandidates() {
-  for (const candidate of pendingCandidates.splice(0)) await peerConnection.addIceCandidate(candidate).catch(() => {});
+  const peer = peerConnection;
+  for (const candidate of pendingCandidates.splice(0)) {
+    if (!peer || peer !== peerConnection) return;
+    await peer.addIceCandidate(candidate).catch(() => {});
+  }
 }
 
 function teardown(notifyPeer) {
+  if (notifyPeer && call) {
+    rememberCall();
+    if (call.id) resumeSuppressed.add(call.id);
+    resumeSuppressedRooms.add(call.room);
+  }
   stopNativeScreen();
   call?.recovery?.close();
   document.documentElement.classList.remove("android-pip");
-  if (notifyPeer && call) socket?.emit("call-ended", { to: call.peerId, id: call.id });
+  if (notifyPeer && call?.id) socket?.emit("call-leave", { to: call.peerId, id: call.id, lease: call.lease ?? 0 });
   if (notifyPeer && call?.connected) sound.play("hangup");
   if (call) {
     clearTimeout(call.timeout);
@@ -6147,6 +6366,7 @@ function teardown(notifyPeer) {
   fx.hide(callPanel, { y: -20, scale: 0.97 });
   requestAnimationFrame(() => scrollToLatest());
   syncAndroidCall();
+  paintAvailableCall();
 }
 
 function toggleFullscreen() {
@@ -6249,9 +6469,12 @@ $("#stream-volume").addEventListener("input", (event) => { streamVideo.volume = 
 $("#end-call").addEventListener("click", () => teardown(true));
 $("#accept-call").addEventListener("click", acceptCall);
 $("#decline-call").addEventListener("click", declineCall);
-// Fechando a aba no meio da chamada: ela acaba. A que só estava tocando aqui continua (pode tocar em outro aparelho).
+// Fechar/recarregar sai desta conexão, preservando a sala e os dados para reentrar por até cinco minutos.
 window.addEventListener("beforeunload", () => {
-  if (call && (call.role === "caller" || call.accepted)) socket?.emit("call-ended", { to: call.peerId, id: call.id });
+  if (call?.id && (call.role === "caller" || call.accepted)) {
+    rememberCall();
+    socket?.emit("call-leave", { to: call.peerId, id: call.id, lease: call.lease ?? 0 });
+  }
 });
 window.addEventListener("online", () => call?.recovery?.request());
 

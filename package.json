@@ -11,6 +11,7 @@
     "test": "node tests/integration.mjs",
     "test:rtc": "node --test tests/rtc.mjs",
     "test:emojis": "node tests/emoji-picker-browser.mjs",
+    "test:call-rejoin": "node tests/call-rejoin-browser.mjs",
     "test:turn": "node tests/turn-live.mjs"
   },
   "engines": {
