@@ -397,6 +397,8 @@ function startSession({ token, name }, { animate }) {
 }
 
 function logout() {
+  const savedCall = store.get("localStorage", "potato.callResume");
+  if (savedCall?.account === me) store.remove("localStorage", "potato.callResume");
   socket?.disconnect();
   store.remove("localStorage", SESSION_KEY);
   store.remove("sessionStorage", SESSION_KEY);
@@ -5405,8 +5407,8 @@ const ownParticipant = (info) => info?.participants?.find((item) => item.name ==
 const otherParticipant = (info) => info?.participants?.find((item) => item.name !== me);
 
 function rememberCall(active = call) {
-  if (!active?.id || (active.role === "callee" && !active.accepted)) return;
-  store.set("localStorage", "potato.callResume", { id: active.id, account: me, tab: callTab, room: active.room, mic: micOn(), cam: Boolean(active.local.cam) });
+  if (!active?.id || active.joining || active.conn !== socket?.id || (active.role === "callee" && !active.accepted)) return;
+  store.set("localStorage", "potato.callResume", { id: active.id, active: true, account: me, tab: callTab, room: active.room, mic: micOn(), cam: Boolean(active.local.cam) });
 }
 
 function forgetCall(id) {
@@ -5415,22 +5417,42 @@ function forgetCall(id) {
 }
 
 function paintAvailableCall() {
-  const info = [...availableCalls.values()].find((item) => item.room === room);
+  const info = [...availableCalls.values()].find((item) => item.room === room && item.participants?.length);
   const activeHere = call && (call.role === "caller" || call.accepted);
   availableCall.classList.toggle("hidden", !info || Boolean(activeHere));
   if (info && !activeHere) {
     const elsewhere = ownParticipant(info)?.conn && ownParticipant(info).conn !== socket?.id;
-    $("#available-call-text").textContent = elsewhere ? "Chamada em outro aparelho" : info.waitingUntil
-      ? `Chamada disponível · ${waitLabel(info.waitingUntil)}` : "Chamada em andamento";
+    const peer = otherParticipant(info)?.name || info.caller;
+    paintAvatar($("#available-call-avatar"), elsewhere ? me : peer);
+    $("#available-call-text").textContent = elsewhere ? "Chamada em outro aparelho" : `${peer} está na chamada`;
+    $("#available-call-note").textContent = elsewhere ? "Continue pelo aparelho em uso." : info.joined?.includes(me)
+      ? "Você saiu. Toque em Voltar para entrar." : "Entre para conversar.";
+    paintCallCountdown(availableCall, info.waitingUntil, $("#available-call-timer"));
     const button = $("#join-available-call");
     button.disabled = Boolean(elsewhere || (info.waitingUntil && info.waitingUntil <= serverNow()));
-    button.textContent = info.joined?.includes(me) ? "Entrar novamente" : "Entrar";
+    button.textContent = info.joined?.includes(me) ? "Voltar" : "Entrar";
   }
   const current = availableCalls.get(call?.id);
-  if (activeHere && current?.waitingUntil && !otherParticipant(current)) {
-    callStatus.textContent = `Aguardando ${call.name} · ${waitLabel(current.waitingUntil)}`;
+  const waiting = Boolean(activeHere && current?.waitingUntil && !otherParticipant(current));
+  $("#call-waiting").classList.toggle("hidden", !waiting);
+  callPanel.classList.toggle("waiting-peer", waiting);
+  if (waiting) {
+    const title = current.answered ? `Aguardando ${call.name} voltar` : `Aguardando ${call.name} entrar`;
+    if ($("#call-waiting-title").textContent !== title) $("#call-waiting-title").textContent = title;
+    callStatus.textContent = "Aguardando";
+    paintCallCountdown($("#call-waiting"), current.waitingUntil, $("#call-waiting-timer"));
   }
   paintCallDock();
+}
+
+function paintCallCountdown(card, until, timer) {
+  const remaining = until ? Math.max(0, until - serverNow()) : 0;
+  timer.classList.toggle("hidden", !until);
+  timer.textContent = until ? waitLabel(until) : "";
+  timer.setAttribute("aria-label", `Tempo restante para voltar: ${timer.textContent}`);
+  card.classList.toggle("is-urgent", Boolean(until && remaining <= 30000));
+  card.classList.toggle("has-deadline", Boolean(until));
+  card.style.setProperty("--wait-progress", `${Math.min(100, remaining / 3000)}%`);
 }
 setInterval(paintAvailableCall, 1000);
 $("#join-available-call").addEventListener("click", () => {
@@ -5531,7 +5553,9 @@ function receiveCallUpdate(info) {
 function maybeResumeCall() {
   if (call || !socket?.connected) return;
   const saved = store.get("localStorage", "potato.callResume");
-  const candidates = [...availableCalls.values()].filter((info) => info.joined?.includes(me) && !resumeSuppressed.has(info.id)
+  // Ter participado antes não autoriza entrar de novo. Só uma chamada ainda ativa pode ser retomada.
+  if (saved?.active !== true || saved.account !== me) return;
+  const candidates = [...availableCalls.values()].filter((info) => info.id === saved.id && info.participants?.length && info.joined?.includes(me) && !resumeSuppressed.has(info.id)
     && !resumeSuppressedRooms.has(info.room)
     && (!info.waitingUntil || info.waitingUntil > serverNow()));
   candidates.sort((a, b) => Number(b.id === saved?.id) - Number(a.id === saved?.id) || b.startedAt - a.startedAt);
@@ -5613,10 +5637,12 @@ function paintCallDock() {
   chatView.classList.toggle("in-call", focused);
   if (!active) return;
   callDock.classList.toggle("connected", active.connected && peerConnection?.connectionState === "connected");
+  const current = availableCalls.get(active.id);
+  const waitingUntil = current?.waitingUntil && !otherParticipant(current) ? current.waitingUntil : null;
   paintAvatar($("#call-dock-avatar"), active.name);
   $("#call-dock-name").textContent = active.name;
-  $("#call-dock-status").textContent = callStatus.textContent.startsWith("Em chamada") ? "Em chamada" : callStatus.textContent;
-  $("#call-dock-timer").textContent = callTimer.textContent;
+  $("#call-dock-status").textContent = waitingUntil ? "Aguardando retorno" : callStatus.textContent.startsWith("Em chamada") ? "Em chamada" : callStatus.textContent;
+  $("#call-dock-timer").textContent = waitingUntil ? waitLabel(waitingUntil) : callTimer.textContent;
   $("#call-dock-open").setAttribute("aria-label", `Voltar à chamada com ${active.name}`);
   setToggle(dockMic, micOn(), "Silenciar microfone", "Ativar microfone");
   dockMic.setAttribute("aria-label", dockMic.title);
@@ -6385,7 +6411,7 @@ async function flushCandidates() {
 
 function teardown(notifyPeer) {
   if (notifyPeer && call) {
-    rememberCall();
+    forgetCall(call.id);
     if (call.id) resumeSuppressed.add(call.id);
     resumeSuppressedRooms.add(call.room);
   }

@@ -348,9 +348,10 @@ function asset(string $file): string
         <div id="net-banner" class="net-banner hidden"><span class="spinner"></span><span id="net-text">Reconectando…</span></div>
 
         <div id="available-call" class="available-call hidden" role="region" aria-label="Chamada disponível para reentrar">
-          <svg class="icon" aria-hidden="true"><use href="#i-phone" /></svg>
-          <span id="available-call-text">Chamada disponível</span>
-          <button id="join-available-call" type="button" class="pill small">Entrar novamente</button>
+          <span id="available-call-avatar" class="avatar call-wait-avatar" aria-hidden="true">?</span>
+          <div class="available-call-copy"><strong id="available-call-text">Chamada disponível</strong><span id="available-call-note"></span><span class="available-call-deadline"><span>Tempo restante</span><time id="available-call-timer" class="available-call-timer hidden"></time></span></div>
+          <button id="join-available-call" type="button" class="pill small">Voltar</button>
+          <div class="call-wait-progress" aria-hidden="true"><span></span></div>
         </div>
 
         <!-- Chamada (estilo Discord) -->
@@ -398,6 +399,11 @@ function asset(string $file): string
             </div>
           </div>
           <audio id="remote-audio" autoplay></audio>
+          <div id="call-waiting" class="call-waiting hidden" aria-label="Tempo de espera da chamada">
+            <div class="call-wait-copy"><strong id="call-waiting-title">Aguardando a outra pessoa</strong><span>A chamada encerra se o tempo acabar ou se você sair.</span></div>
+            <div class="call-countdown"><span>Tempo para voltar</span><time id="call-waiting-timer">05:00</time></div>
+            <div class="call-wait-progress" aria-hidden="true"><span></span></div>
+          </div>
           <div class="call-bar">
             <div class="call-info"><span id="call-status">Preparando chamada…</span><span id="call-timer" class="call-timer"></span><span id="live-pill" class="live-pill hidden"></span></div>
             <div class="call-buttons">

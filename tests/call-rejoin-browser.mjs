@@ -116,9 +116,12 @@ try {
   };
   const a = await open(ana), b = await open(beto, true);
   const connected = async (page) => {
-    await page.waitForSelector("#call-panel:not(.hidden) .call-info.live", { timeout: 30000 });
-    assert.equal(await page.locator("#remote-audio").evaluate((node) => node.srcObject?.getAudioTracks()[0]?.readyState), "live");
-    await page.waitForFunction(() => document.querySelector("#remote-video").videoWidth > 0, undefined, { timeout: 15000 });
+    await page.waitForFunction(() => {
+      const panel = document.querySelector("#call-panel");
+      return getComputedStyle(panel).display !== "none" && panel.querySelector(".call-info.live")
+        && document.querySelector("#remote-audio").srcObject?.getAudioTracks()[0]?.readyState === "live"
+        && document.querySelector("#remote-video").videoWidth > 0;
+    }, undefined, { timeout: 30000 });
   };
   const getCall = (id) => php(`find_call('${id}')`);
   const expire = (id) => php(`transaction(function () { $call = find_call('${id}'); $call['waitingUntil'] = now_ms() - 1; save_call($call); sweep(); return true; })`);
@@ -163,6 +166,7 @@ try {
     console.log(`Tela Android ${dimensions.join("x")}, áudio audível no PC, rotação, prévia própria oculta e PiP só com vídeo remoto: OK.`);
   }
   const id = await a.evaluate(() => JSON.parse(localStorage.getItem("potato.callResume")).id);
+  assert.equal(await a.evaluate(() => JSON.parse(localStorage.getItem("potato.callResume")).active), true);
   const firstGeneration = getCall(id).generation;
   assert.equal(getCall(id).waitingUntil, null);
   await b.locator("#call-minimize").click();
@@ -226,9 +230,20 @@ try {
   await a.locator("#name").fill("Ana");
   await a.locator("#password").fill("teste-call-1234");
   await a.locator("#login-form .primary").click();
+  await a.waitForSelector("#available-call:not(.hidden)");
+  assert.ok(await a.locator("#call-panel").isHidden());
+  await until(() => getCall(id).callerConn === null);
+  assert.equal(await a.evaluate(() => localStorage.getItem("potato.callResume")), null);
+  await a.reload();
+  await a.waitForSelector("#join-available-call:enabled");
+  assert.ok(await a.locator("#call-panel").isHidden(), "sair da conta não pode autorizar retomada automática");
+  assert.equal(getCall(id).callerConn, null);
+  await a.locator("#join-available-call").click();
+  await a.waitForSelector("#call-panel .call-info.live");
+  await a.locator("#toggle-cam.is-off").click();
   await Promise.all([connected(a), connected(b)]);
   assert.equal(await a.evaluate(() => JSON.parse(localStorage.getItem("potato.callResume")).id), id);
-  console.log("Sair da conta e entrar novamente também retoma a mesma chamada automaticamente.");
+  console.log("Sair da conta e relogar mantém a pessoa fora da chamada; só Voltar faz a reentrada.");
 
   await b.locator("#toggle-mic").click();
   assert.equal(await b.locator("#toggle-mic").getAttribute("aria-pressed"), "false");
@@ -255,13 +270,43 @@ try {
   const deadline = getCall(id).waitingUntil;
   assert.ok(deadline > Date.now() + 295000 && deadline <= Date.now() + 301000);
   await until(() => a.locator("#call-status").textContent().then((text) => text.includes("Aguardando")));
+  await a.waitForSelector("#call-waiting:not(.hidden)");
+  assert.ok(await a.locator("#call-timer").isHidden());
+  assert.match(await a.locator("#call-waiting-timer").textContent(), /^0[45]:[0-5]\d$/);
+  assert.ok(await a.locator("#call-waiting .call-wait-progress").isVisible());
+  await a.screenshot({ path: path.join(root, "dist/call-absence-waiting-desktop.png") });
+  await b.screenshot({ path: path.join(root, "dist/call-absence-available-mobile.png") });
+  await a.setViewportSize({ width: 390, height: 844 });
+  await a.screenshot({ path: path.join(root, "dist/call-absence-waiting-mobile.png") });
+  await a.setViewportSize({ width: 1100, height: 850 });
   await new Promise((resolve) => setTimeout(resolve, 1800));
   assert.equal(getCall(id).calleeConn, null, "sair não deve reentrar imediatamente na mesma página");
   assert.equal(getCall(id).waitingUntil, deadline, "polling e consultas não renovam o prazo de espera");
   await b.reload();
+  await b.waitForSelector("#join-available-call:enabled");
+  assert.ok(await b.locator("#call-panel").isHidden());
+  assert.equal(getCall(id).calleeConn, null, "sair e recarregar não pode reentrar");
+  assert.equal(getCall(id).waitingUntil, deadline);
+  await b.evaluate((id) => localStorage.setItem("potato.callResume", JSON.stringify({ id, account: "Beto", mic: false, cam: true })), id);
+  await b.reload();
+  await b.waitForSelector("#join-available-call:enabled");
+  assert.ok(await b.locator("#call-panel").isHidden(), "registro antigo sem chamada ativa não autoriza retomada");
+  assert.equal(getCall(id).calleeConn, null);
+  await b.evaluate(() => document.querySelector("[data-logout]").click());
+  await b.waitForSelector("#login-view:not(.hidden)");
+  await b.locator("#name").fill("Beto");
+  await b.locator("#password").fill("teste-call-1234");
+  await b.locator("#login-form .primary").click();
+  await b.waitForSelector("#join-available-call:enabled");
+  assert.ok(await b.locator("#call-panel").isHidden(), "Sair da chamada e relogar deve continuar fora");
+  assert.equal(getCall(id).calleeConn, null);
+  await b.locator("#join-available-call").click();
+  await b.waitForSelector("#call-panel .call-info.live");
+  await b.locator("#toggle-cam.is-off").click();
   await Promise.all([connected(a), connected(b)]);
   assert.equal(getCall(id).waitingUntil, null);
-  console.log("Sair preserva a sala por 5 minutos; relogar reentra e cancela o prazo.");
+  assert.ok(await a.locator("#call-waiting").isHidden());
+  console.log("Saída voluntária, reload, registro antigo e relogin não entram sozinhos; Voltar cancela a ausência e o contador.");
 
   // Um aviso de saída pode chegar depois de a mesma página já ter reentrado.
   await a.route("**/api.php?action=ops", async (route) => {
