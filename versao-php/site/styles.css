@@ -2395,7 +2395,7 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
 #call-dock-mic.is-off { background: #ff6b5e26; color: var(--danger); }
 .call-minimized #call-panel { display: none !important; }
 .call-head { display: flex; flex: none; align-items: center; justify-content: flex-end; padding: 12px; }
-.call-bar .call-info { width: 100%; min-width: 0; justify-content: flex-start; gap: 8px; flex-wrap: wrap; }
+.call-bar .call-info { width: 100%; min-width: 0; justify-content: center; gap: 8px; flex-wrap: wrap; }
 .call-bar #call-status { max-width: 100%; font-size: 12px; font-weight: 650; }
 .call-bar .call-timer { flex: none; padding: 3px 7px; border-radius: 7px; background: var(--hover); color: var(--muted); font-size: 10px; }
 .call-bar .call-timer:empty { display: none; }
