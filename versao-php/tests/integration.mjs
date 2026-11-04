@@ -29,10 +29,24 @@ const db = { host: env("HOST", "127.0.0.1"), port: Number(env("PORT", 3399)), na
 const giphyKey = "chave-de-teste-do-giphy";
 // Serviço de transcrição falso (no formato da OpenAI/Groq): guarda o que recebeu e responde o texto (ou o erro) combinado.
 const transcriber = { calls: [], status: 200, text: "  Oi, tudo bem? Chego às oito.  " };
+const localMusic = { status: "pending", requests: 0, id: "a".repeat(32), trackId: "A".repeat(22) };
+const localMusicKey = "music-test-secret-".repeat(3);
 const transcriberServer = http.createServer((request, response) => {
   const chunks = [];
   request.on("data", (chunk) => chunks.push(chunk));
   request.on("end", () => {
+    if (["/v1/jobs", "/v1/status"].includes(request.url)) {
+      assert.equal(request.headers.authorization, `Bearer ${localMusicKey}`);
+      const body = JSON.parse(Buffer.concat(chunks));
+      const track = { id: localMusic.trackId, source: "local", title: "Faixa local", artist: "Artista", duration: 180,
+        url: `http://127.0.0.1:${transcriberServer.address().port}/media/${localMusic.trackId}.mp3?expires=123&sig=test` };
+      response.writeHead(200, { "Content-Type": "application/json" });
+      if (request.url === "/v1/jobs") {
+        localMusic.requests++;
+        return response.end(JSON.stringify(body.query === "cache" ? { status: "ready", cached: true, track } : { status: "pending", id: localMusic.id }));
+      }
+      return response.end(JSON.stringify({ jobs: { [localMusic.id]: localMusic.status === "ready" ? { status: "ready", track } : localMusic.status === "error" ? { status: "error", error: "Falha de teste" } : { status: "pending" } } }));
+    }
     transcriber.calls.push({ headers: request.headers, body: Buffer.concat(chunks) });
     response.writeHead(transcriber.status, { "Content-Type": "application/json" });
     response.end(JSON.stringify(transcriber.status === 200 ? { text: transcriber.text } : { error: { message: "chave inválida" } }));
@@ -40,7 +54,7 @@ const transcriberServer = http.createServer((request, response) => {
 });
 await new Promise((resolve) => transcriberServer.listen(0, "127.0.0.1", resolve));
 const transcribeUrl = `http://127.0.0.1:${transcriberServer.address().port}/v1/audio/transcriptions`;
-await fs.writeFile(configFile, `<?php return ${phpValue({ token_secret: secret, db, poll_wait: 3, giphy_key: giphyKey, music_lookup: false, transcribe_key: "chave-de-transcricao", transcribe_url: transcribeUrl, transcribe_model: "modelo-de-teste", turn_urls: ["turn:turn.example:3478?transport=udp", "turns:turn.example:5349?transport=tcp"], turn_secret: "segredo-turn-teste", turn_ttl: 600 })};`);
+await fs.writeFile(configFile, `<?php return ${phpValue({ token_secret: secret, db, poll_wait: 3, giphy_key: giphyKey, music_lookup: false, music_local_url: `http://127.0.0.1:${transcriberServer.address().port}`, music_local_key: localMusicKey, transcribe_key: "chave-de-transcricao", transcribe_url: transcribeUrl, transcribe_model: "modelo-de-teste", turn_urls: ["turn:turn.example:3478?transport=udp", "turns:turn.example:5349?transport=tcp"], turn_secret: "segredo-turn-teste", turn_ttl: 600 })};`);
 
 function phpValue(value) {
   if (value === null) return "null";
@@ -703,6 +717,33 @@ try {
   assert.equal((await withAck(dj2, "music", { op: "jump", uid: album.uid })).error, "Essa música não está mais na fila.");
   const stopped = await withAck(dj2, "music", { op: "stop" });
   assert.deepEqual([stopped.state.now, stopped.state.queue], [null, []]);
+  // /playl é assíncrono: cache toca na hora; downloads entram uma única vez e /stop cancela a fila pendente.
+  const cached = await withAck(dj1, "music", { op: "playl", query: "cache" });
+  assert.deepEqual([cached.state.now.source, cached.state.now.id, cached.state.now.by], ["local", localMusic.trackId, "Pessoa 1"]);
+  const pendingLocal = await withAck(dj2, "music", { op: "playl", query: "nova faixa" });
+  assert.equal(pendingLocal.pending, true);
+  assert.equal(pendingLocal.state.pending.length, 1);
+  assert.equal(pendingLocal.state.queue.length, 0);
+  // Tocar outra música enquanto o download continua não perde o pedido pendente.
+  await withAck(dj1, "music", { op: "skip" });
+  const alongside = await withAck(dj1, "music", { op: "play", query: "https://youtu.be/dQw4w9WgXcQ" });
+  assert.equal(alongside.state.pending.length, 1);
+  localMusic.status = "ready";
+  php("(function () { query(\"DELETE FROM \" . t('settings') . \" WHERE name='local-music-poll'\"); return true; })()");
+  await fetch(`${baseUrl}/api.php?action=health`);
+  const localState = php(`music_state('${dj1.history.room}')`);
+  assert.deepEqual([localState.pending.length, localState.queue.length, localState.queue[0].source, localState.queue[0].by], [0, 1, "local", "Pessoa 2"]);
+  await fetch(`${baseUrl}/api.php?action=health`);
+  assert.equal(php(`music_state('${dj1.history.room}')`) .queue.length, 1, "sweep repetido não duplica a música");
+  await withAck(dj1, "music", { op: "stop" });
+  localMusic.status = "pending";
+  await withAck(dj1, "music", { op: "playl", query: "cancelada" });
+  await withAck(dj1, "music", { op: "stop" });
+  localMusic.status = "ready";
+  php("(function () { query(\"DELETE FROM \" . t('settings') . \" WHERE name='local-music-poll'\"); return true; })()");
+  await fetch(`${baseUrl}/api.php?action=health`);
+  assert.equal(php(`music_state('${dj1.history.room}')`).now, null);
+  assert.equal(sql("SELECT COUNT(*) AS n FROM {p}settings WHERE name LIKE 'local-music:%'")[0].n, 0);
   // Assistir junto: um vídeo para os dois, com play/pause compartilhado; começar um vídeo pausa a música.
   assert.equal(dj1.history.watch.now, null);
   await withAck(dj1, "music", { op: "play", query: "https://youtu.be/dQw4w9WgXcQ" });

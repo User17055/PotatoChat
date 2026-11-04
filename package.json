@@ -12,6 +12,7 @@
     "test:rtc": "node --test tests/rtc.mjs",
     "test:emojis": "node tests/emoji-picker-browser.mjs",
     "test:call-rejoin": "node tests/call-rejoin-browser.mjs",
+    "test:local-music": "node tests/local-music-browser.mjs",
     "test:turn": "node tests/turn-live.mjs"
   },
   "engines": {

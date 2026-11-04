@@ -43,7 +43,7 @@ Em `localhost` o microfone e a câmera funcionam (o Android trata como endereço
 
 Para distribuir, crie uma chave de assinatura e configure um build `release`.
 
-O APK **1.2.0** precisa ser instalado para ativar o novo playback e o PiP atualizado. Os arquivos de `versao-php/site/`, inclusive `native-screen.js`, `remote-pip.js`, `rtc-config.js` e `rtc-recovery.js`, são publicados pelo fluxo Git → GitHub Actions → FTP. A configuração privada de TURN fica em `turn.config.php`, ao lado de `config.php`, e não entra no Git. Veja [TURN](../ops/TURN.md).
+O APK **1.3.0** inclui a notificação persistente da chamada com a pessoa, o estado da conexão e o contador de espera quando ela sai. Tocar na notificação abre a chamada ativa; uma notificação antiga não provoca reentrada. Também inclui o playback e o PiP da versão 1.2.0. Os arquivos de `versao-php/site/`, inclusive `native-screen.js`, `remote-pip.js`, `rtc-config.js` e `rtc-recovery.js`, são publicados pelo fluxo Git → GitHub Actions → FTP. As configurações privadas de TURN e música ficam ao lado de `config.php` e não entram no Git. Veja [TURN](../ops/TURN.md) e [música](../ops/MUSIC.md).
 
 `npm run test:rtc` verifica a negociação e o encerramento das duas faixas. Com o PHP/MySQL de teste e Playwright configurados, `POTATO_TEST_SCREEN=1 npm run test:call-rejoin` valida o percurso completo no navegador com um produtor Android simulado: vídeo em pé, áudio recebido no PC, rotação, ausência de prévia própria e PiP sem interface. A captura real de playback e a janela nativa ainda precisam ser verificadas em um aparelho Android; a simulação não substitui esse teste.
 

@@ -8,7 +8,7 @@ AddDefaultCharset UTF-8
 </IfModule>
 
 # Arquivos internos nunca são servidos ao navegador.
-<FilesMatch "^((turn\.)?config\.php|.*\.(md|sql|json|log))$">
+<FilesMatch "^(((turn|music)\.)?config\.php|.*\.(md|sql|json|log))$">
   <IfModule mod_authz_core.c>
     Require all denied
   </IfModule>

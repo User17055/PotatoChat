@@ -38,6 +38,7 @@ const MUSIC_QUEUE_MAX = 50;
 const CALL_RING_MS = 60000;
 const CALL_WAIT_MS = 300000;
 const CALL_NAMES = ['audio' => 'Chamada de voz', 'video' => 'Chamada de vídeo', 'screen' => 'Transmissão de tela'];
+require_once __DIR__ . '/local-music.php';
 // Mesma lista do app.js (THEMES). O primeiro é o padrão.
 const THEMES = ['escuro', 'preto', 'rosa', 'roxo', 'azul', 'verde', 'claro'];
 
@@ -64,6 +65,9 @@ function config(): array
         $turnFile = dirname($file) . '/turn.config.php';
         $turn = is_file($turnFile) ? require $turnFile : [];
         $turn = is_array($turn) ? array_intersect_key($turn, array_flip(['turn_urls', 'turn_secret', 'turn_username', 'turn_password', 'turn_ttl', 'turn_only'])) : [];
+        $musicFile = dirname($file) . '/music.config.php';
+        $localMusic = is_file($musicFile) ? require $musicFile : [];
+        $localMusic = is_array($localMusic) ? array_intersect_key($localMusic, array_flip(['music_local_url', 'music_local_key'])) : [];
         $config = array_merge([
             'token_secret' => '',
             'poll_wait' => 20,
@@ -82,7 +86,9 @@ function config(): array
             'transcribe_model' => 'whisper-large-v3-turbo',
             // false = não consulta YouTube nem Spotify (só para os testes automáticos, que rodam sem internet).
             'music_lookup' => true,
-        ], $custom, $turn);
+            'music_local_url' => getenv('MUSIC_LOCAL_URL') ?: '',
+            'music_local_key' => getenv('MUSIC_LOCAL_KEY') ?: '',
+        ], $custom, $turn, $localMusic);
         $config['db'] = array_merge([
             'host' => 'localhost',
             'port' => 3306,
@@ -1103,7 +1109,7 @@ function resolve_track(string $query): array
 
 function music_blank(): array
 {
-    return ['now' => null, 'queue' => [], 'playing' => false, 'position' => 0, 'updatedAt' => 0];
+    return ['now' => null, 'queue' => [], 'pending' => [], 'playing' => false, 'position' => 0, 'updatedAt' => 0];
 }
 
 // Cada conversa tem o seu tocador (settings: music:<conversa>).
@@ -1139,13 +1145,14 @@ function post_music_card(array $me, string $room, array $track, int $queued): vo
 
 // Comandos: play (com query = pede música; sem = continua), pause, resume, seek, skip, ended (a música acabou), stop,
 // remove (tira da fila) e jump (toca agora uma da fila).
-function music_act(array $me, array $body): array
+function music_act(array $me, array $body, ?array $localTrack = null): array
 {
     if (!$me['room']) return ['ok' => false, 'error' => 'Escolha uma conversa.'];
     $room = $me['room']['id'];
     $op = str($body['op'] ?? '');
     $query = text_slice(text_trim(str($body['query'] ?? '')), 300);
-    $track = null;
+    if ($op === 'playl') return local_music_request($me, $query);
+    $track = $localTrack ? $localTrack + ['uid' => bin2hex(random_bytes(8)), 'by' => $me['name']] : null;
     $card = null;
     $more = [];
     if ($op === 'play' && $query !== '') {
@@ -1182,7 +1189,7 @@ function music_act(array $me, array $body): array
                     $state['queue'][] = $track;
                     $action['queued'] = count($state['queue']);
                 } else {
-                    $state = ['now' => $track, 'queue' => $state['queue'], 'playing' => true, 'position' => 0, 'updatedAt' => $now];
+                    $state = array_merge($state, ['now' => $track, 'playing' => true, 'position' => 0, 'updatedAt' => $now]);
                     $action['queued'] = 0;
                 }
                 $action['track'] = $track;
@@ -1240,7 +1247,7 @@ function music_act(array $me, array $body): array
             [$picked] = array_splice($state['queue'], $index, 1);
             $picked = ready_track($picked);
             if (!$picked) return ['ok' => false, 'error' => 'Não deu para tocar essa música.'];
-            $state = ['now' => $picked, 'queue' => $state['queue'], 'playing' => true, 'position' => 0, 'updatedAt' => $now];
+            $state = array_merge($state, ['now' => $picked, 'playing' => true, 'position' => 0, 'updatedAt' => $now]);
             $action['track'] = $picked;
             break;
         default:
@@ -3139,6 +3146,7 @@ function sweep(): void
         drop((string) $client['conn']);
     }
     call_sweep();
+    local_music_sweep();
     query('DELETE FROM ' . t('gone') . ' WHERE at < ?', [$now - EVENT_KEEP_MS]);
     query('DELETE FROM ' . t('events') . ' WHERE at < ? AND seq < ?', [$now - EVENT_KEEP_MS, last_seq()]);
     // Arquivo enviado que nunca virou mensagem (envio cancelado, aba fechada no meio).

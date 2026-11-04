@@ -184,6 +184,7 @@ class MainActivity : ComponentActivity() {
         val action = intent.getStringExtra(CallNotifications.EXTRA_CALL_ACTION)
         val room = intent.getStringExtra(ChatNotifications.EXTRA_ROOM).orEmpty()
         when (action) {
+            "return" -> js("window.potatoCall?.('return', ${JSONObject.quote(intent.getStringExtra(CallNotifications.EXTRA_CALL_ID).orEmpty())})")
             "accept" -> js("window.potatoCall && window.potatoCall('accept', ${JSONObject.quote(intent.getStringExtra(CallNotifications.EXTRA_CALL_ID).orEmpty())})")
             "dial" -> js("window.potatoCall && window.potatoCall('dial', ${JSONObject.quote(intent.getStringExtra(CallNotifications.EXTRA_MEDIA).orEmpty())}, ${JSONObject.quote(room)})")
             null -> if (room.isNotBlank()) js("window.potatoRoom && window.potatoRoom(${JSONObject.quote(room)})")
@@ -389,7 +390,8 @@ class MainActivity : ComponentActivity() {
         }
         val state = CallService.State(
             message.optString("id"), message.optString("name"), message.optString("avatar").takeIf { it.isNotBlank() },
-            message.optString("media"), message.optBoolean("connected"), message.optLong("since"), message.optBoolean("mic", true)
+            message.optString("media"), message.optBoolean("connected"), message.optLong("since"), message.optBoolean("mic", true),
+            message.optString("phase", if (message.optBoolean("connected")) "connected" else "calling"), message.optLong("waitingUntil"), message.optString("room")
         )
         callState = state
         screenActive = message.optBoolean("screen")

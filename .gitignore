@@ -1,6 +1,8 @@
 node_modules/
+__pycache__/
 .env
 versao-php/site/turn.config.php
+versao-php/site/music.config.php
 ops/.turn-secret
 data/*.json
 data/*.tmp

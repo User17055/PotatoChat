@@ -8,6 +8,7 @@ on:
       - "versao-php/site/**"
       - ".github/workflows/deploy-ftp.yml"
       - "ops/prepare-turn-config.py"
+      - "ops/prepare-music-config.py"
   workflow_dispatch:
 
 permissions:
@@ -30,6 +31,11 @@ jobs:
         env:
           POTATO_TURN_CONFIG_B64: ${{ secrets.POTATO_TURN_CONFIG_B64 }}
         run: python3 ops/prepare-turn-config.py
+
+      - name: Preparar biblioteca privada de músicas
+        env:
+          POTATO_MUSIC_CONFIG_B64: ${{ secrets.POTATO_MUSIC_CONFIG_B64 }}
+        run: python3 ops/prepare-music-config.py
 
       - name: Enviar o site por FTP
         uses: SamKirkland/FTP-Deploy-Action@v4.4.0

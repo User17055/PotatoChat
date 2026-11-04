@@ -691,6 +691,7 @@ function asset(string $file): string
             <input id="music-volume" type="range" min="0" max="100" step="1" value="80" aria-label="Volume (só para você)" />
           </div>
         </div>
+        <div id="music-downloads" class="music-downloads hidden" role="status"><span class="spinner" aria-hidden="true"></span><span id="music-download-status"></span></div>
         <div class="music-empty">
           <span class="music-empty-art"><svg class="icon"><use href="#i-headphones" /></svg></span>
           <strong>Nada tocando</strong>

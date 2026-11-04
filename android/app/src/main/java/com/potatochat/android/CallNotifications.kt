@@ -143,26 +143,40 @@ object CallNotifications {
 
     /** A chamada em andamento (a do CallService): o tempo dela, o desligar e o mudo; tocar volta para a chamada. */
     fun ongoing(context: Context, state: CallService.State, avatar: android.graphics.Bitmap): Notification {
-        val person = Person.Builder().setName(state.name).setKey(state.name).setIcon(IconCompat.createWithBitmap(avatar)).setImportant(true).build()
+        val person = Person.Builder().setName(state.name.ifBlank { "Chamada" }).setKey(state.name).setIcon(IconCompat.createWithBitmap(avatar)).setImportant(true).build()
         val hangUp = PendingIntent.getService(context, 40, Intent(context, CallService::class.java).setAction(CallService.ACTION_HANGUP), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val mute = PendingIntent.getService(context, 41, Intent(context, CallService::class.java).setAction(CallService.ACTION_MUTE), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val open = PendingIntent.getActivity(context, 42, Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val open = openIntent(context, "return", 42, state.id, state.room, state.media)
+        val waiting = state.phase == "waiting" && state.waitingUntil > 0
+        val status = when (state.phase) {
+            "waiting" -> "${state.name} está ausente · aguardando retorno"
+            "reconnecting" -> "Reconectando com ${state.name}…"
+            "connecting" -> "Conectando com ${state.name}…"
+            "calling" -> "Chamando ${state.name}…"
+            else -> "Em chamada · ${mediaLabel(state.media)}"
+        } + if (state.mic) "" else " · microfone silenciado"
         return NotificationCompat.Builder(context, ONGOING_CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(state.name)
-            .setContentText(if (state.connected) "${mediaLabel(state.media)}${if (state.mic) "" else " · microfone desligado"}" else "Chamando ${state.name}…")
+            .setContentText(status)
+            .setSubText(status)
+            .setLargeIcon(avatar)
             .setStyle(NotificationCompat.CallStyle.forOngoingCall(person, hangUp))
             .addAction(R.drawable.ic_notification, if (state.mic) "Silenciar" else "Ativar microfone", mute)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setContentIntent(open)
             .setOngoing(true)
+            .setAutoCancel(false)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setOnlyAlertOnce(true)
-            .setUsesChronometer(state.connected && state.since > 0)
-            .setWhen(if (state.connected && state.since > 0) state.since else System.currentTimeMillis())
-            .setShowWhen(state.connected && state.since > 0)
+            .setUsesChronometer(waiting || (state.connected && state.since > 0))
+            .setChronometerCountDown(waiting)
+            .setWhen(if (waiting) state.waitingUntil else if (state.connected && state.since > 0) state.since else System.currentTimeMillis())
+            .setShowWhen(waiting || (state.connected && state.since > 0))
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setBadgeIconType(NotificationCompat.BADGE_ICON_NONE)
-            .build()
+            .build().apply { flags = flags or Notification.FLAG_ONGOING_EVENT or Notification.FLAG_NO_CLEAR }
     }
 
     private fun person(context: Context, name: String, avatarUrl: String?) =

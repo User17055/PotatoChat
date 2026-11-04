@@ -20,7 +20,8 @@ import androidx.core.content.ContextCompat
  */
 class CallService : Service() {
     /** O que a notificação mostra: com quem, o tipo, se já conectou (e desde quando), se o microfone está ligado. */
-    data class State(val id: String, val name: String, val avatar: String?, val media: String, val connected: Boolean, val since: Long, val mic: Boolean)
+    data class State(val id: String, val name: String, val avatar: String?, val media: String, val connected: Boolean, val since: Long, val mic: Boolean,
+        val phase: String = if (connected) "connected" else "calling", val waitingUntil: Long = 0, val room: String = "")
 
     private var wakeLock: PowerManager.WakeLock? = null
     private val handler = Handler(Looper.getMainLooper())

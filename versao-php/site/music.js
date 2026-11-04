@@ -1,4 +1,4 @@
-// Tocador do bot de música: YouTube (IFrame API) ou Spotify (Embed API), atrás da capa no painel de música.
+// Tocador do bot de música: arquivo da biblioteca spotDL, YouTube ou Spotify.
 // Quem decide o que toca e em que segundo é o servidor; o app.js chama open/play/pause/seek para acompanhar.
 
 const apis = {};
@@ -36,6 +36,7 @@ export function createPlayer(host, events) {
   let kind = null;
   let youtube = null;
   let spotify = null;
+  let audio = null;
   let uid = null;
   let videoId = null;
   let ready = false;
@@ -46,13 +47,16 @@ export function createPlayer(host, events) {
 
   function destroy() {
     load += 1;
+    const previousAudio = audio;
+    audio = null;
+    if (previousAudio) { previousAudio.pause(); previousAudio.removeAttribute("src"); previousAudio.load(); }
     try { youtube?.destroy(); } catch {}
     try { spotify?.destroy(); } catch {}
     youtube = spotify = kind = uid = videoId = null;
     ready = false;
     spot = { position: 0, duration: 0, paused: true, started: false };
     host.replaceChildren();
-    host.classList.remove("youtube", "spotify");
+    host.classList.remove("youtube", "spotify", "local");
   }
 
   // Outra do YouTube depois de uma do YouTube: troca o vídeo no mesmo player.
@@ -78,6 +82,26 @@ export function createPlayer(host, events) {
     const mount = document.createElement("div");
     host.append(mount);
     try {
+      if (kind === "local") {
+        const player = document.createElement("audio");
+        audio = player;
+        player.preload = "auto";
+        player.volume = volume / 100;
+        player.addEventListener("loadedmetadata", () => {
+          if (audio !== player) return;
+          ready = true;
+          player.currentTime = Math.max(0, Math.min(position(), player.duration || Infinity));
+          if (playing()) player.play().catch(() => {});
+          events.onReady?.();
+        });
+        player.addEventListener("timeupdate", () => { if (audio === player) events.onUpdate?.(); });
+        player.addEventListener("playing", () => { if (audio === player) events.onUpdate?.(); });
+        player.addEventListener("ended", () => { if (audio === player) events.onEnded?.(track.uid); });
+        player.addEventListener("error", () => { if (audio === player) events.onError?.(track.uid, "O arquivo de áudio não está disponível."); });
+        player.src = track.url;
+        mount.append(player);
+        return;
+      }
       if (kind === "youtube") {
         const YT = await youtubeApi();
         if (mine !== load) return;
@@ -148,12 +172,12 @@ export function createPlayer(host, events) {
     get ready() { return ready; },
     open,
     destroy,
-    time: () => (kind === "youtube" ? youtube?.getCurrentTime?.() || 0 : spot.position),
-    duration: () => (kind === "youtube" ? youtube?.getDuration?.() || 0 : spot.duration),
+    time: () => (kind === "local" ? audio?.currentTime || 0 : kind === "youtube" ? youtube?.getCurrentTime?.() || 0 : spot.position),
+    duration: () => (kind === "local" ? (Number.isFinite(audio?.duration) ? audio.duration : 0) : kind === "youtube" ? youtube?.getDuration?.() || 0 : spot.duration),
     // Tocando (ou carregando para tocar).
-    playing: () => (kind === "youtube" ? [1, 3].includes(youtube?.getPlayerState?.()) : !spot.paused),
+    playing: () => (kind === "local" ? Boolean(audio && !audio.paused && !audio.ended) : kind === "youtube" ? [1, 3].includes(youtube?.getPlayerState?.()) : !spot.paused),
     // Estado do YouTube (1 tocando, 2 pausado, 3 carregando…); no Spotify, só tocando ou pausado.
-    state: () => (kind === "youtube" ? youtube?.getPlayerState?.() : spot.paused ? 2 : 1),
+    state: () => (kind === "local" ? audio?.paused ? 2 : 1 : kind === "youtube" ? youtube?.getPlayerState?.() : spot.paused ? 2 : 1),
     // No celular, o YouTube larga a música quando o app sai da tela e fica "carregando" para sempre:
     // carrega o vídeo de novo, no ponto certo. Devolve se precisou.
     revive(seconds) {
@@ -163,23 +187,27 @@ export function createPlayer(host, events) {
     },
     play() {
       if (!ready) return;
-      if (kind === "youtube") youtube.playVideo();
+      if (kind === "local") audio?.play().catch(() => {});
+      else if (kind === "youtube") youtube.playVideo();
       else if (spot.started) spotify.resume();
       else spotify.play();
     },
     pause() {
       if (!ready) return;
-      if (kind === "youtube") youtube.pauseVideo();
+      if (kind === "local") audio?.pause();
+      else if (kind === "youtube") youtube.pauseVideo();
       else spotify.pause();
     },
     seek(seconds) {
       if (!ready) return;
-      if (kind === "youtube") youtube.seekTo(seconds, true);
+      if (kind === "local" && audio) audio.currentTime = Math.max(0, Math.min(seconds, audio.duration || Infinity));
+      else if (kind === "youtube") youtube.seekTo(seconds, true);
       else spotify.seek(seconds);
     },
-    // Volume só no YouTube (o Spotify não deixa mudar por fora).
+    // Volume no áudio local e no YouTube (o Spotify não deixa mudar por fora).
     setVolume(value) {
       volume = value;
+      if (audio) audio.volume = value / 100;
       if (ready && kind === "youtube") youtube.setVolume(value);
     }
   };

@@ -3581,6 +3581,7 @@ const musicButton = $("#music-button");
 const musicPanel = $("#music-panel");
 const commandMenu = $("#command-menu");
 const MUSIC_COMMANDS = [
+  { name: "playl", args: "nome ou link do Spotify", icon: "music", text: "Toca da biblioteca spotDL; baixa uma vez e reutiliza nas próximas" },
   { name: "play", args: "nome ou link", icon: "play", text: "Toca do YouTube ou do Spotify (sozinho, continua a pausada)" },
   { name: "pause", icon: "pause", text: "Pausa a música para os dois" },
   { name: "skip", icon: "skip", text: "Pula para a próxima da fila" },
@@ -3924,7 +3925,7 @@ function musicCard(message) {
 function cardAction(action, track) {
   if (musicBlocked) return listenHere();
   if (justUnblocked()) return;
-  if (action === "again") return musicCommand("play", { query: trackLink(track) });
+  if (action === "again") return musicCommand(track.source === "local" ? "playl" : "play", { query: trackLink(track) });
   musicCommand(action, action === "jump" ? { uid: track.uid } : {});
 }
 
@@ -3960,7 +3961,9 @@ function paintTrack(track) {
   $("#music-meta").textContent = [track.artist, requestedBy(track.by)].filter(Boolean).join(" · ");
   $("#music-caption-title").textContent = track.title;
   $("#music-caption-artist").textContent = track.artist || SOURCE_NAME[shownSource(track)];
-  $("#music-source").textContent = track.origin ? `${SOURCE_NAME[track.origin.source]} · pelo YouTube` : SOURCE_NAME[track.source];
+  $("#music-source").textContent = track.source === "local" ? "Biblioteca · spotDL" : track.origin ? `${SOURCE_NAME[track.origin.source]} · pelo YouTube` : SOURCE_NAME[track.source];
+  $("#music-video").classList.toggle("hidden", track.source === "local");
+  if (track.source === "local" && musicVideo) setMusicVideo(false);
   $("#music-logo").setAttribute("href", `#b-${shownSource(track)}`);
   const open = $("#music-open");
   open.href = trackLink(track);
@@ -3992,8 +3995,11 @@ function paintTrack(track) {
 
 function paintMusic() {
   const track = music.now;
+  const pending = music.pending || [];
   const playing = Boolean(track && music.playing);
-  musicButton.classList.toggle("hidden", !track);
+  musicButton.classList.toggle("hidden", !track && !pending.length);
+  $("#music-downloads").classList.toggle("hidden", !pending.length);
+  $("#music-download-status").textContent = pending.length ? `Preparando ${pending.length > 1 ? `${pending.length} músicas` : pending[0].title}…` : "";
   musicButton.classList.toggle("playing", playing && !musicBlocked);
   musicButton.classList.toggle("blocked", musicBlocked);
   musicButton.title = track ? `${musicBlocked ? "Toque para ouvir" : playing ? "Tocando" : "Pausada"}: ${track.title}` : "Música";
@@ -4172,12 +4178,14 @@ function musicCommand(op, extra = {}) {
       return toast(result?.error || "Não deu certo.", "error");
     }
     applyMusic(result.state, true);
+    if (result.pending) return toast("Preparando a música. Ela entra na fila quando estiver pronta.", "music", "music");
     if (op === "play" && result.action?.added > 1) toast(`${result.action.added} músicas na fila: tocam inteiras, uma depois da outra`, "music", "list-music");
     else if (op === "play" && result.action?.queued) toast(`${result.action.queued}ª na fila: ${result.action.track.title}`, "music", "list-music");
   });
 }
 
 function musicNotice(action) {
+  if (action?.op === "local-error") return toast(action.message, "error");
   if (!action || action.by === me) return;
   if (action.op === "jump" && action.track) return toast(`${action.by} pôs “${action.track.title}” para tocar agora`, "music", "play");
   const [name, text] = MUSIC_NOTICE[action.op] || [];
@@ -4197,7 +4205,7 @@ function runCommand(text) {
   else if (name === "watchparty") {
     setWatchRoom(true);
     if (query) watchCommand("start", { query });
-  } else if (name === "play") musicCommand("play", query ? { query } : {});
+  } else if (name === "play" || name === "playl") musicCommand(name, query ? { query } : {});
   else musicCommand(name);
   sound.play("tap");
   return true;
@@ -5837,6 +5845,7 @@ async function createPeer(expectedGeneration = call?.generation) {
     if (state === "failed") {
       callStatus.textContent = "Reconectando a chamada…";
     }
+    syncAndroidCall();
   };
   return peer;
 }
@@ -6308,8 +6317,16 @@ let pendingDialRoom = "";
 function syncAndroidCall() {
   if (!inAndroid) return;
   const active = call && (call.role === "caller" || call.accepted) ? call : null;
+  const info = availableCalls.get(active?.id);
+  const peerPresent = Boolean(otherParticipant(info));
+  const connected = Boolean(active?.connected && peerConnection?.connectionState === "connected");
+  const phase = !peerPresent ? (info?.answered || active?.since ? "waiting" : "calling") : connected ? "connected" : info?.answered ? "reconnecting" : "connecting";
+  if (active && active.nativeWaitDeadline !== info?.waitingUntil) {
+    active.nativeWaitDeadline = info?.waitingUntil;
+    active.nativeWaitWhen = info?.waitingUntil ? Date.now() + Math.max(0, info.waitingUntil - serverNow()) : 0;
+  }
   const state = active
-    ? { type: "call", active: true, id: active.id || "", name: active.name, avatar: avatars.get(active.name) || "", media: active.media, connected: active.connected, since: active.since || 0, mic: micOn(), screen: Boolean(active.local.screen), peerScreen: Boolean(active.remoteState.screen), peerVideo: Boolean((active.remoteState.screen && active.remote.screen) || (active.remoteState.cam && active.remote.cam)) }
+    ? { type: "call", active: true, id: active.id || "", room: active.room, name: active.name, avatar: avatars.get(active.name) || "", media: active.media, connected, phase, waitingUntil: active.nativeWaitWhen || 0, since: active.since || 0, mic: micOn(), screen: Boolean(active.local.screen), peerScreen: Boolean(active.remoteState.screen), peerVideo: Boolean((active.remoteState.screen && active.remote.screen) || (active.remoteState.cam && active.remote.cam)) }
     : { type: "call", active: false, ringing: Boolean(call) };
   const json = JSON.stringify(state);
   if (json === androidCall) return;
@@ -6349,6 +6366,8 @@ window.potatoCall = (action, value = "", where = "") => {
     if (action === "foreground" && peerConnection?.connectionState !== "connected") call?.recovery?.request();
   } else if (action === "network") {
     call?.recovery?.request();
+  } else if (action === "return") {
+    if (call && (!value || call.id === value)) returnToCall();
   } else if (action === "pip") {
     document.documentElement.classList.toggle("android-pip", value === true);
   } else if (action === "pip-unavailable") {

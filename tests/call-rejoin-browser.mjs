@@ -322,7 +322,23 @@ try {
   await a.unroute("**/api.php?action=ops");
   await a.locator("#end-call").click();
   await until(() => getCall(id).callerConn === null);
+  if (process.env.POTATO_TEST_SCREEN) {
+    await b.waitForFunction(() => window.__nativeMessages.filter((m) => m.type === "call").at(-1)?.phase === "waiting");
+    const notification = await b.evaluate(() => window.__nativeMessages.filter((m) => m.type === "call").at(-1));
+    assert.equal(notification.name, "Ana");
+    assert.equal(notification.active, true);
+    assert.ok(notification.waitingUntil > Date.now() + 290000);
+    await b.locator("#call-minimize").click();
+    await b.evaluate((id) => window.potatoCall("return", id), id);
+    assert.ok(await b.locator("#call-panel").isVisible(), "tocar na notificação restaura a chamada ativa");
+  }
   await b.locator("#end-call").click();
+  if (process.env.POTATO_TEST_SCREEN) {
+    await b.waitForFunction(() => window.__nativeMessages.filter((m) => m.type === "call").at(-1)?.active === false);
+    await b.waitForSelector("#call-panel", { state: "hidden" });
+    await b.evaluate((id) => window.potatoCall("return", id), id);
+    assert.ok(await b.locator("#call-panel").isHidden(), "notificação antiga não autoriza reentrada");
+  }
   await until(() => getCall(id) === null);
   await Promise.all([a.waitForSelector("#available-call", { state: "hidden" }), b.waitForSelector("#available-call", { state: "hidden" })]);
   await a.reload();
