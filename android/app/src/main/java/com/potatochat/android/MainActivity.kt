@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity() {
     // A chamada aberta no site (null = nenhuma): enquanto ela existe, o CallService segura o microfone com o app fora da
     // tela, e o WebView não é pausado.
     private var callState: CallService.State? = null
+    private var musicState: MusicService.State? = null
     private var screenActive = false
     private var peerScreenActive = false
     private var peerVideoActive = false
@@ -128,7 +129,10 @@ class MainActivity : ComponentActivity() {
         window.navigationBarColor = Color.rgb(18, 16, 13)
         createChannels()
         configureWebView()
-        CallBridge.page = { action -> runOnUiThread { js("window.potatoCall?.(${JSONObject.quote(action)})") } }
+        CallBridge.page = { action, id -> runOnUiThread { js("window.potatoCall?.(${JSONObject.quote(action)}, ${JSONObject.quote(id)})") } }
+        MusicBridge.page = { action, uid, room, position -> runOnUiThread {
+            js("window.potatoMusic?.(${JSONObject.quote(action)}, ${JSONObject.quote(uid)}, ${JSONObject.quote(room)}, ${position?.div(1000.0) ?: "null"})")
+        } }
         ScreenShareBridge.page = ::screenEvent
         networkCallback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
@@ -162,7 +166,8 @@ class MainActivity : ComponentActivity() {
             override fun handleOnBackPressed() {
                 if (callState != null) {
                     if (!enterCallPip()) moveTaskToBack(true)
-                } else if (webView.canGoBack()) webView.goBack() else finish()
+                } else if (musicState != null) moveTaskToBack(true)
+                else if (webView.canGoBack()) webView.goBack() else finish()
             }
         })
 
@@ -180,6 +185,10 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         overLockForCall(intent)
+        if (intent.getBooleanExtra("music_open", false)) {
+            MusicBridge.send("open", intent.getStringExtra(MusicService.EXTRA_UID).orEmpty(), intent.getStringExtra(MusicService.EXTRA_ROOM).orEmpty())
+            return
+        }
         section(intent)?.let { webView.evaluateJavascript("window.potatoOpen && window.potatoOpen(${JSONObject.quote(it)})", null) }
         val action = intent.getStringExtra(CallNotifications.EXTRA_CALL_ACTION)
         val room = intent.getStringExtra(ChatNotifications.EXTRA_ROOM).orEmpty()
@@ -254,6 +263,8 @@ class MainActivity : ComponentActivity() {
                 // que estava nele acabou; o app abre de novo.
                 override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
                     callState = null
+                    musicState = null
+                    MusicService.stop(this@MainActivity)
                     CallService.stop(this@MainActivity)
                     stopService(Intent(this@MainActivity, ScreenShareService::class.java))
                     recreate()
@@ -331,7 +342,11 @@ class MainActivity : ComponentActivity() {
                     .putString("name", session?.optString("name").orEmpty())
                     .putBoolean("notifications", message.optBoolean("notifications", true))
                     .apply()
-                if (session == null) stopService(Intent(this, ChatNotificationService::class.java))
+                if (session == null) {
+                    stopService(Intent(this, ChatNotificationService::class.java))
+                    musicState = null
+                    MusicService.stop(this)
+                }
             }
             "notification" -> showNotification(
                 message.optString("title", "Potato Chat"),
@@ -341,6 +356,20 @@ class MainActivity : ComponentActivity() {
             )
             "permission" -> requestNotificationPermission()
             "call" -> onCallState(message)
+            "music" -> {
+                if (!message.optBoolean("active") || message.optString("uid").isBlank() || message.optString("room").isBlank()) {
+                    musicState = null
+                    MusicService.stop(this)
+                } else {
+                    val next = MusicService.State(message.optString("uid"), message.optString("room"),
+                        message.optString("title", "Música"), message.optString("artist"), message.optString("cover"),
+                        (message.optDouble("duration", 0.0).coerceIn(0.0, 86400.0) * 1000).toLong(),
+                        (message.optDouble("position", 0.0).coerceIn(0.0, 86400.0) * 1000).toLong(),
+                        message.optBoolean("playing"), message.optBoolean("buffering"), message.optBoolean("muted"), message.optBoolean("canSkip"))
+                    musicState = next
+                    MusicService.update(this, next)
+                }
+            }
             "screen-start" -> {
                 if (pendingScreen != null) {
                     screenEvent(JSONObject().put("id", message.optString("id")).put("event", "error").put("value", "Já existe uma solicitação de captura."))
@@ -464,6 +493,7 @@ class MainActivity : ComponentActivity() {
             (() => {
               if (window.__potatoNativeReady) return;
               window.__potatoNativeReady = true;
+              window.__potatoNativeMusic = true;
               window.__potatoScreenCapture = true;
               window.__potatoScreenAudio = ${Build.VERSION.SDK_INT >= 29};
               const nativeStyle = document.createElement('style');
@@ -505,6 +535,7 @@ class MainActivity : ComponentActivity() {
               };
               sync();
               setInterval(sync, 750);
+              window.dispatchEvent(new Event('potato-music-ready'));
             })();
         """.trimIndent()
     }
@@ -545,14 +576,15 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         stopService(Intent(this, ChatNotificationService::class.java))
         val notifications = getSystemService(NotificationManager::class.java)
-        notifications.activeNotifications.filter { it.id != CallNotifications.ONGOING_ID && it.id != ScreenShareService.NOTIFICATION_ID }
+        notifications.activeNotifications.filter { it.id != CallNotifications.ONGOING_ID && it.id != ScreenShareService.NOTIFICATION_ID && it.id != MusicService.NOTIFICATION_ID }
             .forEach { notifications.cancel(it.tag, it.id) }
         callState?.let(::startCallService)
+        musicState?.let { MusicService.update(this, it) }
         ChatNotifications.clear(this)
         // O One UI cria um resumo automatico; limpa novamente depois que o servico termina.
         webView.postDelayed({
             // Não apagar as notificações dos serviços que mantêm a chamada e a captura ativas.
-            notifications.activeNotifications.filter { it.id != CallNotifications.ONGOING_ID && it.id != ScreenShareService.NOTIFICATION_ID }
+            notifications.activeNotifications.filter { it.id != CallNotifications.ONGOING_ID && it.id != ScreenShareService.NOTIFICATION_ID && it.id != MusicService.NOTIFICATION_ID }
                 .forEach { notifications.cancel(it.tag, it.id) }
         }, 500)
         // De volta à tela no meio de uma chamada: a câmera que desligou ao sair volta.
@@ -576,12 +608,14 @@ class MainActivity : ComponentActivity() {
     // Numa chamada o WebView não pausa: ela continua com o app em segundo plano.
     override fun onPause() {
         startBackgroundNotifications()
-        if (callState == null) webView.onPause()
+        if (callState == null && musicState == null) webView.onPause()
         super.onPause()
     }
 
     override fun onDestroy() {
         CallBridge.page = null
+        MusicBridge.page = null
+        MusicService.stop(this)
         ScreenShareBridge.page = null
         networkCallback?.let { runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it) } }
         stopService(Intent(this, ScreenShareService::class.java))

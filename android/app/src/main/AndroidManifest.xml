@@ -11,6 +11,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <!-- Chamada recebida em tela cheia (também com o celular bloqueado), o celular acordado na chamada e a conexão de
          volta depois de ligar o celular. -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
@@ -45,6 +46,11 @@
             android:name=".CallService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+        <service
+            android:name=".MusicService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback"
+            android:stopWithTask="false" />
         <service
             android:name=".ScreenShareService"
             android:exported="false"

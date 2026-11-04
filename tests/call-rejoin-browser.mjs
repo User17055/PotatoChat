@@ -115,6 +115,9 @@ try {
     return page;
   };
   const a = await open(ana), b = await open(beto, true);
+  for (const page of [a, b]) await page.addLocatorHandler(page.locator("#nudge:not(.hidden)"), async () => {
+    await page.locator("#nudge-close").click();
+  });
   const connected = async (page) => {
     await page.waitForFunction(() => {
       const panel = document.querySelector("#call-panel");

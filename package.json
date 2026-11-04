@@ -13,6 +13,8 @@
     "test:emojis": "node tests/emoji-picker-browser.mjs",
     "test:call-rejoin": "node tests/call-rejoin-browser.mjs",
     "test:local-music": "node tests/local-music-browser.mjs",
+    "test:native-music": "node --test tests/native-music.mjs",
+    "test:native-music-browser": "node tests/native-music-browser.mjs",
     "test:turn": "node tests/turn-live.mjs"
   },
   "engines": {

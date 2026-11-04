@@ -2,6 +2,7 @@ import { sound } from "./sound.js";
 import { fx, effectFor, motion } from "./fx.js";
 import { io, apiUrl } from "./realtime.js";
 import { createPlayer } from "./music.js";
+import { createNativeMusicBridge } from "./native-music.js";
 import { createWatchPlayer } from "./watch.js";
 import { nativeScreenAvailable, nativeScreenAudioAvailable, startNativeScreen, stopNativeScreen } from "./native-screen.js";
 import { updateRemotePip } from "./remote-pip.js";
@@ -3566,6 +3567,7 @@ wallEditor.addEventListener("click", (event) => {
 
 // O que vem do servidor: a música (now), a fila, se está tocando e em que segundo estava em updatedAt (relógio dele).
 let music = { now: null, queue: [], playing: false, position: 0, updatedAt: 0 };
+let nativeMusic = null;
 // Diferença entre o relógio do servidor e o daqui (ms), medida no histórico e nas respostas aos comandos.
 let musicClock = 0;
 // O navegador barrou o som (falta um toque na página): aparece o "Toque para ouvir junto".
@@ -3789,6 +3791,7 @@ function setMusicVolume(value) {
   const label = musicVolume === 0 ? "Voltar o som" : "Tirar o som (só para você)";
   $("#music-mute").title = label;
   $("#music-mute").setAttribute("aria-label", label);
+  syncAndroidMusic();
 }
 setMusicVolume(musicVolume);
 
@@ -4108,6 +4111,28 @@ async function syncWakeLock() {
 // desligada: lá o YouTube para quando o app sai da tela, e a tela de bloqueio mostraria "tocando" em silêncio.
 const media = "mediaSession" in navigator ? navigator.mediaSession : null;
 let anchor = null;
+nativeMusic = createNativeMusicBridge({
+  state: () => music.now ? {
+    active: !musicBlocked, uid: music.now.uid, room, title: music.now.title,
+    artist: music.now.artist || SOURCE_NAME[shownSource(music.now)],
+    cover: music.now.cover || smallCover(music.now), duration: musicLength(),
+    position: Math.max(0, musicAt()), playing: Boolean(music.playing && !musicBlocked && musicPlayer.playing()),
+    buffering: Boolean(music.playing && !musicBlocked && !musicPlayer.playing()),
+    muted: musicVolume === 0, canSkip: Boolean(music.queue.length)
+  } : { active: false },
+  control: (action, value) => {
+    if (action === "play") return music.playing ? listenHere() : musicCommand("resume");
+    if (action === "pause" || action === "stop") return musicCommand(action);
+    if (action === "previous" || action === "seek") return musicCommand("seek", { position: action === "previous" ? 0 : value });
+    if (action === "next") return musicCommand("skip");
+    if (action === "mute") { const previous = volumeBefore; if (musicVolume) volumeBefore = musicVolume; setMusicVolume(musicVolume ? 0 : previous || 80); }
+  },
+  open: () => { showTab("chat"); openMusic(); }
+});
+function syncAndroidMusic() {
+  // O volume é inicializado antes da ponte; as chamadas seguintes acompanham os eventos do player.
+  nativeMusic?.sync();
+}
 
 // WAV de 10 s em silêncio (8 kHz). Mais de 5 s: o Chrome só mostra a notificação para áudio "de verdade".
 function silence(seconds = 10, rate = 8000) {
@@ -4115,14 +4140,15 @@ function silence(seconds = 10, rate = 8000) {
 }
 
 function syncAnchor() {
-  if (!media || phone) return;
+  if (!media || phone || nativeMusic.enabled()) return;
   if (!music.now || !music.playing || musicBlocked) return anchor?.pause();
   anchor ||= Object.assign(new Audio(silence()), { loop: true });
   if (anchor.paused) anchor.play().catch(() => {});
 }
 
 function paintMediaTrack(track, cover) {
-  if (!media) return;
+  syncAndroidMusic();
+  if (!media || nativeMusic.enabled()) return;
   try {
     media.metadata = new MediaMetadata({
       title: track.title,
@@ -4134,22 +4160,25 @@ function paintMediaTrack(track, cover) {
 }
 
 function paintMediaState() {
+  syncAndroidMusic();
   if (!media) return;
   try {
+    if (nativeMusic.enabled()) { media.metadata = null; media.playbackState = "none"; return; }
     media.playbackState = !music.now ? "none" : music.playing ? "playing" : "paused";
     if (!music.now) media.metadata = null;
   } catch {}
 }
 
 function paintPosition() {
+  syncAndroidMusic();
   const length = musicLength();
-  if (!media?.setPositionState || !music.now || !length) return;
+  if (nativeMusic.enabled() || !media?.setPositionState || !music.now || !length) return;
   try {
     media.setPositionState({ duration: length, playbackRate: 1, position: Math.min(Math.max(0, musicAt()), length) });
   } catch {}
 }
 
-if (media) {
+if (media && !nativeMusic.enabled()) {
   const actions = {
     play: () => (music.playing ? listenHere() : musicCommand("resume")),
     pause: () => musicCommand("pause"),
@@ -6346,6 +6375,7 @@ function pauseCamera(hidden) {
 }
 
 window.potatoCall = (action, value = "", where = "") => {
+  if (["mute", "hangup"].includes(action) && value && call?.id !== value) return;
   if (action === "accept") {
     if (call?.id === value) acceptCall();
     else if (availableCalls.has(value)) joinExistingCall(availableCalls.get(value));

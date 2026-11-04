@@ -144,8 +144,10 @@ object CallNotifications {
     /** A chamada em andamento (a do CallService): o tempo dela, o desligar e o mudo; tocar volta para a chamada. */
     fun ongoing(context: Context, state: CallService.State, avatar: android.graphics.Bitmap): Notification {
         val person = Person.Builder().setName(state.name.ifBlank { "Chamada" }).setKey(state.name).setIcon(IconCompat.createWithBitmap(avatar)).setImportant(true).build()
-        val hangUp = PendingIntent.getService(context, 40, Intent(context, CallService::class.java).setAction(CallService.ACTION_HANGUP), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val mute = PendingIntent.getService(context, 41, Intent(context, CallService::class.java).setAction(CallService.ACTION_MUTE), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val hangUp = PendingIntent.getService(context, 40, Intent(context, CallService::class.java).setAction(CallService.ACTION_HANGUP)
+            .setData(android.net.Uri.parse("potato://call/${state.id}/hangup")).putExtra(EXTRA_CALL_ID, state.id), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val mute = PendingIntent.getService(context, 41, Intent(context, CallService::class.java).setAction(CallService.ACTION_MUTE)
+            .setData(android.net.Uri.parse("potato://call/${state.id}/mute")).putExtra(EXTRA_CALL_ID, state.id), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val open = openIntent(context, "return", 42, state.id, state.room, state.media)
         val waiting = state.phase == "waiting" && state.waitingUntil > 0
         val status = when (state.phase) {
@@ -162,7 +164,7 @@ object CallNotifications {
             .setSubText(status)
             .setLargeIcon(avatar)
             .setStyle(NotificationCompat.CallStyle.forOngoingCall(person, hangUp))
-            .addAction(R.drawable.ic_notification, if (state.mic) "Silenciar" else "Ativar microfone", mute)
+            .addAction(if (state.mic) R.drawable.ic_mic else R.drawable.ic_mic_off, if (state.mic) "Silenciar" else "Ativar microfone", mute)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setContentIntent(open)
             .setOngoing(true)

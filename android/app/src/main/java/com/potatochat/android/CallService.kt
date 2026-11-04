@@ -45,8 +45,10 @@ class CallService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_HANGUP -> if (!CallBridge.send("hangup")) stopSelf()
-            ACTION_MUTE -> CallBridge.send("mute")
+            ACTION_HANGUP -> if (intent.getStringExtra(CallNotifications.EXTRA_CALL_ID).let { it == null || it == state?.id }) {
+                if (!CallBridge.send("hangup", state?.id.orEmpty())) stopSelf()
+            }
+            ACTION_MUTE -> if (intent.getStringExtra(CallNotifications.EXTRA_CALL_ID).let { it == null || it == state?.id }) CallBridge.send("mute", state?.id.orEmpty())
         }
         val current = state ?: run {
             stopSelf()
@@ -115,12 +117,12 @@ class CallService : Service() {
 
 /** Leva o que foi tocado na notificação da chamada (desligar, mudo) ao site aberto no app (MainActivity). */
 object CallBridge {
-    @Volatile var page: ((String) -> Unit)? = null
+    @Volatile var page: ((String, String) -> Unit)? = null
 
     /** false = o app não está aberto (não tem site para avisar). */
-    fun send(action: String): Boolean {
+    fun send(action: String, id: String = ""): Boolean {
         val target = page ?: return false
-        target(action)
+        target(action, id)
         return true
     }
 }
