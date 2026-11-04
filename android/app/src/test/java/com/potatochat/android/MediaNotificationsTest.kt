@@ -7,6 +7,19 @@ import android.content.Context
 import android.media.session.PlaybackState
 import android.media.session.MediaSession
 import android.media.MediaMetadata
+import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.drawable.BitmapDrawable
+import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.TextView
+import android.widget.ImageButton
+import android.view.View
+import android.view.ViewGroup
+import kotlin.math.abs
+import java.io.File
 import android.os.Handler
 import org.junit.After
 import org.junit.Assert.*
@@ -19,6 +32,7 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.Implements
 import org.robolectric.annotation.Implementation
+import org.robolectric.annotation.GraphicsMode
 import org.robolectric.shadow.api.Shadow
 import org.robolectric.shadows.ShadowMediaSession
 
@@ -28,6 +42,14 @@ class MediaNotificationsTest {
     private val app: Application get() = RuntimeEnvironment.getApplication()
     private val notifications get() = app.getSystemService(NotificationManager::class.java)
     private fun music() = MusicService.State("song-one", "room-one", "Uma música", "Artista", "", 180000, 25000, true, false, false, true)
+    private fun assertImageColors(expected: Bitmap, actual: Bitmap) {
+        // O Android pode redimensionar os bitmaps ao montar a notificação.
+        for ((x, y) in listOf(0.1 to 0.2, 0.35 to 0.5, 0.9 to 0.8)) {
+            val before = expected.getPixel((expected.width * x).toInt(), (expected.height * y).toInt())
+            val after = actual.getPixel((actual.width * x).toInt(), (actual.height * y).toInt())
+            for (channel in listOf(16, 8, 0)) assertTrue("a imagem deve preservar suas cores após o redimensionamento", abs(((before shr channel) and 255) - ((after shr channel) and 255)) <= 8)
+        }
+    }
 
     @After fun clear() {
         MusicService.stop(app)
@@ -44,6 +66,7 @@ class MediaNotificationsTest {
             val shown = shadowOf(notifications).getNotification(MusicService.NOTIFICATION_ID)
             assertEquals("Uma música", shown.extras.getCharSequence(Notification.EXTRA_TITLE))
             assertEquals("Artista", shown.extras.getCharSequence(Notification.EXTRA_TEXT))
+            assertEquals(R.drawable.ic_notification, shown.smallIcon.resId)
             assertNotNull(shown.extras.getParcelable<android.media.session.MediaSession.Token>(Notification.EXTRA_MEDIA_SESSION))
             assertEquals(listOf("Voltar ao início", "Pausar", "Próxima", "Silenciar música", "Parar música"), shown.actions.map { it.title.toString() })
             assertArrayEquals(intArrayOf(0, 1, 2), shown.extras.getIntArray("android.compactActions"))
@@ -108,6 +131,70 @@ class MediaNotificationsTest {
             service.onStartCommand(shadowOf(app).nextStartedService, 0, 3)
             assertEquals(2, received.size)
         } finally { lifecycle.destroy() }
+    }
+
+    @Test @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    fun blurredBackgroundKeepsOriginalCoverAndClearsOnTrackChange() {
+        val original = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
+        val pixels = IntArray(64 * 64) { if (it % 64 < 32) Color.RED else Color.BLUE }
+        original.setPixels(pixels, 0, 64, 0, 0, 64, 64)
+        val images = MusicArtwork.prepare(original)
+        assertSame(original, images.cover)
+        assertEquals(Color.RED, original.getPixel(0, 0))
+        assertEquals(Color.BLUE, original.getPixel(63, 0))
+        val center = images.background.getPixel(192, 192)
+        assertTrue("o fundo deve misturar as cores da capa", Color.red(center) > 20 && Color.blue(center) > 20)
+        assertTrue(Color.red(images.background.getPixel(32, 192)) > Color.blue(images.background.getPixel(32, 192)))
+        assertTrue(Color.blue(images.background.getPixel(352, 192)) > Color.red(images.background.getPixel(352, 192)))
+        val url = "https://test.invalid/cover"
+        MusicArtwork.cache.put(url, images)
+        val lifecycle = Robolectric.buildService(MusicService::class.java).create()
+        try {
+            MusicService.update(app, music().copy(cover = url))
+            val session = Shadow.extract<RecordingMediaSession>(lifecycle.get().mediaSession)
+            assertTrue(original.sameAs(session.publishedMetadata?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)))
+            assertTrue(images.background.sameAs(session.publishedMetadata?.getBitmap(MediaMetadata.METADATA_KEY_ART)))
+            val shown = shadowOf(notifications).getNotification(MusicService.NOTIFICATION_ID)
+            assertImageColors(original, (shown.getLargeIcon().loadDrawable(app) as BitmapDrawable).bitmap)
+            MusicService.update(app, music().copy(uid = "new-song", cover = ""))
+            assertNull(session.publishedMetadata?.getBitmap(MediaMetadata.METADATA_KEY_ART))
+            assertNull(shadowOf(notifications).getNotification(MusicService.NOTIFICATION_ID).getLargeIcon())
+        } finally { lifecycle.destroy(); MusicArtwork.cache.remove(url) }
+    }
+
+    @Test @Config(sdk = [32]) @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    fun olderAndroidShowsBlurredExpandedBodyAndWorkingControls() {
+        val original = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.rgb(180, 70, 120)) }
+        Canvas(original).drawRect(32f, 0f, 64f, 64f, Paint().apply { color = Color.BLUE })
+        val images = MusicArtwork.prepare(original)
+        val url = "https://test.invalid/legacy-cover"
+        MusicArtwork.cache.put(url, images)
+        val lifecycle = Robolectric.buildService(MusicService::class.java).create()
+        val received = mutableListOf<String>()
+        MusicBridge.page = { action, _, _, _ -> received += action }
+        try {
+            MusicService.update(app, music().copy(cover = url))
+            val shown = shadowOf(notifications).getNotification(MusicService.NOTIFICATION_ID)
+            val view = Notification.Builder.recoverBuilder(app, shown).createBigContentView().apply(app, FrameLayout(app))
+            assertEquals("Uma música", view.findViewById<TextView>(R.id.music_title).text)
+            assertImageColors(images.background, (view.findViewById<ImageView>(R.id.music_background).drawable as BitmapDrawable).bitmap)
+            assertImageColors(original, (view.findViewById<ImageView>(R.id.music_cover).drawable as BitmapDrawable).bitmap)
+            val labels = shown.actions.map { it.title.toString() }
+            fun countButtons(node: View): Int = (if (node is ImageButton && node.contentDescription?.toString() in labels) 1 else 0) +
+                (if (node is ViewGroup) (0 until node.childCount).sumOf { countButtons(node.getChildAt(it)) } else 0)
+            assertEquals("o corpo expandido deve ter um único conjunto de controles", 5, countButtons(view))
+            view.measure(View.MeasureSpec.makeMeasureSpec(420, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+            view.layout(0, 0, view.measuredWidth, view.measuredHeight)
+            val preview = Bitmap.createBitmap(view.measuredWidth, view.measuredHeight, Bitmap.Config.ARGB_8888)
+            view.draw(Canvas(preview))
+            File("build/outputs/previews/music-notification-legacy.png").apply {
+                parentFile?.mkdirs()
+                outputStream().use { preview.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            }
+            shown.actions[1].actionIntent.send()
+            lifecycle.get().onStartCommand(shadowOf(app).nextStartedService, 0, 1)
+            assertEquals(listOf("pause"), received)
+        } finally { lifecycle.destroy(); MusicArtwork.cache.remove(url) }
     }
 }
 

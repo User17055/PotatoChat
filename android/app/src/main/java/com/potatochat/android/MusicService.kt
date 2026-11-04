@@ -8,8 +8,6 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.media.MediaMetadata
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
@@ -21,13 +19,9 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
-import android.util.LruCache
+import android.widget.RemoteViews
 import androidx.core.content.ContextCompat
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 
 /** O WebView reproduz; esta sessão publica o estado real e encaminha os controles à mesma fila. */
 class MusicService : Service() {
@@ -39,7 +33,7 @@ class MusicService : Service() {
         private set
     private val handler = Handler(Looper.getMainLooper())
     private val artworkWorker = Executors.newSingleThreadExecutor()
-    private var cover: Bitmap? = null
+    private var artwork: MusicArtwork.Images? = null
     private var coverUrl = ""
     private var published: State? = null
     private var wakeLock: PowerManager.WakeLock? = null
@@ -91,13 +85,13 @@ class MusicService : Service() {
         val current = state ?: return
         if (current.cover != coverUrl) {
             coverUrl = current.cover
-            cover = Artwork.cache.get(coverUrl)
-            if (cover == null && coverUrl.startsWith("https://")) {
+            artwork = MusicArtwork.cache.get(coverUrl)
+            if (artwork == null && coverUrl.startsWith("https://")) {
                 val requested = coverUrl
                 artworkWorker.execute {
-                    val loaded = Artwork.load(requested)
+                    val loaded = MusicArtwork.load(requested)
                     handler.post {
-                        if (instance === this && coverUrl == requested) { cover = loaded; publishMetadata(); publishNotification() }
+                        if (instance === this && coverUrl == requested) { artwork = loaded; publishMetadata(); publishNotification() }
                     }
                 }
             }
@@ -113,7 +107,7 @@ class MusicService : Service() {
         if (published?.let { it.uid != current.uid || it.title != current.title || it.artist != current.artist || it.duration != current.duration || it.cover != current.cover } != false) publishMetadata()
         if (current.playing || current.buffering) { if (wakeLock?.isHeld != true) wakeLock?.acquire(10 * 60 * 1000L) }
         else wakeLock?.takeIf { it.isHeld }?.release()
-        if (published?.copy(position = current.position) != current) publishNotification()
+        if (published?.copy(position = current.position) != current || (Build.VERSION.SDK_INT < 33 && published?.position != current.position)) publishNotification()
         published = current
     }
 
@@ -122,7 +116,11 @@ class MusicService : Service() {
         mediaSession.setMetadata(MediaMetadata.Builder().putString(MediaMetadata.METADATA_KEY_MEDIA_ID, current.uid)
             .putString(MediaMetadata.METADATA_KEY_TITLE, current.title).putString(MediaMetadata.METADATA_KEY_ARTIST, current.artist)
             .putString(MediaMetadata.METADATA_KEY_ALBUM, "Potato Chat").putLong(MediaMetadata.METADATA_KEY_DURATION, current.duration)
-            .apply { cover?.let { putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, it); putBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON, it) } }.build())
+            .apply { artwork?.let {
+                putBitmap(MediaMetadata.METADATA_KEY_ART, it.background)
+                putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, it.cover)
+                putBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON, it.cover)
+            } }.build())
     }
 
     private fun publishNotification() {
@@ -136,22 +134,41 @@ class MusicService : Service() {
             if (enabled) PendingIntent.getService(this, 101, Intent(this, MusicService::class.java).setAction(name)
                 .setData(Uri.parse("potato://music/${current.uid}/$name"))
                 .putExtra(EXTRA_UID, current.uid).putExtra(EXTRA_ROOM, current.room), PENDING_FLAGS) else null).build()
-        val notification = Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_music)
+        val actions = listOf(
+            action(R.drawable.ic_previous, "Voltar ao início", "previous"),
+            action(if (current.playing || current.buffering) R.drawable.ic_pause else R.drawable.ic_play, if (current.playing || current.buffering) "Pausar" else "Reproduzir", if (current.playing || current.buffering) "pause" else "play"),
+            action(R.drawable.ic_next, "Próxima", "next", current.canSkip),
+            action(if (current.muted) R.drawable.ic_volume_off else R.drawable.ic_volume, if (current.muted) "Ativar som" else "Silenciar música", "mute"),
+            action(R.drawable.ic_stop, "Parar música", "stop"))
+        val notification = Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(current.title).setContentText(current.artist).setSubText(if (current.buffering) "Carregando…" else if (current.muted) "Som silenciado neste aparelho" else "Potato Chat")
-            .setLargeIcon(cover).setContentIntent(open).setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setLargeIcon(artwork?.cover).setColor(artwork?.color ?: 0x24201d).setColorized(artwork != null)
+            .setContentIntent(open).setVisibility(Notification.VISIBILITY_PUBLIC)
             .setCategory(Notification.CATEGORY_TRANSPORT).setOnlyAlertOnce(true).setShowWhen(false)
             .setOngoing(current.playing || current.buffering).setAutoCancel(false)
-            .addAction(action(R.drawable.ic_previous, "Voltar ao início", "previous"))
-            .addAction(action(if (current.playing || current.buffering) R.drawable.ic_pause else R.drawable.ic_play, if (current.playing || current.buffering) "Pausar" else "Reproduzir", if (current.playing || current.buffering) "pause" else "play"))
-            .addAction(action(R.drawable.ic_next, "Próxima", "next", current.canSkip))
-            .addAction(action(if (current.muted) R.drawable.ic_volume_off else R.drawable.ic_volume, if (current.muted) "Ativar som" else "Silenciar música", "mute"))
-            .addAction(action(R.drawable.ic_stop, "Parar música", "stop"))
-            .setStyle(Notification.MediaStyle().setMediaSession(mediaSession.sessionToken).setShowActionsInCompactView(0, 1, 2))
+            .apply { actions.forEach(::addAction) }
+            .apply {
+                // Android 13+ desenha o player a partir da MediaSession; os anteriores usam este corpo personalizado.
+                val style = if (Build.VERSION.SDK_INT < 33) Notification.DecoratedMediaCustomViewStyle() else Notification.MediaStyle()
+                setStyle(style.setMediaSession(mediaSession.sessionToken).setShowActionsInCompactView(0, 1, 2))
+                if (Build.VERSION.SDK_INT < 33) {
+                    setCustomContentView(contentView(R.layout.music_notification_compact, current))
+                    setCustomBigContentView(contentView(R.layout.music_notification_expanded, current))
+                }
+            }
             .apply { if (Build.VERSION.SDK_INT >= 31) setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE) }.build()
         runCatching {
             if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
             else startForeground(NOTIFICATION_ID, notification)
         }.onFailure { stop(this) }
+    }
+
+    private fun contentView(layout: Int, current: State) = RemoteViews(packageName, layout).apply {
+        setImageViewBitmap(R.id.music_background, artwork?.background)
+        setImageViewBitmap(R.id.music_cover, artwork?.cover)
+        setTextViewText(R.id.music_title, current.title)
+        setTextViewText(R.id.music_artist, current.artist)
+        setProgressBar(R.id.music_progress, 1000, if (current.duration > 0) ((current.position * 1000) / current.duration).coerceIn(0, 1000).toInt() else 0, current.buffering)
     }
 
     override fun onDestroy() {
@@ -192,32 +209,6 @@ class MusicService : Service() {
         }
     }
 
-    private object Artwork {
-        val cache = LruCache<String, Bitmap>(8)
-        private val http = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(12, TimeUnit.SECONDS).build()
-        fun load(url: String): Bitmap? = runCatching {
-            val bytes = http.newCall(Request.Builder().url(url).build()).execute().use { response ->
-                if (!response.isSuccessful) return null
-                response.body?.byteStream()?.use { input ->
-                    val output = ByteArrayOutputStream()
-                    val buffer = ByteArray(8192)
-                    while (output.size() <= 2 * 1024 * 1024) {
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        output.write(buffer, 0, count)
-                    }
-                    output.toByteArray()
-                }
-            } ?: return null
-            if (bytes.size > 2 * 1024 * 1024) return null
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-            val options = BitmapFactory.Options().apply {
-                while (bounds.outWidth / inSampleSize > 512 || bounds.outHeight / inSampleSize > 512) inSampleSize *= 2
-            }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.also { cache.put(url, it) }
-        }.getOrNull()
-    }
 }
 
 object MusicBridge {
