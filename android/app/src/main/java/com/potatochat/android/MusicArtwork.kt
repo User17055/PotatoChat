@@ -9,6 +9,7 @@ import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.Shader
 import android.util.LruCache
+import android.util.Log
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.ByteArrayOutputStream
@@ -23,7 +24,10 @@ internal object MusicArtwork {
     fun load(url: String): Images? = runCatching {
         cache.get(url)?.let { return it }
         val bytes = http.newCall(Request.Builder().url(url).build()).execute().use { response ->
-            if (!response.isSuccessful) return null
+            if (!response.isSuccessful) {
+                Log.w("PotatoMusic", "Capa indisponível: HTTP ${response.code}")
+                return null
+            }
             response.body?.byteStream()?.use { input ->
                 val output = ByteArrayOutputStream()
                 val buffer = ByteArray(8192)
@@ -39,10 +43,11 @@ internal object MusicArtwork {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         val options = BitmapFactory.Options().apply {
+            inSampleSize = 1
             while (bounds.outWidth / inSampleSize > 512 || bounds.outHeight / inSampleSize > 512) inSampleSize *= 2
         }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.let(::prepare)?.also { cache.put(url, it) }
-    }.getOrNull()
+    }.onFailure { Log.w("PotatoMusic", "Não foi possível carregar a capa da música.", it) }.getOrNull()
 
     fun prepare(cover: Bitmap): Images {
         val size = 128

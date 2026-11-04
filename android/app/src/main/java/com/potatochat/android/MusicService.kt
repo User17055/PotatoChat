@@ -35,6 +35,9 @@ class MusicService : Service() {
     private val artworkWorker = Executors.newSingleThreadExecutor()
     private var artwork: MusicArtwork.Images? = null
     private var coverUrl = ""
+    private var artworkLoading = false
+    private var artworkAttempts = 0
+    private var artworkRetryAt = 0L
     private var published: State? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private val renew = object : Runnable {
@@ -86,12 +89,22 @@ class MusicService : Service() {
         if (current.cover != coverUrl) {
             coverUrl = current.cover
             artwork = MusicArtwork.cache.get(coverUrl)
-            if (artwork == null && coverUrl.startsWith("https://")) {
-                val requested = coverUrl
-                artworkWorker.execute {
-                    val loaded = MusicArtwork.load(requested)
-                    handler.post {
-                        if (instance === this && coverUrl == requested) { artwork = loaded; publishMetadata(); publishNotification() }
+            artworkLoading = false
+            artworkAttempts = 0
+            artworkRetryAt = 0L
+        }
+        if (artwork == null && coverUrl.startsWith("https://") && !artworkLoading && artworkAttempts < 3 && SystemClock.elapsedRealtime() >= artworkRetryAt) {
+            val requested = coverUrl
+            artworkLoading = true
+            artworkAttempts++
+            artworkWorker.execute {
+                val loaded = MusicArtwork.load(requested)
+                handler.post {
+                    if (instance === this && coverUrl == requested) {
+                        artworkLoading = false
+                        artwork = loaded
+                        artworkRetryAt = SystemClock.elapsedRealtime() + artworkAttempts * 10000L
+                        if (loaded != null) { publishMetadata(); publishNotification() }
                     }
                 }
             }

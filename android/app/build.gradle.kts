@@ -11,8 +11,8 @@ android {
         applicationId = "com.potatochat.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "1.4.1"
+        versionCode = 7
+        versionName = "1.4.2"
         // Endereço do site. Para testar com o PHP local: ./gradlew assembleDebug -PpotatoSite=http://localhost:8000/
         // (no emulador, antes: adb reverse tcp:8000 tcp:8000).
         buildConfigField("String", "SITE_URL", "\"${project.findProperty("potatoSite") ?: "https://potato.andrejrs.com.br/"}\"")
@@ -45,6 +45,7 @@ dependencies {
     implementation("io.github.webrtc-sdk:android:150.7871.01")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.16.1")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }
 
 // Gradle 8 escreve o arquivo de argumentos do Test worker em UTF-8, mas o Java no Windows

@@ -20,6 +20,12 @@ import android.view.View
 import android.view.ViewGroup
 import kotlin.math.abs
 import java.io.File
+import java.io.ByteArrayOutputStream
+import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.MockResponse
+import okio.Buffer
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import android.os.Handler
 import org.junit.After
 import org.junit.Assert.*
@@ -131,6 +137,37 @@ class MediaNotificationsTest {
             service.onStartCommand(shadowOf(app).nextStartedService, 0, 3)
             assertEquals(2, received.size)
         } finally { lifecycle.destroy() }
+    }
+
+    @Test @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    fun downloadsAndDecodesJpegBeforePreparingArtwork() {
+        val original = Bitmap.createBitmap(600, 600, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.rgb(40, 150, 70)) }
+        val bytes = ByteArrayOutputStream().apply { assertTrue(original.compress(Bitmap.CompressFormat.JPEG, 90, this)) }.toByteArray()
+        val server = MockWebServer()
+        server.enqueue(MockResponse().setHeader("Content-Type", "image/jpeg").setBody(Buffer().write(bytes)))
+        server.start()
+        val worker = Executors.newSingleThreadExecutor()
+        val url = "http://localhost:${server.port}/cover.jpg"
+        try {
+            val images = worker.submit<MusicArtwork.Images?> { MusicArtwork.load(url) }.get(30, TimeUnit.SECONDS)
+            assertNotNull("o JPEG baixado deve ser decodificado, sem divisão por zero", images)
+            assertEquals(300, images!!.cover.width)
+            assertEquals(300, images.cover.height)
+            assertEquals(384, images.background.width)
+            assertSame(images, MusicArtwork.load(url))
+            assertEquals("a imagem já carregada deve vir do cache", 1, server.requestCount)
+            val live = System.getenv("POTATO_TEST_COVER_URL")
+            if (!live.isNullOrBlank()) {
+                val downloaded = worker.submit<MusicArtwork.Images?> { MusicArtwork.load(live) }.get(30, TimeUnit.SECONDS)
+                assertNotNull("a capa real também deve carregar pelo cliente nativo", downloaded)
+                assertTrue(downloaded!!.cover.width in 1..512)
+                File("build/outputs/previews/real-album-background.png").apply {
+                    parentFile?.mkdirs()
+                    outputStream().use { downloaded.background.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                }
+                MusicArtwork.cache.remove(live)
+            }
+        } finally { worker.shutdownNow(); server.shutdown(); MusicArtwork.cache.remove(url) }
     }
 
     @Test @GraphicsMode(GraphicsMode.Mode.NATIVE)
