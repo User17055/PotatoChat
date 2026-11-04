@@ -3581,7 +3581,7 @@ const musicButton = $("#music-button");
 const musicPanel = $("#music-panel");
 const commandMenu = $("#command-menu");
 const MUSIC_COMMANDS = [
-  { name: "playl", args: "nome ou link do Spotify", icon: "music", text: "Toca da biblioteca spotDL; baixa uma vez e reutiliza nas próximas" },
+  { name: "playl", args: "nome ou link do Spotify/YouTube", icon: "music", text: "Toca da biblioteca spotDL; baixa uma vez e reutiliza nas próximas" },
   { name: "play", args: "nome ou link", icon: "play", text: "Toca do YouTube ou do Spotify (sozinho, continua a pausada)" },
   { name: "pause", icon: "pause", text: "Pausa a música para os dois" },
   { name: "skip", icon: "skip", text: "Pula para a próxima da fila" },

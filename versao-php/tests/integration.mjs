@@ -38,12 +38,14 @@ const transcriberServer = http.createServer((request, response) => {
     if (["/v1/jobs", "/v1/status"].includes(request.url)) {
       assert.equal(request.headers.authorization, `Bearer ${localMusicKey}`);
       const body = JSON.parse(Buffer.concat(chunks));
-      const track = { id: localMusic.trackId, source: "local", title: "Faixa local", artist: "Artista", duration: 180,
-        url: `http://127.0.0.1:${transcriberServer.address().port}/media/${localMusic.trackId}.mp3?expires=123&sig=test` };
+      const youtube = body.query?.includes("youtu");
+      const trackId = youtube ? "yt_Erd8iIS7X8Y" : localMusic.trackId;
+      const track = { id: trackId, source: "local", title: "Faixa local", artist: "Artista", duration: 180,
+        url: `http://127.0.0.1:${transcriberServer.address().port}/media/${trackId}.mp3?expires=123&sig=test` };
       response.writeHead(200, { "Content-Type": "application/json" });
       if (request.url === "/v1/jobs") {
         localMusic.requests++;
-        return response.end(JSON.stringify(body.query === "cache" ? { status: "ready", cached: true, track } : { status: "pending", id: localMusic.id }));
+        return response.end(JSON.stringify(body.query === "cache" || youtube ? { status: "ready", cached: true, track } : { status: "pending", id: localMusic.id }));
       }
       return response.end(JSON.stringify({ jobs: { [localMusic.id]: localMusic.status === "ready" ? { status: "ready", track } : localMusic.status === "error" ? { status: "error", error: "Falha de teste" } : { status: "pending" } } }));
     }
@@ -720,6 +722,11 @@ try {
   // /playl é assíncrono: cache toca na hora; downloads entram uma única vez e /stop cancela a fila pendente.
   const cached = await withAck(dj1, "music", { op: "playl", query: "cache" });
   assert.deepEqual([cached.state.now.source, cached.state.now.id, cached.state.now.by], ["local", localMusic.trackId, "Pessoa 1"]);
+  const youtubeLocal = await withAck(dj2, "music", { op: "playl", query: "https://youtu.be/Erd8iIS7X8Y" });
+  const youtubeTrack = youtubeLocal.state.queue[0];
+  assert.equal(youtubeTrack.id, "yt_Erd8iIS7X8Y");
+  assert.deepEqual(youtubeTrack.origin, { source: "youtube", type: "video", id: "Erd8iIS7X8Y" });
+  await withAck(dj2, "music", { op: "remove", uid: youtubeTrack.uid });
   const pendingLocal = await withAck(dj2, "music", { op: "playl", query: "nova faixa" });
   assert.equal(pendingLocal.pending, true);
   assert.equal(pendingLocal.state.pending.length, 1);

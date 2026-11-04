@@ -17,6 +17,29 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
+TRACK_ID_PATTERN = r"(?:[A-Za-z0-9]{22}|yt_[A-Za-z0-9_-]{11})"
+
+
+def youtube_id(value):
+    try:
+        target = urlsplit(value)
+        if target.scheme not in ("http", "https") or target.username or target.password or target.port:
+            return None
+        host = target.hostname
+        if host in ("youtu.be", "www.youtu.be"):
+            video = target.path.removeprefix("/")
+        elif host in ("youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"):
+            if target.path == "/watch":
+                video = parse_qs(target.query).get("v", [""])[0]
+            else:
+                match = re.fullmatch(r"/(?:shorts|embed|live)/([A-Za-z0-9_-]{11})/?", target.path)
+                video = match[1] if match else ""
+        else:
+            return None
+        return video if re.fullmatch(r"[A-Za-z0-9_-]{11}", video) else None
+    except ValueError:
+        return None
+
 
 def run_download(args, log):
     with subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT,
@@ -40,9 +63,16 @@ def clean_query(value):
     match = re.fullmatch(r"(?:https?://open\.spotify\.com/(?:intl-[a-z-]+/)?track/|spotify:track:)([A-Za-z0-9]{22})(?:\?[^\s]*)?", value)
     if match:
         return "https://open.spotify.com/track/" + match[1]
+    video = youtube_id(value)
+    if video:
+        return "https://www.youtube.com/watch?v=" + video
     if "://" in value or value.startswith(("spotify:", "-")):
-        raise ValueError("Use o nome ou o link de uma faixa do Spotify; envie uma música por vez.")
+        raise ValueError("Use o nome ou um link do Spotify ou YouTube; envie uma música por vez.")
     return " ".join(value.split())
+
+
+def query_key(query):
+    return query if query.startswith("https://") else query.casefold()
 
 
 class Library:
@@ -90,10 +120,14 @@ class Library:
 
     def create(self, query):
         query = clean_query(query)
-        key = query.casefold()
+        key = query_key(query)
         with self.lock, self.db() as db:
             alias = db.execute("SELECT track FROM aliases WHERE query=?", (key,)).fetchone()
-            track = self.track(alias[0]) if alias else None
+            video = youtube_id(query)
+            direct_id = "yt_" + video if video else query.rsplit("/", 1)[-1] if query.startswith("https://open.spotify.com/track/") else None
+            track = self.track(direct_id) if direct_id else None
+            if not track and alias:
+                track = self.track(alias[0])
             if track:
                 return {"status": "ready", "cached": True, "track": self.public_track(track)}
             row = db.execute("SELECT * FROM jobs WHERE query=? AND status IN ('queued','working')", (query,)).fetchone()
@@ -143,11 +177,11 @@ class Library:
                 print(f"spotDL job {row['id']}: {log_file.read_text(errors='replace')[-3000:]}", flush=True)
                 raise ValueError("Não foi possível baixar essa música agora. Tente outro nome ou link.")
             track = json.loads(result_file.read_text())
-            if not re.fullmatch(r"[A-Za-z0-9]{22}", track["id"]) or not (self.root / f"{track['id']}.mp3").is_file():
+            if not re.fullmatch(TRACK_ID_PATTERN, track["id"]) or not (self.root / f"{track['id']}.mp3").is_file():
                 raise ValueError("O download não gerou um áudio válido.")
             with self.db() as db:
                 db.execute("INSERT OR REPLACE INTO tracks VALUES(?,?)", (track["id"], json.dumps(track)))
-                for alias in [row["query"].casefold(), track["origin"]["url"].casefold()]:
+                for alias in [query_key(row["query"]), track["origin"]["url"]]:
                     db.execute("INSERT OR REPLACE INTO aliases VALUES(?,?)", (alias, track["id"]))
                 db.execute("UPDATE jobs SET status='ready',track=? WHERE id=?", (track["id"], row["id"]))
         except subprocess.TimeoutExpired:
@@ -197,13 +231,13 @@ def handler(library):
                     return self.json(200, {"jobs": library.statuses([str(i) for i in data["ids"]])})
                 return self.json(404, {"error": "Não encontrado."})
             except (ValueError, TypeError, AttributeError):
-                return self.json(400, {"error": "Informe o nome ou o link de uma faixa do Spotify."})
+                return self.json(400, {"error": "Informe o nome ou um link do Spotify ou YouTube."})
 
         def do_GET(self):
             target = urlsplit(self.path)
             if target.path == "/health":
                 return self.json(200, {"ok": True})
-            match = re.fullmatch(r"/media/([A-Za-z0-9]{22})\.mp3", target.path)
+            match = re.fullmatch(r"/media/(" + TRACK_ID_PATTERN + r")\.mp3", target.path)
             if not match:
                 return self.json(404, {"error": "Não encontrado."})
             query = parse_qs(target.query)

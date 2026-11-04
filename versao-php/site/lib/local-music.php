@@ -12,15 +12,16 @@ function local_music_api(string $path, array $body): ?array
 
 function local_music_track($raw): ?array
 {
-    if (!is_array($raw) || !preg_match('/^[A-Za-z0-9]{22}$/', str($raw['id'] ?? ''))) return null;
+    if (!is_array($raw) || !preg_match('/^(?:[A-Za-z0-9]{22}|yt_[A-Za-z0-9_-]{11})$/', str($raw['id'] ?? ''))) return null;
     $url = str($raw['url'] ?? '');
     $base = rtrim(str(config()['music_local_url']), '/');
     if ($base === '' || !str_starts_with($url, $base . '/media/' . $raw['id'] . '.mp3?')) return null;
+    $youtube = str_starts_with($raw['id'], 'yt_');
     return ['source' => 'local', 'type' => 'track', 'id' => $raw['id'], 'url' => $url,
         'title' => text_slice(str($raw['title'] ?? 'Música'), 200), 'artist' => text_slice(str($raw['artist'] ?? ''), 200),
         'duration' => max(0, min(1200, (float) ($raw['duration'] ?? 0))),
         'thumb' => https_url($raw['thumb'] ?? null), 'cover' => https_url($raw['cover'] ?? null),
-        'origin' => ['source' => 'spotify', 'type' => 'track', 'id' => $raw['id']]];
+        'origin' => ['source' => $youtube ? 'youtube' : 'spotify', 'type' => $youtube ? 'video' : 'track', 'id' => $youtube ? substr($raw['id'], 3) : $raw['id']]];
 }
 
 function local_music_request(array $me, string $query): array

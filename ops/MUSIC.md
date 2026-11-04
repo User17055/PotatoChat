@@ -1,10 +1,10 @@
 # Biblioteca de músicas (spotDL)
 
-`/playl nome da música` ou `/playl https://open.spotify.com/track/...` usa a biblioteca da VPS. `/play` mantém o comportamento anterior. São aceitas faixas individuais de até 20 minutos.
+`/playl nome da música`, `/playl https://open.spotify.com/track/...` ou `/playl https://youtu.be/...` usa a biblioteca da VPS. Aceita também links de vídeo do YouTube, Shorts e YouTube Music. Links de playlist sem vídeo e transmissões ao vivo não são aceitos. `/play` mantém o comportamento anterior. São aceitas faixas individuais de até 20 minutos.
 
 O PHP agenda o pedido sem esperar o download. A interface mostra o preparo e insere a faixa na fila compartilhada quando estiver pronta. `/pause`, `/skip`, a barra de posição e o volume usam o mesmo player. `/stop` cancela a entrada dos pedidos pendentes daquela conversa; arquivos já baixados continuam na biblioteca.
 
-O serviço usa spotDL 4.6.0 para identificar e baixar, FFmpeg para gerar MP3 e Node.js para o resolvedor normal do yt-dlp. O cache considera o ID do Spotify e o ISRC. Repetir uma consulta ou enviar o link de uma faixa identificada reaproveita o MP3. Um nome diferente pode precisar de nova identificação, mas não baixa novamente a mesma faixa.
+O serviço usa spotDL 4.6.0 para identificar e baixar, FFmpeg para gerar MP3 e Node.js para o resolvedor normal do yt-dlp. Links do YouTube usam diretamente o yt-dlp instalado com o spotDL para preservar o áudio do vídeo enviado, sem substituir por outra versão no Spotify. O cache considera o ID do Spotify, o ISRC ou o ID do vídeo. As variantes de link do mesmo vídeo são normalizadas antes da busca no cache. Repetir uma consulta ou enviar o link de uma faixa identificada reaproveita o MP3. Um nome diferente pode precisar de nova identificação, mas não baixa novamente a mesma faixa.
 
 ## VPS
 
@@ -14,7 +14,7 @@ Requer Debian/Ubuntu com Python 3, venv, FFmpeg, Node.js 22+, Nginx, Certbot e u
 bash /opt/potato-music/setup.sh music-potato.191-252-178-205.sslip.io
 ```
 
-O serviço `potato-music` escuta somente em `127.0.0.1:8787`. O Nginx oferece HTTPS e mantém o certificado com renovação automática. O usuário de sistema tem acesso de escrita apenas à biblioteca, `/var/lib/potato-music`. O SQLite guarda trabalhos e metadados; os arquivos ficam como `<spotify-id>.mp3`.
+O serviço `potato-music` escuta somente em `127.0.0.1:8787`. O Nginx oferece HTTPS e mantém o certificado com renovação automática. O usuário de sistema tem acesso de escrita apenas à biblioteca, `/var/lib/potato-music`. O SQLite guarda trabalhos e metadados; os arquivos ficam como `<spotify-id>.mp3` ou `yt_<video-id>.mp3`.
 
 Há um download por vez, limite padrão de 2 GiB de biblioteca, 12 trabalhos simultaneamente pendentes, 4 minutos por download e 20 minutos de validade do pedido. `MUSIC_MAX_BYTES` em `/etc/potato-music.env` ajusta o limite de armazenamento. A API exige uma chave privada; os players recebem apenas links de áudio assinados, válidos por sete dias, com suporte a Range. A chave nunca vai para o JavaScript. Use os downloads de acordo com as permissões das músicas e dos provedores.
 
