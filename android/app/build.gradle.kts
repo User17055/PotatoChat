@@ -11,8 +11,8 @@ android {
         applicationId = "com.potatochat.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 7
-        versionName = "1.4.2"
+        versionCode = 8
+        versionName = "1.4.3"
         // Endereço do site. Para testar com o PHP local: ./gradlew assembleDebug -PpotatoSite=http://localhost:8000/
         // (no emulador, antes: adb reverse tcp:8000 tcp:8000).
         buildConfigField("String", "SITE_URL", "\"${project.findProperty("potatoSite") ?: "https://potato.andrejrs.com.br/"}\"")

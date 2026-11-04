@@ -44,13 +44,13 @@ internal object MusicArtwork {
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         val options = BitmapFactory.Options().apply {
             inSampleSize = 1
-            while (bounds.outWidth / inSampleSize > 512 || bounds.outHeight / inSampleSize > 512) inSampleSize *= 2
+            while (bounds.outWidth / inSampleSize > 1024 || bounds.outHeight / inSampleSize > 1024) inSampleSize *= 2
         }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.let(::prepare)?.also { cache.put(url, it) }
     }.onFailure { Log.w("PotatoMusic", "Não foi possível carregar a capa da música.", it) }.getOrNull()
 
     fun prepare(cover: Bitmap): Images {
-        val size = 128
+        val size = 384
         val small = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val side = minOf(cover.width, cover.height)
         val left = (cover.width - side) / 2
@@ -61,19 +61,19 @@ internal object MusicArtwork {
         }
         var pixels = IntArray(size * size)
         small.getPixels(pixels, 0, size, 0, 0, size, size)
-        // Três passes separáveis suavizam os detalhes sem RenderScript nem APIs exclusivas do Android novo.
-        repeat(3) {
+        // Suavização leve em resolução maior: mantém os contornos e as letras da capa reconhecíveis.
+        repeat(2) {
             for (horizontal in listOf(true, false)) {
                 val output = IntArray(pixels.size)
                 for (y in 0 until size) for (x in 0 until size) {
                     var red = 0; var green = 0; var blue = 0
-                    for (offset in -6..6) {
+                    for (offset in -1..1) {
                         val px = if (horizontal) (x + offset).coerceIn(0, size - 1) else x
                         val py = if (horizontal) y else (y + offset).coerceIn(0, size - 1)
                         val color = pixels[py * size + px]
                         red += Color.red(color); green += Color.green(color); blue += Color.blue(color)
                     }
-                    output[y * size + x] = Color.rgb(red / 13, green / 13, blue / 13)
+                    output[y * size + x] = Color.rgb(red / 3, green / 3, blue / 3)
                 }
                 pixels = output
             }
@@ -83,11 +83,11 @@ internal object MusicArtwork {
         val averageGreen = pixels.sumOf { Color.green(it).toLong() } / pixels.size
         val averageBlue = pixels.sumOf { Color.blue(it).toLong() } / pixels.size
         val color = Color.rgb((averageRed * 0.4).toInt(), (averageGreen * 0.4).toInt(), (averageBlue * 0.4).toInt())
-        val background = Bitmap.createBitmap(384, 384, Bitmap.Config.ARGB_8888)
+        val background = Bitmap.createBitmap(512, 512, Bitmap.Config.ARGB_8888)
         Canvas(background).apply {
-            drawBitmap(small, null, Rect(0, 0, 384, 384), Paint(Paint.FILTER_BITMAP_FLAG))
-            val shade = Paint().apply { shader = LinearGradient(0f, 0f, 0f, 384f, 0x28000000, 0x80000000.toInt(), Shader.TileMode.CLAMP) }
-            drawRect(0f, 0f, 384f, 384f, shade)
+            drawBitmap(small, null, Rect(0, 0, 512, 512), Paint(Paint.FILTER_BITMAP_FLAG))
+            val shade = Paint().apply { shader = LinearGradient(0f, 0f, 0f, 512f, 0x10000000, 0x50000000, Shader.TileMode.CLAMP) }
+            drawRect(0f, 0f, 512f, 512f, shade)
         }
         small.recycle()
         return Images(cover, background, color)

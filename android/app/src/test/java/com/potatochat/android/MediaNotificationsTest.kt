@@ -151,16 +151,16 @@ class MediaNotificationsTest {
         try {
             val images = worker.submit<MusicArtwork.Images?> { MusicArtwork.load(url) }.get(30, TimeUnit.SECONDS)
             assertNotNull("o JPEG baixado deve ser decodificado, sem divisão por zero", images)
-            assertEquals(300, images!!.cover.width)
-            assertEquals(300, images.cover.height)
-            assertEquals(384, images.background.width)
+            assertEquals(600, images!!.cover.width)
+            assertEquals(600, images.cover.height)
+            assertEquals(512, images.background.width)
             assertSame(images, MusicArtwork.load(url))
             assertEquals("a imagem já carregada deve vir do cache", 1, server.requestCount)
             val live = System.getenv("POTATO_TEST_COVER_URL")
             if (!live.isNullOrBlank()) {
                 val downloaded = worker.submit<MusicArtwork.Images?> { MusicArtwork.load(live) }.get(30, TimeUnit.SECONDS)
                 assertNotNull("a capa real também deve carregar pelo cliente nativo", downloaded)
-                assertTrue(downloaded!!.cover.width in 1..512)
+                assertTrue(downloaded!!.cover.width in 1..1024)
                 File("build/outputs/previews/real-album-background.png").apply {
                     parentFile?.mkdirs()
                     outputStream().use { downloaded.background.compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -179,10 +179,11 @@ class MediaNotificationsTest {
         assertSame(original, images.cover)
         assertEquals(Color.RED, original.getPixel(0, 0))
         assertEquals(Color.BLUE, original.getPixel(63, 0))
-        val center = images.background.getPixel(192, 192)
+        val middle = images.background.width / 2
+        val center = images.background.getPixel(middle, middle)
         assertTrue("o fundo deve misturar as cores da capa", Color.red(center) > 20 && Color.blue(center) > 20)
-        assertTrue(Color.red(images.background.getPixel(32, 192)) > Color.blue(images.background.getPixel(32, 192)))
-        assertTrue(Color.blue(images.background.getPixel(352, 192)) > Color.red(images.background.getPixel(352, 192)))
+        assertTrue(Color.red(images.background.getPixel(32, middle)) > Color.blue(images.background.getPixel(32, middle)))
+        assertTrue(Color.blue(images.background.getPixel(images.background.width - 32, middle)) > Color.red(images.background.getPixel(images.background.width - 32, middle)))
         val url = "https://test.invalid/cover"
         MusicArtwork.cache.put(url, images)
         val lifecycle = Robolectric.buildService(MusicService::class.java).create()
