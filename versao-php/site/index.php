@@ -32,6 +32,8 @@ function asset(string $file): string
       try { if (JSON.parse(localStorage.getItem("potato.session"))?.token) document.documentElement.classList.add("has-session"); } catch {}
       // Tema escolhido: aplicado antes de desenhar a página, sem piscar o tema padrão.
       try { const theme = JSON.parse(localStorage.getItem("potato.theme")); if (/^[a-z]+$/.test(theme)) document.documentElement.dataset.theme = theme; } catch {}
+      // Letra e balões da conversa (só neste aparelho), também antes de desenhar.
+      try { const look = JSON.parse(localStorage.getItem("potato.look")) || {}; for (const key of ["text", "bubbles"]) if (/^[a-z]+$/.test(look[key] || "")) document.documentElement.dataset[key] = look[key]; } catch {}
     </script>
   </head>
   <body>
@@ -198,6 +200,22 @@ function asset(string $file): string
       <symbol id="i-split" viewBox="0 0 24 24"><path d="M16 3h5v5"/><path d="M8 3H3v5"/><path d="M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3"/><path d="m15 9 6-6"/></symbol>
       <symbol id="i-question" viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
       <symbol id="i-flame" viewBox="0 0 24 24"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></symbol>
+      <symbol id="i-layout" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></symbol>
+      <symbol id="i-connect" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="1.6"/><circle cx="12" cy="9" r="1.6"/><circle cx="16" cy="9" r="1.6"/><circle cx="8" cy="15" r="1.6"/><circle cx="12" cy="15" r="1.6"/><circle cx="16" cy="15" r="1.6"/></symbol>
+      <symbol id="i-gallows" viewBox="0 0 24 24"><path d="M4 21h10M7 21V3h9v3"/><circle cx="16" cy="8.5" r="2.5"/><path d="M16 11v5M16 13l-2.5 2M16 13l2.5 2"/></symbol>
+      <symbol id="i-align-left" viewBox="0 0 24 24"><path d="M21 5H3M15 12H3M17 19H3"/></symbol>
+      <symbol id="i-align-center" viewBox="0 0 24 24"><path d="M21 5H3M17 12H7M19 19H5"/></symbol>
+      <symbol id="i-align-right" viewBox="0 0 24 24"><path d="M21 5H3M21 12H9M21 19H7"/></symbol>
+      <symbol id="i-align-justify" viewBox="0 0 24 24"><path d="M3 5h18M3 12h18M3 19h18"/></symbol>
+      <symbol id="i-list" viewBox="0 0 24 24"><path d="M3 5h.01M3 12h.01M3 19h.01M8 5h13M8 12h13M8 19h13"/></symbol>
+      <symbol id="i-list-ordered" viewBox="0 0 24 24"><path d="M10 5h11M10 12h11M10 19h11M4 4h1v5M4 9h2M6.5 20H3.4c0-1 2.6-1.925 2.6-3.5a1.5 1.5 0 0 0-2.6-1.02"/></symbol>
+      <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></symbol>
+      <symbol id="i-redo" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/></symbol>
+      <symbol id="i-eraser" viewBox="0 0 24 24"><path d="M4 7V4h16v3M5 20h6M13 4 8 20M15 15l5 5M20 15l-5 5"/></symbol>
+      <symbol id="i-highlighter" viewBox="0 0 24 24"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></symbol>
+      <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></symbol>
+      <symbol id="i-frame" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><rect x="7" y="7" width="10" height="10" rx="1"/></symbol>
+      <symbol id="i-sticker" viewBox="0 0 24 24"><path d="M15.5 3H5a2 2 0 0 0-2 2v14c0 1.1.9 2 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3Z"/><path d="M14 3v4a2 2 0 0 0 2 2h4"/><path d="M8 13h.01M16 13h.01" stroke-width="2.5" stroke-linecap="round"/><path d="M10 16s.8 1 2 1c1.3 0 2-1 2-1"/></symbol>
       <symbol id="i-star" viewBox="0 0 24 24"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></symbol>
       <symbol id="i-pizza" viewBox="0 0 24 24"><path d="m12 14-1 1"/><path d="m13.75 18.25-1.25 1.42"/><path d="M17.775 5.654a15.68 15.68 0 0 0-12.121 12.12"/><path d="M18.8 9.3a1 1 0 0 0 2.1 7.7"/><path d="M21.964 20.732a1 1 0 0 1-1.232 1.232l-18-5a1 1 0 0 1-.695-1.232A19.68 19.68 0 0 1 15.732 2.037a1 1 0 0 1 1.232.695z"/></symbol>
       <symbol id="i-flower" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 16.5A4.5 4.5 0 1 1 7.5 12 4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 1 1 4.5 4.5 4.5 4.5 0 1 1-4.5 4.5"/><path d="M12 7.5V9"/><path d="M7.5 12H9"/><path d="M16.5 12H15"/><path d="M12 16.5V15"/><path d="m8 8 1.88 1.88"/><path d="M14.12 9.88 16 8"/><path d="m8 16 1.88-1.88"/><path d="M14.12 14.12 16 16"/></symbol>
@@ -324,15 +342,17 @@ function asset(string $file): string
             <button id="search-button" class="icon-button" type="button" title="Pesquisar na conversa" aria-label="Pesquisar na conversa" aria-expanded="false" aria-controls="search-panel">
               <svg class="icon"><use href="#i-search" /></svg>
             </button>
-            <button id="audio-call" class="icon-button" type="button" title="Chamada de voz" data-title="Chamada de voz" aria-label="Iniciar chamada de voz">
-              <svg class="icon"><use href="#i-phone" /></svg>
-            </button>
-            <button id="video-call" class="icon-button" type="button" title="Chamada de vídeo" data-title="Chamada de vídeo" aria-label="Iniciar chamada de vídeo">
-              <svg class="icon"><use href="#i-video" /></svg>
-            </button>
-            <button id="share-screen" class="icon-button" type="button" title="Transmitir tela" data-title="Transmitir tela" aria-label="Transmitir tela">
-              <svg class="icon"><use href="#i-monitor-up" /></svg>
-            </button>
+            <!-- Um botão só para ligar: o menu escolhe voz, vídeo ou transmitir a tela. -->
+            <div class="call-pick">
+              <button id="call-button" class="icon-button" type="button" title="Ligar" aria-label="Ligar" aria-haspopup="menu" aria-expanded="false" aria-controls="call-menu">
+                <svg class="icon"><use href="#i-phone" /></svg>
+              </button>
+              <div id="call-menu" class="attach-menu call-menu hidden" role="menu" aria-label="Ligar">
+                <button id="audio-call" type="button" role="menuitem" title="Chamada de voz" data-title="Chamada de voz"><span class="attach-icon voice"><svg class="icon"><use href="#i-phone" /></svg></span>Chamada de voz</button>
+                <button id="video-call" type="button" role="menuitem" title="Chamada de vídeo" data-title="Chamada de vídeo"><span class="attach-icon cam"><svg class="icon"><use href="#i-video" /></svg></span>Chamada de vídeo</button>
+                <button id="share-screen" type="button" role="menuitem" title="Transmitir tela" data-title="Transmitir tela"><span class="attach-icon screen"><svg class="icon"><use href="#i-monitor-up" /></svg></span>Transmitir a tela</button>
+              </div>
+            </div>
             <button id="watch-button" class="icon-button watch-button" type="button" title="Batata Watch Party" aria-label="Abrir a Batata Watch Party" aria-pressed="false">
               <svg class="icon"><use href="#i-tv" /></svg>
               <span class="watch-dot" aria-hidden="true"></span>
@@ -345,6 +365,11 @@ function asset(string $file): string
           </div>
         </header>
 
+        <!-- Contagem regressiva até o próximo encontro (a mesma para os dois). Tocar muda a data ou desliga. -->
+        <button id="countdown" class="countdown hidden" type="button" title="Mudar a contagem">
+          <span class="countdown-icon" aria-hidden="true">✈️</span>
+          <span class="countdown-text"><small id="countdown-label"></small><strong id="countdown-time"></strong></span>
+        </button>
         <div id="net-banner" class="net-banner hidden"><span class="spinner"></span><span id="net-text">Reconectando…</span></div>
 
         <div id="available-call" class="available-call hidden" role="region" aria-label="Chamada disponível para reentrar">
@@ -423,6 +448,7 @@ function asset(string $file): string
                 <svg class="icon when-on"><use href="#i-message" /></svg>
                 <svg class="icon when-off"><use href="#i-message-off" /></svg>
               </button>
+              <button id="call-layout" class="round" type="button" title="Layout da chamada" aria-label="Trocar o layout da chamada"><svg class="icon"><use href="#i-layout" /></svg></button>
               <button id="call-pip" class="round hidden" type="button" title="Abrir miniatura flutuante" aria-label="Abrir miniatura flutuante"><svg class="icon"><use href="#i-pip" /></svg></button>
               <button id="end-call" class="round hangup" type="button" title="Sair da chamada" aria-label="Sair da chamada">
                 <svg class="icon"><use href="#i-hangup" /></svg>
@@ -527,6 +553,7 @@ function asset(string $file): string
               </div>
               <span id="watch-live" class="watch-live hidden"><i></i>AO VIVO</span>
             </div>
+            <button id="watch-view" class="watch-btn" type="button" title="Tela: conversa ao lado" aria-label="Trocar a tela da Watch Party"><svg class="icon"><use href="#i-layout" /></svg></button>
             <button id="watch-full" class="watch-btn" type="button" title="Tela cheia" aria-label="Tela cheia"><svg class="icon"><use id="watch-full-icon" href="#i-maximize" /></svg></button>
             <button id="watch-close" class="watch-btn danger" type="button" title="Parar para os dois" aria-label="Parar o vídeo para os dois"><svg class="icon"><use href="#i-x" /></svg></button>
           </div>
@@ -561,16 +588,34 @@ function asset(string $file): string
 
         <form id="message-form" class="composer">
           <!-- Busca de GIFs (GIPHY): abre em cima do campo de mensagem. -->
-          <div id="gif-panel" class="gif-panel hidden" role="dialog" aria-label="Escolher um GIF">
-            <label class="gif-search">
-              <svg class="icon"><use href="#i-search" /></svg>
-              <input id="gif-search" type="search" maxlength="50" autocomplete="off" enterkeyhint="search" placeholder="Buscar GIFs" aria-label="Buscar GIFs" />
-            </label>
-            <div id="gif-results" class="gif-results">
-              <div id="gif-grid" class="gif-grid"></div>
-              <p id="gif-note" class="gif-note hidden"></p>
+          <!-- Figurinhas: a coleção de cada um (GIFs salvos na estrela, fotos e figurinhas da conversa, imagens do aparelho). -->
+          <div id="gif-panel" class="gif-panel hidden" role="dialog" aria-label="Escolher um GIF ou uma figurinha">
+            <div class="gif-tabs" role="tablist">
+              <button type="button" role="tab" data-gif-tab="gifs" aria-selected="true">GIFs</button>
+              <button type="button" role="tab" data-gif-tab="stickers" aria-selected="false"><svg class="icon"><use href="#i-sticker" /></svg>Figurinhas</button>
             </div>
-            <p class="gif-credit">Powered by GIPHY</p>
+            <div id="gif-pane" class="gif-pane">
+              <label class="gif-search">
+                <svg class="icon"><use href="#i-search" /></svg>
+                <input id="gif-search" type="search" maxlength="50" autocomplete="off" enterkeyhint="search" placeholder="Buscar GIFs" aria-label="Buscar GIFs" />
+              </label>
+              <div id="gif-results" class="gif-results">
+                <div id="gif-grid" class="gif-grid"></div>
+                <p id="gif-note" class="gif-note hidden"></p>
+              </div>
+              <p class="gif-credit">Powered by GIPHY · a estrela salva nas figurinhas</p>
+            </div>
+            <div id="sticker-pane" class="gif-pane hidden">
+              <div class="sticker-bar">
+                <span id="sticker-count" class="sticker-count"></span>
+                <button id="sticker-edit" class="pill" type="button">Organizar</button>
+              </div>
+              <div class="gif-results">
+                <div id="sticker-grid" class="sticker-grid"></div>
+                <p id="sticker-note" class="gif-note"></p>
+              </div>
+            </div>
+            <input id="pick-sticker" type="file" accept="image/*" hidden />
           </div>
           <div class="quick-emojis">
             <button id="emoji-button" type="button" title="Escolher emojis" aria-label="Escolher emojis" aria-haspopup="dialog" aria-expanded="false" aria-controls="emoji-panel"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 14a4.5 4.5 0 0 0 8 0"/><path d="M8.5 9h.01M15.5 9h.01" stroke-linecap="round" stroke-width="2.5"/></svg></button>
@@ -589,7 +634,7 @@ function asset(string $file): string
           <button id="attach-button" class="attach-button" type="button" title="Enviar foto ou arquivo" aria-label="Enviar foto ou arquivo" aria-haspopup="menu" aria-expanded="false" aria-controls="attach-menu">
             <svg class="icon"><use href="#i-paperclip" /></svg>
           </button>
-          <button id="gif-button" class="gif-button" type="button" title="Enviar GIF" aria-label="Enviar GIF" aria-haspopup="dialog" aria-expanded="false" aria-controls="gif-panel">GIF</button>
+          <button id="gif-button" class="gif-button" type="button" title="GIFs e figurinhas" aria-label="GIFs e figurinhas" aria-haspopup="dialog" aria-expanded="false" aria-controls="gif-panel">GIF</button>
           <textarea id="message-input" rows="1" maxlength="2000" placeholder="Escreva uma mensagem…" aria-label="Mensagem"></textarea>
           <!-- Gravando um áudio. Segurando o microfone, a faixa cobre o campo e deslizar para a esquerda cancela. Sem
                segurar (como no Instagram), a faixa colorida fica em cima (parar, a onda e o tempo) e, embaixo, o apagar e
@@ -737,6 +782,20 @@ function asset(string $file): string
           <section class="profile-card">
             <p class="picker-label">Tema <small>· só muda para você</small></p>
             <div id="themes" class="themes" role="group" aria-label="Tema do chat"></div>
+            <!-- Visual da conversa (só neste aparelho): o tamanho da letra e o formato dos balões. -->
+            <p class="picker-label">Letra da conversa</p>
+            <div class="look-row" role="group" aria-label="Tamanho da letra" data-look="text">
+              <button type="button" data-look-value="p">Pequena</button>
+              <button type="button" data-look-value="">Normal</button>
+              <button type="button" data-look-value="g">Grande</button>
+              <button type="button" data-look-value="gg">Enorme</button>
+            </div>
+            <p class="picker-label">Balões</p>
+            <div class="look-row" role="group" aria-label="Formato dos balões" data-look="bubbles">
+              <button type="button" data-look-value="">Arredondados</button>
+              <button type="button" data-look-value="bolha">Bolha</button>
+              <button type="button" data-look-value="reto">Retos</button>
+            </div>
           </section>
 
           <section class="profile-card">
@@ -879,8 +938,26 @@ function asset(string $file): string
               <h3 id="game-live-title" class="us-subtitle">Esperando você</h3>
               <div id="game-live" class="event-list"></div>
             </section>
+            <!-- Modo +18 (só neste aparelho): as cartas do casal ficam apimentadas. -->
+            <button id="spicy-toggle" class="spicy-toggle" type="button" aria-pressed="false">
+              <span class="spicy-flame" aria-hidden="true">🔥</span>
+              <span class="spicy-text"><strong>Modo +18</strong><small>Cartas apimentadas em verdade ou desafio, quem é mais provável, isso ou aquilo e perguntinha.</small></span>
+              <span class="switch" aria-hidden="true"></span>
+            </button>
             <h3 class="us-subtitle">De tabuleiro</h3>
             <div class="games">
+              <article class="game-tile linha4">
+                <span class="game-art" aria-hidden="true"></span>
+                <h3>4 em linha</h3>
+                <p>Solte as peças nas colunas. Quem fizer 4 seguidas, em qualquer direção, ganha.</p>
+                <button class="pill gold small" type="button" data-game-new="linha4"><svg class="icon"><use href="#i-play" /></svg>Jogar</button>
+              </article>
+              <article class="game-tile forca">
+                <span class="game-art" aria-hidden="true"></span>
+                <h3>Forca</h3>
+                <p>Uma palavra e uma dica. Cada um chuta uma letra; acertou, pontua e joga de novo.</p>
+                <button class="pill gold small" type="button" data-game-new="forca"><svg class="icon"><use href="#i-play" /></svg>Jogar</button>
+              </article>
               <article class="game-tile velha">
                 <span class="game-art" aria-hidden="true"></span>
                 <h3>Jogo da velha</h3>
@@ -1030,6 +1107,8 @@ function asset(string $file): string
           <button type="button" role="radio" data-quality="720p"><strong>Leve</strong><small>720p · para internet mais fraca</small></button>
           <button type="button" role="radio" data-quality="1080p"><strong>Nítida</strong><small>1080p · textos, sites e filmes</small></button>
           <button type="button" role="radio" data-quality="1080p60"><strong>Fluida</strong><small>1080p a 60 fps · jogos e vídeos rápidos</small></button>
+          <button type="button" role="radio" data-quality="1440p"><strong>Ultra</strong><small>1440p · tela grande e texto miúdo (internet boa)</small></button>
+          <button type="button" role="radio" data-quality="1440p60"><strong>Ultra fluida</strong><small>1440p a 60 fps · jogos (internet muito boa)</small></button>
         </div>
         <button id="share-audio" class="setting-row swap" type="button" role="switch" aria-checked="true">
           <svg class="icon when-on"><use href="#i-volume" /></svg>
@@ -1136,7 +1215,11 @@ function asset(string $file): string
         <p id="letter-to" class="letter-to"></p>
         <h3 id="letter-title"></h3>
         <div id="letter-audios" class="letter-audios"></div>
-        <div id="letter-body" class="letter-body"></div>
+        <!-- O papel da cartinha: o texto e, por cima, as imagens e figurinhas soltas (decor), onde quem escreveu deixou. -->
+        <div id="letter-page" class="letter-page-view">
+          <div id="letter-body" class="letter-body"></div>
+          <div id="letter-decor" class="letter-decor"></div>
+        </div>
         <div id="letter-photos" class="letter-photos"></div>
         <p id="letter-sign" class="letter-sign"></p>
         <p id="letter-state" class="letter-state"></p>

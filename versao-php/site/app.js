@@ -202,7 +202,7 @@ function isJumbo(text) {
 
 // Texto curto da mensagem (citação da resposta, notificação): GIF e arquivo sem legenda não têm texto.
 const FILE_LABEL = { image: "Foto", video: "Vídeo", audio: "Áudio" };
-const previewText = (message) => (message.gif ? "GIF"
+const previewText = (message) => (message.gif ? (message.gif.sticker ? "Figurinha" : "GIF")
   : message.music ? `Música: ${message.music.title}`
   : message.game ? GAME_NAMES[message.game.type] || "Joguinho"
   : message.call ? callLabel(message.call)
@@ -492,6 +492,8 @@ function connect(token, animate) {
   // Tema trocado em outra aba ou aparelho da mesma pessoa.
   // Papel de parede trocado em outra aba ou aparelho da mesma pessoa.
   socket.on("wallpaper", ({ wallpaper: next }) => applyWallpaper(next));
+  socket.on("stickers", ({ stickers: next }) => setStickers(next));
+  socket.on("countdown", ({ countdown: next }) => setCountdown(next));
   // Bot de música e Watch Party: cada conversa tem os seus; o de outra conversa não mexe nesta.
   socket.on("music", ({ state, action, room: where }) => {
     if (where && where !== room) return;
@@ -566,6 +568,8 @@ function applyHistory(payload) {
   for (const clientId of pending.keys()) if (payload.items.some((message) => message.clientId === clientId)) pending.delete(clientId);
   reads = payload.reads || {};
   gifKey = payload.gifKey || "";
+  setStickers(payload.stickers);
+  setCountdown(payload.countdown);
   fileMax = payload.fileMax || 0;
   watchChunk = payload.watchChunk || 0;
   transcribeOn = Boolean(payload.transcribe);
@@ -849,6 +853,7 @@ function fill(article, message) {
     }
   } else if (message.gif && !message.deleted) {
     bubble.classList.add("gif");
+    bubble.classList.toggle("sticker", Boolean(message.gif.sticker));
     bubble.append(gifImage(message.gif));
   } else {
     const text = el("div", "text");
@@ -888,6 +893,14 @@ function fill(article, message) {
       copy.title = "Copiar texto";
       copy.append(icon("copy"));
       tools.append(copy);
+    }
+    if (message.gif || message.file?.kind === "image") {
+      const keep = el("button", "tool");
+      keep.type = "button";
+      keep.dataset.action = "sticker";
+      keep.title = "Salvar nas figurinhas";
+      keep.append(icon("sticker"));
+      tools.append(keep);
     }
     if (message.file) {
       const save = el("button", "tool");
@@ -1188,7 +1201,8 @@ let gifTimer;
 // GIF da mensagem: o tamanho fica reservado antes de carregar, para a conversa não pular.
 function gifImage(gif) {
   const image = el("img", "gif-media");
-  const scale = Math.min(1, GIF_MAX_WIDTH / gif.width, GIF_MAX_HEIGHT / gif.height);
+  // Figurinha: sempre do mesmo tamanho (a pequena cresce), sem fundo.
+  const scale = gif.sticker ? STICKER_SIZE / Math.max(gif.width, gif.height) : Math.min(1, GIF_MAX_WIDTH / gif.width, GIF_MAX_HEIGHT / gif.height);
   image.src = gif.url;
   image.alt = gif.title || "GIF";
   image.decoding = "async";
@@ -1237,10 +1251,17 @@ function addGif(found) {
   image.width = found.thumb.width;
   image.height = found.thumb.height;
   button.append(image);
+  const cell = el("div", "gif-cell");
+  const star = el("button", "gif-save");
+  star.type = "button";
+  star.title = "Salvar nas figurinhas";
+  star.setAttribute("aria-label", "Salvar nas figurinhas");
+  star.append(icon("star"));
+  cell.append(button, star);
   // Sempre na coluna mais curta: a grade fica equilibrada, estilo mural.
   const column = gifs.columns.reduce((low, next) => (next.fill < low.fill ? next : low));
   column.fill += found.thumb.height / found.thumb.width;
-  column.append(button);
+  column.append(cell);
 }
 
 // fresh = começa de novo (abriu o painel ou mudou a busca); senão, carrega a próxima página.
@@ -1299,9 +1320,7 @@ function openGifs() {
   fx.show(gifPanel, { y: 10, scale: 0.98 });
   gifButton.setAttribute("aria-expanded", "true");
   document.addEventListener("keydown", onGifKey, true);
-  // Abre onde parou. Sem resultados (primeira vez ou erro) ou com outra largura, monta de novo.
-  if (!gifGrid.querySelector(".gif-item") || gifs.columns.length !== gifColumnCount()) loadGifs(true);
-  if (matchMedia("(pointer: fine)").matches) gifSearch.focus({ preventScroll: true });
+  showGifTab(gifTab);
 }
 
 function closeGifs() {
@@ -1342,6 +1361,11 @@ gifResults.addEventListener("scroll", () => {
 }, { passive: true });
 
 gifGrid.addEventListener("click", (event) => {
+  const star = event.target.closest(".gif-save");
+  if (star) {
+    fx.press(star);
+    return saveSticker({ gif: star.previousElementSibling.gif });
+  }
   const item = event.target.closest(".gif-item");
   if (!item) return;
   send("", item.gif);
@@ -1351,6 +1375,143 @@ gifGrid.addEventListener("click", (event) => {
 
 document.addEventListener("click", (event) => {
   if (!event.target.closest("#gif-panel, #gif-button")) closeGifs();
+});
+
+// ---------- figurinhas ----------
+// A coleção de cada um (vem com o histórico e muda ao vivo nas outras abas da mesma pessoa): GIFs salvos e imagens. Fica
+// na aba Figurinhas do painel do GIF. Salva pela estrela de cada GIF, pelo menu de uma mensagem com GIF, foto ou
+// figurinha, ou criando de uma imagem do aparelho (reduzida a STICKER_SIDE px, com a transparência).
+
+const STICKER_SIDE = 512;
+const STICKER_SIZE = 150;
+// Mesmo limite do servidor (STICKER_FILE_MAX em lib/potato.php).
+const STICKER_FILE_MAX = 3e6;
+const pickSticker = $("#pick-sticker");
+let stickers = [];
+let gifTab = "gifs";
+let stickerEditing = false;
+
+function stickerCall(data) {
+  return new Promise((resolve) => {
+    if (!socket?.connected) {
+      toast("Sem conexão agora. Tente de novo em instantes.", "error");
+      return resolve(null);
+    }
+    socket.timeout(20000).emit("sticker", data, (error, result) => {
+      if (!error && result?.ok) {
+        setStickers(result.stickers);
+        return resolve(result);
+      }
+      toast(result?.error || "Não deu certo. Tente de novo.", "error");
+      sound.play("error");
+      resolve(null);
+    });
+  });
+}
+
+function setStickers(next) {
+  stickers = next || [];
+  if (!stickers.length) stickerEditing = false;
+  if (gifTab === "stickers") paintStickers();
+}
+
+async function saveSticker(data) {
+  const result = await stickerCall({ op: "add", ...data });
+  if (!result) return;
+  toast(result.already ? "Esse já está nas suas figurinhas" : "Salvo nas suas figurinhas", "ok", "sticker");
+  if (!result.already) sound.play("sparkle");
+}
+
+function paintStickers() {
+  const add = el("button", "sticker-item sticker-add");
+  add.type = "button";
+  add.dataset.stickerAdd = "1";
+  add.title = "Criar figurinha com uma imagem do aparelho";
+  add.append(icon("plus"), el("span", "", "Criar"));
+  const grid = $("#sticker-grid");
+  grid.classList.toggle("editing", stickerEditing);
+  grid.replaceChildren(...(stickerEditing ? [] : [add]), ...stickers.map((sticker) => {
+    const button = el("button", "sticker-item");
+    button.type = "button";
+    button.dataset.sticker = sticker.id;
+    button.title = stickerEditing ? "Tirar das figurinhas" : "Enviar figurinha";
+    const image = el("img");
+    image.src = sticker.url;
+    image.alt = "";
+    image.loading = "lazy";
+    image.decoding = "async";
+    button.append(image);
+    if (stickerEditing) button.append(el("span", "sticker-remove", "×"));
+    return button;
+  }));
+  $("#sticker-count").textContent = stickers.length ? `${stickers.length} ${stickers.length === 1 ? "figurinha" : "figurinhas"}` : "";
+  $("#sticker-edit").textContent = stickerEditing ? "Pronto" : "Organizar";
+  $("#sticker-edit").classList.toggle("hidden", !stickers.length);
+  $("#sticker-note").textContent = stickers.length ? "" : "Nenhuma figurinha ainda. Toque na estrela de um GIF, salve uma foto ou figurinha pelo menu da mensagem, ou crie com uma imagem do aparelho.";
+}
+
+function showGifTab(name) {
+  gifTab = name;
+  for (const button of gifPanel.querySelectorAll("[data-gif-tab]")) button.setAttribute("aria-selected", String(button.dataset.gifTab === name));
+  $("#gif-pane").classList.toggle("hidden", name !== "gifs");
+  $("#sticker-pane").classList.toggle("hidden", name !== "stickers");
+  if (name === "stickers") return paintStickers();
+  // Abre onde parou. Sem resultados (primeira vez ou erro) ou com outra largura, monta de novo.
+  if (!gifGrid.querySelector(".gif-item") || gifs.columns.length !== gifColumnCount()) loadGifs(true);
+  if (matchMedia("(pointer: fine)").matches) gifSearch.focus({ preventScroll: true });
+}
+
+gifPanel.querySelector(".gif-tabs").addEventListener("click", (event) => {
+  const tabButton = event.target.closest("[data-gif-tab]");
+  if (tabButton) showGifTab(tabButton.dataset.gifTab);
+});
+
+$("#sticker-edit").addEventListener("click", () => {
+  stickerEditing = !stickerEditing;
+  paintStickers();
+});
+
+$("#sticker-grid").addEventListener("click", (event) => {
+  if (event.target.closest("[data-sticker-add]")) return pickSticker.click();
+  const sticker = stickers.find((item) => item.id === event.target.closest("[data-sticker]")?.dataset.sticker);
+  if (!sticker) return;
+  if (stickerEditing) return stickerCall({ op: "delete", id: sticker.id });
+  send("", { url: sticker.url, width: sticker.width, height: sticker.height, title: "", sticker: true });
+  closeGifs();
+  if (matchMedia("(pointer: fine)").matches) messageInput.focus();
+});
+
+// GIF vai inteiro (para não perder a animação); foto é reduzida em WEBP, que guarda a transparência (sem WEBP, PNG).
+async function stickerBlob(file) {
+  if (file.type === "image/gif") return file;
+  const image = await readImage(file);
+  const scale = Math.min(1, STICKER_SIDE / Math.max(image.naturalWidth, image.naturalHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+  const context = canvas.getContext("2d");
+  context.imageSmoothingQuality = "high";
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/webp", 0.9));
+  if (!blob) throw new Error("Não deu para preparar essa imagem.");
+  return new File([blob], blob.type === "image/webp" ? "figurinha.webp" : "figurinha.png", { type: blob.type });
+}
+
+pickSticker.addEventListener("change", async () => {
+  const [file] = pickSticker.files;
+  pickSticker.value = "";
+  if (!file) return;
+  if (!socket?.connected) return toast("Sem conexão agora. Tente de novo em instantes.", "error");
+  try {
+    const blob = await stickerBlob(file);
+    if (blob.size > STICKER_FILE_MAX) throw new Error("Figurinha muito grande (até 3 MB).");
+    const uploaded = await uploadBlob(blob, blob.name, "A figurinha não subiu. Tente de novo.");
+    if (uploaded.kind !== "image") throw new Error("Escolha uma imagem (JPG, PNG, WEBP ou GIF).");
+    await saveSticker({ file: uploaded.key });
+  } catch (error) {
+    toast(error.message, "error");
+    sound.play("error");
+  }
 });
 
 // ---------- fotos e arquivos ----------
@@ -1623,6 +1784,10 @@ messagesEl.addEventListener("click", (event) => {
   if (action === "info") {
     closeTools();
     return openInfo(message);
+  }
+  if (action === "sticker") {
+    closeTools();
+    return saveSticker({ message: message.id });
   }
   if (action === "copy") {
     closeTools();
@@ -3319,7 +3484,12 @@ const THEMES = [
   { id: "roxo", label: "Roxo", bg: "#0f0d17", accent: "#b38dff" },
   { id: "azul", label: "Azul", bg: "#0a1017", accent: "#5cc8ff" },
   { id: "verde", label: "Verde", bg: "#0a120e", accent: "#5ee0a0" },
-  { id: "claro", label: "Claro", bg: "#f6f1e9", accent: "#f2b33d" }
+  { id: "claro", label: "Claro", bg: "#f6f1e9", accent: "#f2b33d" },
+  { id: "vinho", label: "Vinho", bg: "#140a0d", accent: "#e0567a" },
+  { id: "oceano", label: "Oceano", bg: "#06141a", accent: "#2fd6c8" },
+  { id: "coral", label: "Coral", bg: "#170e0b", accent: "#ff8a5c" },
+  // Natal: o site inteiro natalino (neve caindo, gorro nas fotos e luzinhas no topo).
+  { id: "natal", label: "Natal 🎄", bg: "#0f1411", accent: "#e8394b" }
 ];
 // false enquanto a escolha ainda não foi gravada no banco (sem conexão): ao reconectar, ela é enviada de novo.
 let themeSaved = true;
@@ -3341,6 +3511,190 @@ function applyTheme(id) {
     button.setAttribute("aria-pressed", String(button.dataset.themeChoice === theme.id));
   });
   tellParent({ type: "potato:theme", colors: themeColors() });
+  snow(theme.id === "natal");
+}
+
+// Contagem regressiva no topo (countdown_state em lib/potato.php): dias, horas, minutos e segundos até o dia (e a hora)
+// marcados, no horário deste aparelho. No dia, "É hoje!"; depois do dia, some. Tocar abre a edição (ou desliga).
+let countdown = null;
+let tripTimer = 0;
+
+function countdownTarget() {
+  if (!countdown) return null;
+  const [year, month, day] = countdown.day.split("-").map(Number);
+  const [hour, minute] = (countdown.time || "00:00").split(":").map(Number);
+  return new Date(year, month - 1, day, hour, minute);
+}
+
+function paintCountdown() {
+  clearTimeout(tripTimer);
+  const box = $("#countdown");
+  const target = countdownTarget();
+  const left = target ? target - Date.now() : 0;
+  const endOfDay = target ? new Date(target.getFullYear(), target.getMonth(), target.getDate() + 1) - Date.now() : 0;
+  box.classList.toggle("hidden", !target || endOfDay <= 0);
+  if (!target || endOfDay <= 0) return;
+  const when = new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "short" }).format(target);
+  $("#countdown-label").textContent = `${countdown.label} · ${when}${countdown.time ? ` às ${countdown.time}` : ""}`;
+  box.classList.toggle("today", left <= 0);
+  if (left <= 0) {
+    $("#countdown-time").textContent = "É hoje! 💛";
+  } else {
+    const seconds = Math.floor(left / 1000);
+    const days = Math.floor(seconds / 86400);
+    const pad = (value) => String(value).padStart(2, "0");
+    $("#countdown-time").textContent = `${days ? `${days} ${days === 1 ? "dia" : "dias"} · ` : ""}${pad(Math.floor(seconds / 3600) % 24)}h ${pad(Math.floor(seconds / 60) % 60)}m ${pad(seconds % 60)}s`;
+  }
+  tripTimer = setTimeout(paintCountdown, 1000 - (Date.now() % 1000));
+}
+
+function setCountdown(next) {
+  countdown = next || null;
+  paintCountdown();
+}
+
+$("#countdown").addEventListener("click", () => {
+  openSheet({
+    title: "Contagem regressiva",
+    icon: "plane",
+    fields: [
+      { name: "label", type: "text", label: "Para quê", value: countdown?.label ?? "Até a gente se ver", max: 60 },
+      { name: "day", type: "date", label: "Dia", value: countdown?.day ?? "" },
+      { name: "time", type: "time", label: "Hora (se quiser)", value: countdown?.time ?? "", optional: "Sem hora", fallback: "12:00" }
+    ],
+    onDelete: async () => {
+      const result = await countdownCall({ off: true });
+      if (result) setCountdown(null);
+      return Boolean(result);
+    },
+    deleteLabel: "Desligar",
+    onSubmit: async (values) => {
+      const result = await countdownCall(values);
+      if (!result) return false;
+      setCountdown(result.countdown);
+      toast("Contagem atualizada para os dois", "ok", "plane");
+      return true;
+    }
+  });
+});
+
+function countdownCall(data) {
+  return new Promise((resolve) => {
+    if (!socket?.connected) {
+      toast("Sem conexão agora. Tente de novo em instantes.", "error");
+      return resolve(null);
+    }
+    socket.timeout(15000).emit("countdown", data, (error, result) => {
+      if (!error && result?.ok) return resolve(result);
+      toast(result?.error || "Não deu certo. Tente de novo.", "error");
+      resolve(null);
+    });
+  });
+}
+
+// Tela da Watch Party (só neste aparelho): a conversa ao lado (o de sempre), o modo cinema (só o vídeo) ou a conversa
+// flutuando por cima do vídeo. Classe watch-<modo> no .app-shell.
+const WATCH_VIEWS = [["lado", "conversa ao lado"], ["cinema", "modo cinema (só o vídeo)"], ["flutuante", "conversa flutuante"]];
+const WATCH_VIEW_KEY = "potato.watchView";
+
+function paintWatchView() {
+  const current = WATCH_VIEWS.find(([id]) => id === store.get("localStorage", WATCH_VIEW_KEY)) || WATCH_VIEWS[0];
+  const shell = $(".app-shell");
+  shell.classList.remove(...WATCH_VIEWS.map(([id]) => `watch-${id}`));
+  shell.classList.add(`watch-${current[0]}`);
+  $("#watch-view").title = `Tela: ${current[1]}`;
+  return current;
+}
+
+$("#watch-view").addEventListener("click", () => {
+  const index = WATCH_VIEWS.indexOf(paintWatchView());
+  store.set("localStorage", WATCH_VIEW_KEY, WATCH_VIEWS[(index + 1) % WATCH_VIEWS.length][0]);
+  toast(`Tela: ${paintWatchView()[1]}`, "info", "tv");
+  sound.play("tap");
+});
+paintWatchView();
+
+// Visual da conversa (só neste aparelho): data-text (letra) e data-bubbles (balões) no <html>; o styles.css faz o resto.
+const LOOK_KEY = "potato.look";
+
+function paintLook() {
+  const look = store.get("localStorage", LOOK_KEY) || {};
+  for (const row of document.querySelectorAll("[data-look]")) {
+    const value = look[row.dataset.look] || "";
+    if (value) document.documentElement.dataset[row.dataset.look] = value;
+    else delete document.documentElement.dataset[row.dataset.look];
+    row.querySelectorAll("[data-look-value]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.lookValue === value)));
+  }
+}
+
+document.addEventListener("click", (event) => {
+  const choice = event.target.closest("[data-look-value]");
+  if (!choice) return;
+  store.set("localStorage", LOOK_KEY, { ...(store.get("localStorage", LOOK_KEY) || {}), [choice.closest("[data-look]").dataset.look]: choice.dataset.lookValue });
+  sound.play("tap");
+  paintLook();
+});
+paintLook();
+
+// Neve do tema Natal: um canvas por cima de tudo (sem pegar os toques), com flocos de tamanhos, velocidades e balanços
+// diferentes. Para com a página escondida; com "reduzir movimento" ligado, os flocos ficam parados.
+let snowfall = null;
+
+function snow(on) {
+  if (!on) {
+    if (snowfall) {
+      cancelAnimationFrame(snowfall.frame);
+      removeEventListener("resize", snowfall.resize);
+      snowfall.canvas.remove();
+      snowfall = null;
+    }
+    return;
+  }
+  if (snowfall) return;
+  const canvas = el("canvas", "snow");
+  canvas.setAttribute("aria-hidden", "true");
+  document.body.append(canvas);
+  const context = canvas.getContext("2d");
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let flakes = [];
+  const resize = () => {
+    const ratio = Math.min(2, devicePixelRatio || 1);
+    canvas.width = innerWidth * ratio;
+    canvas.height = innerHeight * ratio;
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    const count = Math.round(Math.min(110, innerWidth / 11));
+    flakes = Array.from({ length: count }, () => ({
+      x: Math.random() * innerWidth, y: Math.random() * innerHeight, r: 1 + Math.random() * 2.6,
+      speed: 0.35 + Math.random() * 0.9, sway: Math.random() * Math.PI * 2, star: Math.random() < 0.12
+    }));
+  };
+  const draw = () => {
+    context.clearRect(0, 0, innerWidth, innerHeight);
+    for (const flake of flakes) {
+      if (!still && !document.hidden) {
+        flake.y += flake.speed;
+        flake.sway += 0.012;
+        flake.x += Math.sin(flake.sway) * 0.4;
+        if (flake.y > innerHeight + 10) Object.assign(flake, { y: -10, x: Math.random() * innerWidth });
+      }
+      context.globalAlpha = 0.35 + flake.r / 5;
+      if (flake.star) {
+        context.font = `${8 + flake.r * 4}px sans-serif`;
+        context.fillStyle = "#ffffff";
+        context.fillText("❄", flake.x, flake.y);
+      } else {
+        context.beginPath();
+        context.arc(flake.x, flake.y, flake.r, 0, Math.PI * 2);
+        context.fillStyle = "#ffffff";
+        context.fill();
+      }
+    }
+    if (!still) snowfall.frame = requestAnimationFrame(draw);
+  };
+  snowfall = { canvas, resize, frame: 0 };
+  addEventListener("resize", resize);
+  resize();
+  draw();
 }
 
 // O tema fica na conta (no banco): vale em qualquer aparelho em que a pessoa entrar.
@@ -5408,7 +5762,9 @@ const QUALITY_KEY = "potato.quality";
 const QUALITY = {
   "720p": { width: 1280, height: 720, frameRate: 30, bitrate: 2_500_000, hint: "detail" },
   "1080p": { width: 1920, height: 1080, frameRate: 30, bitrate: 4_500_000, hint: "detail" },
-  "1080p60": { width: 1920, height: 1080, frameRate: 60, bitrate: 8_000_000, hint: "motion" }
+  "1080p60": { width: 1920, height: 1080, frameRate: 60, bitrate: 8_000_000, hint: "motion" },
+  "1440p": { width: 2560, height: 1440, frameRate: 30, bitrate: 9_000_000, hint: "detail" },
+  "1440p60": { width: 2560, height: 1440, frameRate: 60, bitrate: 14_000_000, hint: "motion" }
 };
 const canStream = nativeScreenAvailable() || Boolean(navigator.mediaDevices?.getDisplayMedia);
 
@@ -5422,7 +5778,28 @@ const myStream = $("#my-stream");
 const myStreamVideo = myStream.querySelector("video");
 const shareSheet = $("#share-sheet");
 const SHARE_AUDIO_KEY = "potato.shareAudio";
-const QUALITY_LABEL = { "720p": "720p", "1080p": "1080p", "1080p60": "1080p 60fps" };
+const QUALITY_LABEL = { "720p": "720p", "1080p": "1080p", "1080p60": "1080p 60fps", "1440p": "1440p", "1440p60": "1440p 60fps" };
+// Layout da chamada (só neste aparelho): grade (o de sempre), foco (a outra pessoa grande e você no canto), lado a
+// lado (com transmissão, as câmeras numa coluna ao lado da tela) ou só a outra pessoa.
+const CALL_LAYOUTS = [["grade", "Grade"], ["foco", "Foco na outra pessoa"], ["lado", "Tela e câmeras lado a lado"], ["sozinho", "Só a outra pessoa"]];
+const CALL_LAYOUT_KEY = "potato.callLayout";
+
+function paintCallLayout() {
+  const current = CALL_LAYOUTS.find(([id]) => id === store.get("localStorage", CALL_LAYOUT_KEY)) || CALL_LAYOUTS[0];
+  const panel = $("#call-panel");
+  panel.classList.remove(...CALL_LAYOUTS.map(([id]) => `layout-${id}`));
+  panel.classList.add(`layout-${current[0]}`);
+  $("#call-layout").title = `Layout: ${current[1]} (toque para trocar)`;
+  return current;
+}
+
+$("#call-layout").addEventListener("click", () => {
+  const index = CALL_LAYOUTS.findIndex(([id]) => `layout-${id}` === [...$("#call-panel").classList].find((name) => name.startsWith("layout-")));
+  store.set("localStorage", CALL_LAYOUT_KEY, CALL_LAYOUTS[(index + 1) % CALL_LAYOUTS.length][0]);
+  toast(`Layout: ${paintCallLayout()[1]}`, "info", "layout");
+  sound.play("tap");
+});
+paintCallLayout();
 const canPip = inAndroid || Boolean(document.pictureInPictureEnabled && streamVideo.requestPictureInPicture);
 const callInfo = $(".call-info");
 const callDock = $("#call-dock");
@@ -6579,6 +6956,27 @@ shareSheet.addEventListener("click", (event) => {
   }
 });
 
+// O botão de ligar abre o menu (voz, vídeo ou tela); escolher, tocar fora ou Esc fecha.
+const callMenu = $("#call-menu");
+const closeCallMenu = () => {
+  callMenu.classList.add("hidden");
+  $("#call-button").setAttribute("aria-expanded", "false");
+};
+$("#call-button").addEventListener("click", () => {
+  const open = callMenu.classList.contains("hidden");
+  if (!open) return closeCallMenu();
+  fx.show(callMenu, { y: -8, scale: 0.97 });
+  $("#call-button").setAttribute("aria-expanded", "true");
+});
+callMenu.addEventListener("click", (event) => {
+  if (event.target.closest("button")) closeCallMenu();
+});
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".call-pick")) closeCallMenu();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !callMenu.classList.contains("hidden")) closeCallMenu();
+});
 $("#audio-call").addEventListener("click", () => startCall("audio"));
 $("#video-call").addEventListener("click", () => startCall("video"));
 $("#share-screen").addEventListener("click", () => (call?.local.screen ? toast("Você já está transmitindo.") : openShare()));
@@ -6642,7 +7040,10 @@ const EVENT_ICONS = [["calendar", "Compromisso"], ["heart", "Encontro"], ["film"
 const GOAL_ICONS = [["sparkles", "Sonho"], ["palmtree", "Praia"], ["plane", "Viagem"], ["home", "Casa"], ["dog", "Bichinho"], ["gem", "Aliança"], ["car", "Carro"], ["graduation", "Estudo"], ["piggy", "Dinheiro"], ["gamepad", "Jogo"], ["chef", "Cozinha"], ["globe", "Mundo"]];
 const REPEAT_LABEL = { none: "Não repete", weekly: "Toda semana", monthly: "Todo mês", yearly: "Todo ano" };
 const REMIND_OPTIONS = [["", "Sem lembrete"], [0, "Na hora"], [15, "15 minutos antes"], [30, "30 minutos antes"], [60, "1 hora antes"], [120, "2 horas antes"], [1440, "1 dia antes"]];
-const PAPERS = [["creme", "Creme"], ["rosa", "Rosa"], ["azul", "Azul"], ["lilas", "Lilás"], ["verde", "Verde"]];
+const PAPERS = [["creme", "Creme"], ["rosa", "Rosa"], ["azul", "Azul"], ["lilas", "Lilás"], ["verde", "Verde"], ["branco", "Branco"], ["amarelo", "Amarelo"], ["pessego", "Pêssego"], ["kraft", "Kraft"], ["noite", "Noite"]];
+// Fundo e borda do papel (mesmas listas do servidor; o primeiro é o padrão).
+const LETTER_PATTERNS = [["linhas", "Pautado"], ["liso", "Liso"], ["quadriculado", "Quadriculado"], ["pontos", "Pontinhos"], ["coracoes", "Corações"], ["estrelas", "Estrelas"]];
+const LETTER_BORDERS = [["nenhuma", "Sem borda"], ["simples", "Simples"], ["dupla", "Dupla"], ["pontilhada", "Pontilhada"], ["rosa", "Rosinha"]];
 // Letras da cartinha (mesma lista do servidor; a primeira é o padrão) e quantas fotos e áudios cabem nela.
 const LETTER_FONTS = [["classica", "Clássica"], ["mao", "À mão"], ["cursiva", "Cursiva"], ["bilhete", "Bilhetinho"], ["maquina", "Máquina"], ["moderna", "Moderna"]];
 const LETTER_PHOTOS = 6;
@@ -8037,7 +8438,8 @@ function paintLetters() {
 function letterCard(letter) {
   const mine = letter.owner === me;
   const fresh = !mine && !letter.readAt;
-  const card = el("button", `letter-card paper-${letter.paper} font-${letter.font || LETTER_FONTS[0][0]}${fresh ? " fresh" : ""}`);
+  const card = el("button", `letter-card ${paperClasses(letter)}${fresh ? " fresh" : ""}`);
+  paintPaperColor(card, letter.paperColor);
   card.type = "button";
   card.dataset.letter = letter.id;
   const text = el("span", "letter-text");
@@ -8091,7 +8493,8 @@ async function openLetter(id) {
 function paintLetter(letter) {
   letterOpen = letter;
   const mine = letter.owner === me;
-  $("#letter-paper").className = `letter-paper paper-${letter.paper} font-${letter.font || LETTER_FONTS[0][0]}`;
+  $("#letter-paper").className = `letter-paper ${paperClasses(letter)}`;
+  paintPaperColor($("#letter-paper"), letter.paperColor);
   // Os áudios ficam logo embaixo do título (dá para ouvir enquanto lê) e as fotos, como polaroides, depois do texto.
   const playing = playback.key;
   $("#letter-audios").replaceChildren(...(letter.audios || []).map((audio) => letterVoice(audio, `letter:${audio.key}`)));
@@ -8110,8 +8513,12 @@ function paintLetter(letter) {
   }));
   $("#letter-to").textContent = letter.to === me ? "Para você" : `Para ${letter.to || "o seu amor"}`;
   $("#letter-title").textContent = letter.title;
-  $("#letter-body").textContent = letter.body ?? "Abrindo a cartinha…";
+  // Formatada: o HTML que o servidor já filtrou (clean_letter_html). As de antes são texto puro.
+  if (letter.html) $("#letter-body").innerHTML = letter.html;
+  else $("#letter-body").textContent = letter.body ?? "Abrindo a cartinha…";
   $("#letter-body").classList.toggle("loading", letter.body == null);
+  $("#letter-decor").replaceChildren(...(letter.decor || []).map((piece) => decorNode(piece)));
+  $("#letter-page").classList.toggle("has-decor", Boolean(letter.decor?.length));
   $("#letter-sign").textContent = `Com amor, ${letter.owner}`;
   const read = mine ? (letter.readAt ? ` · lida em ${longDate(letter.readAt)} às ${time(letter.readAt)}` : " · ainda não lida") : "";
   $("#letter-state").textContent = `${longDate(letter.createdAt)}${letter.edited ? " · editada" : ""}${read}`;
@@ -8127,10 +8534,27 @@ function closeLetter() {
 
 function writeLetter(letter = null) {
   const draft = letter ? null : store.get("localStorage", LETTER_DRAFT_KEY);
-  const paper = letter?.paper || draft?.paper || "creme";
-  const font = letter?.font || draft?.font || LETTER_FONTS[0][0];
-  // O campo do texto já mostra o papel e a letra escolhidos.
-  const restyle = (prefix) => (value) => swapClass(sheetForm.querySelector(".letter-input"), prefix, value);
+  const style = {
+    paper: letter?.paper || draft?.paper || "creme",
+    font: letter?.font || draft?.font || LETTER_FONTS[0][0],
+    pattern: letter?.pattern || draft?.pattern || LETTER_PATTERNS[0][0],
+    border: letter?.border || draft?.border || LETTER_BORDERS[0][0],
+    paperColor: letter ? letter.paperColor || "" : draft?.paperColor || ""
+  };
+  // O papel do editor já mostra o papel, a letra, o fundo e a borda escolhidos. Escolher um papel tira a cor própria.
+  const restyle = (key) => (value) => {
+    style[key] = value;
+    if (key === "paper") style.paperColor = "";
+    paintEditorPaper();
+  };
+  const paintEditorPaper = () => {
+    const page = sheetForm.querySelector(".letter-page");
+    if (!page) return;
+    page.className = `letter-page ${paperClasses(style)}`;
+    paintPaperColor(page, style.paperColor);
+  };
+  // Cartinha antiga (texto puro): vira HTML com as quebras de linha.
+  const startHtml = letter ? letter.html || escapeHtml(letter.body || "").replace(/\n/g, "<br>") : draft?.html || escapeHtml(draft?.body || "").replace(/\n/g, "<br>");
   openSheet({
     title: letter ? "Editar cartinha" : `Cartinha para ${peerName || "o seu amor"}`,
     icon: "mail",
@@ -8138,19 +8562,22 @@ function writeLetter(letter = null) {
     submit: letter ? "Salvar" : "Enviar",
     fields: [
       { name: "title", type: "text", label: "Título", value: letter?.title ?? draft?.title, placeholder: "Para o meu amor", max: 120 },
-      { name: "paper", type: "chips", label: "Papel", value: paper, options: PAPERS.map(([value, label]) => [value, label, `paper-${value}`]), onPick: restyle("paper-") },
-      { name: "font", type: "chips", label: "Letra", value: font, options: LETTER_FONTS.map(([value, label]) => [value, label, `font-chip font-${value}`]), onPick: restyle("font-") },
-      { name: "body", type: "textarea", value: letter?.body ?? draft?.body, placeholder: "Escreva com o coração…", max: 20000, rows: 12, className: `letter-input paper-${paper} font-${font}` },
-      { name: "photos", type: "photos", label: "Fotos", value: letter?.photos, limit: LETTER_PHOTOS },
+      { name: "body", type: "rich", value: { html: startHtml, decor: letter?.decor || [] }, style, onPaperColor: (color) => { style.paperColor = color; paintEditorPaper(); } },
+      { name: "paper", type: "chips", label: "Papel", value: style.paper, options: PAPERS.map(([value, label]) => [value, label, `paper-${value}`]), onPick: restyle("paper") },
+      { name: "pattern", type: "chips", label: "Fundo", value: style.pattern, options: LETTER_PATTERNS.map(([value, label]) => [value, label]), onPick: restyle("pattern") },
+      { name: "border", type: "chips", label: "Borda", value: style.border, options: LETTER_BORDERS.map(([value, label]) => [value, label]), onPick: restyle("border") },
+      { name: "font", type: "chips", label: "Letra", value: style.font, options: LETTER_FONTS.map(([value, label]) => [value, label, `font-chip font-${value}`]), onPick: restyle("font") },
+      { name: "photos", type: "photos", label: "Fotos no fim (polaroides)", value: letter?.photos, limit: LETTER_PHOTOS },
       { name: "audios", type: "audios", label: "Áudios", value: letter?.audios, limit: LETTER_AUDIOS, hint: "Uma mensagem de voz ou uma música (MP3, M4A, OGG ou WAV)." }
     ],
-    // O rascunho (sem as fotos e os áudios, que ainda não subiram) fica guardado neste aparelho até a cartinha ser enviada.
-    onChange: letter ? null : ({ photos, audios, ...values }) => store.set("localStorage", LETTER_DRAFT_KEY, values),
-    onSubmit: async ({ photos, audios, ...values }) => {
+    // O rascunho (o texto formatado e o papel; sem as fotos, os áudios e as imagens soltas, que ainda não subiram) fica
+    // guardado neste aparelho até a cartinha ser enviada.
+    onChange: letter ? null : ({ photos, audios, body, ...values }) => store.set("localStorage", LETTER_DRAFT_KEY, { ...values, paperColor: style.paperColor, html: body.html }),
+    onSubmit: async ({ photos, audios, body, ...values }) => {
       if (sheetForm.querySelector('[data-field="audios"]')?.rec) throw new Error("Pare a gravação antes de enviar.");
-      if (!values.body && !photos.length && !audios.length) throw new Error("Escreva alguma coisa na cartinha.");
+      if (!body.text && !photos.length && !audios.length && !body.decor.length) throw new Error("Escreva alguma coisa na cartinha.");
       // As fotos e os áudios novos sobem antes, um de cada vez (se o envio falhar, o que já subiu não sobe de novo).
-      for (const photo of photos) {
+      for (const photo of [...photos, ...body.decor.filter((piece) => piece.type === "photo")]) {
         if (!photo.file) continue;
         photo.key = (await uploadPhoto(photo.file)).key;
         delete photo.file;
@@ -8164,13 +8591,16 @@ function writeLetter(letter = null) {
         op: "letter:save",
         id: letter?.id,
         ...values,
+        paperColor: style.paperColor,
+        html: body.html,
+        decor: body.decor.map(({ type, key, url, x, y, w, rot, z, frame }) => ({ type, key, url, x, y, w, rot, z, frame })),
         photos: photos.map(({ key }) => ({ key })),
         audios: audios.map(({ key, duration, peaks, voice }) => ({ key, duration, peaks, voice }))
       });
       if (!result) return false;
       if (!letter) store.remove("localStorage", LETTER_DRAFT_KEY);
-      const { body, ...meta } = result.item;
-      upsert(us.letters, { ...meta, preview: body.replace(/\s+/g, " ").slice(0, 140) });
+      const { body: text, html, decor, ...meta } = result.item;
+      upsert(us.letters, { ...meta, preview: text.replace(/\s+/g, " ").slice(0, 140) });
       paintLetters();
       if (!letter) {
         toast(`Cartinha enviada para ${peerName || "o seu amor"}`, "ok", "mail");
@@ -8182,12 +8612,337 @@ function writeLetter(letter = null) {
   });
 }
 
-// Troca a classe de um prefixo (paper-…, font-…) por outra.
-function swapClass(node, prefix, value) {
-  if (!node) return;
-  node.classList.remove(...[...node.classList].filter((name) => name.startsWith(prefix)));
-  node.classList.add(prefix + value);
+// ---- editor da cartinha (como num Word) ----
+// O texto é um contenteditable com a barra de formatação (os comandos de edição do próprio navegador, com o estilo em
+// CSS); o servidor filtra o HTML (clean_letter_html). Por cima do papel ficam as imagens e figurinhas soltas (decor),
+// cada uma onde a pessoa deixou: arrastar move, a alça do canto muda o tamanho e a de cima gira; a barrinha dela troca
+// a moldura, traz para frente e tira. As posições são frações do papel, então valem em qualquer tela.
+
+const EDITOR_FONTS = [["Georgia", "Clássica"], ["Caveat", "À mão"], ["Dancing Script", "Cursiva"], ["Patrick Hand", "Bilhetinho"], ["Special Elite", "Máquina"], ["Poppins", "Moderna"]];
+const EDITOR_SIZES = [["2", "Pequena"], ["3", "Normal"], ["4", "Média"], ["5", "Grande"], ["6", "Enorme"], ["7", "Gigante"]];
+const DECOR_FRAMES = ["none", "polaroid", "round", "tape", "shadow"];
+const DECOR_FRAME_NAMES = { none: "Sem moldura", polaroid: "Polaroide", round: "Redonda", tape: "Fita", shadow: "Sombra" };
+// Mesmo limite do servidor (LETTER_DECOR em lib/potato.php).
+const LETTER_DECOR = 16;
+// A seleção do texto, guardada: escolher a fonte, o tamanho ou a cor tira o foco do texto.
+let editorRange = null;
+
+const escapeHtml = (text) => text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+const paperClasses = (letter) => `paper-${letter.paper || "creme"} font-${letter.font || LETTER_FONTS[0][0]} pattern-${letter.pattern || "linhas"} border-${letter.border || "nenhuma"}`;
+
+// Cor própria do papel: a tinta fica escura ou clara conforme o papel, e as linhas do fundo, uma mistura das duas.
+function paintPaperColor(node, color) {
+  for (const name of ["--paper", "--paper-ink", "--paper-line"]) node.style.removeProperty(name);
+  if (!/^#[0-9a-f]{6}$/i.test(color || "")) return;
+  const [r, g, b] = [1, 3, 5].map((start) => parseInt(color.slice(start, start + 2), 16));
+  const ink = 0.299 * r + 0.587 * g + 0.114 * b > 150 ? "#3a2f26" : "#fdf6ff";
+  node.style.setProperty("--paper", color);
+  node.style.setProperty("--paper-ink", ink);
+  node.style.setProperty("--paper-line", `color-mix(in srgb, ${ink} 18%, ${color})`);
 }
+
+// Uma imagem ou figurinha solta no papel (no editor, com as alças e a barrinha quando está escolhida).
+function decorNode(piece, index = -1, picked = false) {
+  const node = el("div", `decor-item frame-${piece.frame || "none"}${picked ? " picked" : ""}`);
+  node.style.left = `${piece.x * 100}%`;
+  node.style.top = `${piece.y * 100}%`;
+  node.style.width = `${piece.w * 100}%`;
+  node.style.zIndex = String(piece.z || 1);
+  node.style.transform = `translate(-50%, -50%) rotate(${piece.rot || 0}deg)`;
+  const image = el("img");
+  image.src = piece.url;
+  image.alt = "";
+  image.draggable = false;
+  if (piece.width && piece.height) image.style.aspectRatio = `${piece.width} / ${piece.height}`;
+  node.append(image);
+  if (index < 0) {
+    // Na cartinha aberta, a foto abre grande.
+    if (piece.type === "photo") node.dataset.photo = piece.url;
+    return node;
+  }
+  node.dataset.decor = String(index);
+  if (picked) {
+    const bar = el("div", "decor-bar");
+    for (const [action, iconName, title] of [["rotate", "rotate-ccw", "Girar"], ["frame", "frame", `Moldura: ${DECOR_FRAME_NAMES[piece.frame || "none"]}`], ["front", "layers", "Trazer para a frente"], ["remove", "trash", "Tirar do papel"]]) {
+      const button = el("button", "decor-act");
+      button.type = "button";
+      button.dataset.decorAct = action;
+      button.title = title;
+      button.setAttribute("aria-label", title);
+      button.append(icon(iconName));
+      bar.append(button);
+    }
+    node.append(bar, el("span", "decor-handle decor-resize"), el("span", "decor-handle decor-rotate"));
+  }
+  return node;
+}
+
+function paintDecor(wrap) {
+  wrap.querySelector(".letter-decor").replaceChildren(...wrap.decor.map((piece, index) => decorNode(piece, index, index === wrap.picked)));
+}
+
+function addDecor(wrap, piece) {
+  if (wrap.decor.length >= LETTER_DECOR) return toast(`Cabem até ${LETTER_DECOR} imagens soltas no papel.`);
+  const z = Math.min(99, Math.max(0, ...wrap.decor.map((item) => item.z || 1)) + 1);
+  // Cada nova entra num canto diferente (dá para arrastar depois).
+  const corners = [[0.8, 0.12], [0.2, 0.12], [0.8, 0.88], [0.2, 0.88], [0.5, 0.5]];
+  const [x, y] = corners[wrap.decor.length % corners.length];
+  wrap.decor.push({ x, y, rot: x > 0.5 ? 5 : -5, z, ...piece });
+  wrap.picked = wrap.decor.length - 1;
+  paintDecor(wrap);
+  sound.play("tap");
+}
+
+async function addDecorPhoto(wrap, file) {
+  if (!file.type.startsWith("image/")) return toast("Escolha uma imagem.", "error");
+  try {
+    const image = await readImage(file);
+    addDecor(wrap, { type: "photo", file, url: URL.createObjectURL(file), width: image.naturalWidth, height: image.naturalHeight, w: 0.34, frame: "polaroid" });
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+function richCommand(wrap, command, value = null) {
+  const editor = wrap.querySelector(".letter-rich");
+  editor.focus({ preventScroll: true });
+  if (editorRange && editor.contains(editorRange.startContainer)) {
+    const selection = getSelection();
+    selection.removeAllRanges();
+    selection.addRange(editorRange);
+  }
+  document.execCommand("styleWithCSS", false, true);
+  // O marca-texto é hiliteColor no Chrome e no Firefox; o Safari antigo só conhece backColor.
+  if (!document.execCommand(command, false, value) && command === "hiliteColor") document.execCommand("backColor", false, value);
+  paintRichState(wrap);
+  sheetChanged();
+}
+
+// Os botões de negrito, itálico… acesos quando o texto escolhido já tem aquilo.
+function paintRichState(wrap) {
+  for (const button of wrap.querySelectorAll("[data-state]")) {
+    let on = false;
+    try {
+      on = document.queryCommandState(button.dataset.state);
+    } catch {}
+    button.setAttribute("aria-pressed", String(on));
+  }
+}
+
+function richField(wrap, field) {
+  wrap.decor = (field.value.decor || []).map((piece) => ({ ...piece }));
+  wrap.picked = -1;
+  const bar = el("div", "rich-bar");
+  const select = (className, label, options, command) => {
+    const node = el("select", `rich-select ${className}`);
+    node.title = label;
+    node.setAttribute("aria-label", label);
+    node.append(Object.assign(el("option", "", label), { value: "", disabled: true, selected: true }));
+    for (const [value, text] of options) node.append(Object.assign(el("option", "", text), { value }));
+    node.addEventListener("change", () => {
+      if (node.value) richCommand(wrap, command, node.value);
+      node.selectedIndex = 0;
+    });
+    return node;
+  };
+  const button = (iconName, title, action, value = "", state = "") => {
+    const node = el("button", "rich-button");
+    node.type = "button";
+    node.title = title;
+    node.setAttribute("aria-label", title);
+    node.dataset.rich = action;
+    if (value) node.dataset.value = value;
+    if (state) {
+      node.dataset.state = state;
+      node.setAttribute("aria-pressed", "false");
+    }
+    if (iconName.length > 2) node.append(icon(iconName));
+    else node.append(el("span", `rich-glyph glyph-${action}`, iconName));
+    return node;
+  };
+  const color = (iconName, title, command, start) => {
+    const label = el("label", "rich-button rich-color");
+    label.title = title;
+    const input = el("input");
+    input.type = "color";
+    input.value = start;
+    input.setAttribute("aria-label", title);
+    input.addEventListener("input", () => {
+      label.style.setProperty("--swatch", input.value);
+      if (command === "paper") field.onPaperColor?.(input.value);
+      else richCommand(wrap, command, input.value);
+    });
+    label.style.setProperty("--swatch", start);
+    label.append(iconName.length > 2 ? icon(iconName) : el("span", "rich-glyph", iconName), input);
+    return label;
+  };
+  const group = (...nodes) => {
+    const node = el("div", "rich-group");
+    node.append(...nodes);
+    return node;
+  };
+  const photoInput = el("input");
+  photoInput.type = "file";
+  photoInput.accept = "image/*";
+  photoInput.hidden = true;
+  photoInput.addEventListener("change", () => {
+    const [file] = photoInput.files;
+    photoInput.value = "";
+    if (file) addDecorPhoto(wrap, file);
+  });
+  bar.append(
+    group(select("rich-font", "Letra", EDITOR_FONTS.map(([value, text]) => [value, text]), "fontName"), select("rich-size", "Tamanho", EDITOR_SIZES, "fontSize")),
+    group(button("B", "Negrito", "bold", "", "bold"), button("I", "Itálico", "italic", "", "italic"), button("U", "Sublinhado", "underline", "", "underline"), button("S", "Riscado", "strikeThrough", "", "strikeThrough")),
+    group(color("A", "Cor da letra", "foreColor", "#e2457b"), color("highlighter", "Marca-texto", "hiliteColor", "#fff27a"), color("palette", "Cor do papel", "paper", field.style.paperColor || "#fff4df")),
+    group(button("align-left", "Alinhar à esquerda", "justifyLeft"), button("align-center", "Centralizar", "justifyCenter"), button("align-right", "Alinhar à direita", "justifyRight"), button("align-justify", "Justificar", "justifyFull")),
+    group(button("list", "Lista", "insertUnorderedList"), button("list-ordered", "Lista numerada", "insertOrderedList"), button("T", "Título", "formatBlock", "h2"), button("eraser", "Tirar a formatação", "removeFormat")),
+    group(button("image", "Imagem solta no papel", "photo"), button("sticker", "Figurinha no papel", "sticker"), photoInput),
+    group(button("undo", "Desfazer", "undo"), button("redo", "Refazer", "redo"))
+  );
+  const page = el("div", `letter-page ${paperClasses(field.style)}`);
+  paintPaperColor(page, field.style.paperColor);
+  const editor = el("div", "letter-rich");
+  editor.contentEditable = "true";
+  editor.setAttribute("role", "textbox");
+  editor.setAttribute("aria-multiline", "true");
+  editor.setAttribute("aria-label", "Texto da cartinha");
+  editor.dataset.placeholder = "Escreva com o coração…";
+  editor.innerHTML = field.value.html || "";
+  editor.addEventListener("input", () => {
+    // Apagou tudo: sem o <br> que sobra, o "Escreva com o coração…" volta.
+    if (!editor.textContent.trim() && !editor.querySelector("li")) editor.innerHTML = "";
+  });
+  // Colar vem sem a formatação de fora (o texto puro); imagem colada vira imagem solta no papel.
+  editor.addEventListener("paste", (event) => {
+    const image = [...(event.clipboardData?.files || [])].find((file) => file.type.startsWith("image/"));
+    const text = event.clipboardData?.getData("text/plain");
+    if (!image && text == null) return;
+    event.preventDefault();
+    if (image) return addDecorPhoto(wrap, image);
+    document.execCommand("insertText", false, text);
+  });
+  editor.addEventListener("keyup", () => paintRichState(wrap));
+  editor.addEventListener("mouseup", () => paintRichState(wrap));
+  const decor = el("div", "letter-decor editing");
+  page.append(editor, decor);
+  const stickerPicker = el("div", "decor-stickers hidden");
+  wrap.append(bar, stickerPicker, page);
+  paintDecor(wrap);
+
+  // Os botões da barra não tiram o foco do texto (a seleção continua lá).
+  bar.addEventListener("mousedown", (event) => {
+    if (event.target.closest("button")) event.preventDefault();
+  });
+  bar.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-rich]");
+    if (!target) return;
+    const action = target.dataset.rich;
+    if (action === "photo") return photoInput.click();
+    if (action === "sticker") {
+      stickerPicker.classList.toggle("hidden");
+      if (stickerPicker.classList.contains("hidden")) return;
+      stickerPicker.replaceChildren(...(stickers.length ? stickers.map((sticker) => {
+        const pick = el("button", "sticker-item");
+        pick.type = "button";
+        pick.dataset.stickerId = sticker.id;
+        pick.title = "Colocar no papel";
+        const image = el("img");
+        image.src = sticker.url;
+        image.alt = "";
+        image.loading = "lazy";
+        pick.append(image);
+        return pick;
+      }) : [el("p", "gif-note", "Você ainda não tem figurinhas. Salve algumas na conversa (no painel do GIF, aba Figurinhas).")]));
+      return;
+    }
+    // Título: liga e desliga.
+    if (action === "formatBlock") {
+      const block = getSelection().anchorNode?.parentElement?.closest("h2");
+      return richCommand(wrap, "formatBlock", block && editor.contains(block) ? "div" : "h2");
+    }
+    richCommand(wrap, action, target.dataset.value || null);
+  });
+  stickerPicker.addEventListener("click", (event) => {
+    const sticker = stickers.find((item) => item.id === event.target.closest("[data-sticker-id]")?.dataset.stickerId);
+    if (!sticker) return;
+    stickerPicker.classList.add("hidden");
+    addDecor(wrap, { type: "sticker", url: sticker.url, width: sticker.width, height: sticker.height, w: 0.24, frame: "none" });
+  });
+
+  // Barrinha da imagem escolhida.
+  decor.addEventListener("click", (event) => {
+    const action = event.target.closest("[data-decor-act]")?.dataset.decorAct;
+    const piece = wrap.decor[wrap.picked];
+    if (!action || !piece) return;
+    if (action === "rotate") piece.rot = ((Math.round((piece.rot || 0) / 15) * 15 + 15 + 180) % 360) - 180;
+    if (action === "frame") piece.frame = DECOR_FRAMES[(DECOR_FRAMES.indexOf(piece.frame || "none") + 1) % DECOR_FRAMES.length];
+    if (action === "front") piece.z = Math.min(99, Math.max(...wrap.decor.map((item) => item.z || 1)) + 1);
+    if (action === "remove") {
+      wrap.decor.splice(wrap.picked, 1);
+      wrap.picked = -1;
+    }
+    paintDecor(wrap);
+  });
+  // Arrastar: move, muda o tamanho (alça do canto) ou gira (alça de cima). Tocar fora solta a imagem escolhida.
+  page.addEventListener("pointerdown", (event) => {
+    const node = event.target.closest(".decor-item");
+    if (!node) {
+      if (wrap.picked >= 0) {
+        wrap.picked = -1;
+        paintDecor(wrap);
+      }
+      return;
+    }
+    if (event.target.closest("[data-decor-act]")) return;
+    event.preventDefault();
+    const index = Number(node.dataset.decor);
+    if (wrap.picked !== index) {
+      wrap.picked = index;
+      paintDecor(wrap);
+    }
+    const piece = wrap.decor[index];
+    const rect = page.getBoundingClientRect();
+    const mode = event.target.closest(".decor-resize") ? "resize" : event.target.closest(".decor-rotate") ? "rotate" : "move";
+    const start = { x: event.clientX, y: event.clientY, px: piece.x, py: piece.y, w: piece.w };
+    const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
+    const move = (moved) => {
+      const dx = moved.clientX - start.x;
+      const dy = moved.clientY - start.y;
+      if (mode === "move") {
+        piece.x = clamp(start.px + dx / rect.width, 0, 1);
+        piece.y = clamp(start.py + dy / rect.height, 0, 1);
+      } else if (mode === "resize") {
+        // Preso no centro: o canto andar dx aumenta a largura em 2·dx.
+        piece.w = clamp(start.w + (2 * dx) / rect.width, 0.06, 1);
+      } else {
+        const cx = rect.left + piece.x * rect.width;
+        const cy = rect.top + piece.y * rect.height;
+        piece.rot = Math.round((Math.atan2(moved.clientY - cy, moved.clientX - cx) * 180) / Math.PI + 90);
+        if (piece.rot > 180) piece.rot -= 360;
+      }
+      const current = decor.querySelector(`[data-decor="${index}"]`);
+      if (!current) return;
+      current.style.left = `${piece.x * 100}%`;
+      current.style.top = `${piece.y * 100}%`;
+      current.style.width = `${piece.w * 100}%`;
+      current.style.transform = `translate(-50%, -50%) rotate(${piece.rot || 0}deg)`;
+    };
+    const stop = () => {
+      removeEventListener("pointermove", move);
+      removeEventListener("pointerup", stop);
+      removeEventListener("pointercancel", stop);
+    };
+    addEventListener("pointermove", move);
+    addEventListener("pointerup", stop);
+    addEventListener("pointercancel", stop);
+  });
+}
+
+document.addEventListener("selectionchange", () => {
+  const selection = getSelection();
+  const editor = sheetForm.querySelector(".letter-rich");
+  if (editor && selection?.rangeCount && editor.contains(selection.anchorNode)) editorRange = selection.getRangeAt(0).cloneRange();
+});
 
 // Player de um áudio da cartinha: o mesmo das mensagens de voz, com o nome em cima (música: o nome do arquivo).
 function letterVoice(audio, key) {
@@ -8381,7 +9136,7 @@ function openSheet({ title, icon: iconName = "sparkles", fields, submit = "Salva
   fx.incoming(sheetForm);
   document.addEventListener("keydown", onSheetKey, true);
   const focus = sheetForm.querySelector("[data-autofocus]") || (matchMedia("(pointer: fine)").matches && sheetForm.querySelector(".field-input:not([type=date]):not([type=time]):not(select)"));
-  focus?.focus();
+  if (focus) focus.focus();
 }
 
 function closeSheet() {
@@ -8476,6 +9231,10 @@ function fieldNode(field) {
       wrap.append(node);
       break;
     }
+    // O editor da cartinha (texto formatado e imagens soltas no papel).
+    case "rich":
+      richField(wrap, field);
+      break;
     case "select": {
       const node = input("select");
       for (const [value, label] of field.options) {
@@ -8758,6 +9517,11 @@ function readSheet() {
       case "photos":
         values[field.name] = wrap.photos;
         break;
+      case "rich": {
+        const editor = wrap.querySelector(".letter-rich");
+        values[field.name] = { html: editor.innerHTML, text: editor.innerText.trim(), decor: wrap.decor };
+        break;
+      }
       case "audios":
         values[field.name] = wrap.audios;
         break;
@@ -8992,9 +9756,13 @@ window.potatoOpen = (section) => {
 // provável, isso ou aquilo, perguntinha) se jogam no próprio cartão da conversa; os de tabuleiro (velha, dama,
 // memória e stop) na mesinha, que abre por cima e acompanha as jogadas ao vivo.
 
-const GAME_NAMES = { vd: "Verdade ou desafio", quem: "Quem é mais provável?", isso: "Isso ou aquilo", pergunta: "Perguntinha", velha: "Jogo da velha", dama: "Dama", memoria: "Jogo da memória", stop: "Stop" };
-const GAME_ICONS = { vd: "dice", quem: "users", isso: "split", pergunta: "question", velha: "hash", dama: "crown", memoria: "brain", stop: "hand" };
-const BOARD_GAMES = ["velha", "dama", "memoria", "stop"];
+const GAME_NAMES = { vd: "Verdade ou desafio", quem: "Quem é mais provável?", isso: "Isso ou aquilo", pergunta: "Perguntinha", velha: "Jogo da velha", dama: "Dama", memoria: "Jogo da memória", stop: "Stop", linha4: "4 em linha", forca: "Forca" };
+const GAME_ICONS = { vd: "dice", quem: "users", isso: "split", pergunta: "question", velha: "hash", dama: "crown", memoria: "brain", stop: "hand", linha4: "connect", forca: "gallows" };
+const BOARD_GAMES = ["velha", "dama", "memoria", "stop", "linha4", "forca"];
+// Modo +18 (🔥, só neste aparelho): as cartas desses jogos vêm do baralho apimentado (SPICY_GAMES em lib/potato.php).
+const SPICY_GAMES = ["vd", "quem", "isso", "pergunta"];
+const SPICY_KEY = "potato.spicy";
+const spicyOn = () => store.get("localStorage", SPICY_KEY) === true;
 const GAME_PICKS_KEY = "potato.gamePicks";
 const STOP_DRAFT_KEY = "potato.stopDraft";
 // O que você escolheu em cada jogo de votar ou responder (o servidor só mostra quando os dois tiverem ido).
@@ -9029,6 +9797,7 @@ function myTurn(game) {
 
 // A seção de jogos: o placar, só as partidas esperando você (das mensagens já carregadas) e os jogos para começar.
 function paintGames() {
+  paintSpicy();
   $('[data-game-hint="vd"]').textContent = `${peerName || "A outra pessoa"} escolhe: verdade ou desafio. Perguntas e desafios fofinhos.`;
   const waiting = loaded().filter((message) => message.game && !message.deleted && myTurn(message.game)).reverse();
   $("#game-live-wrap").classList.toggle("hidden", !waiting.length);
@@ -9113,18 +9882,38 @@ function paintScore() {
   shownScore = key;
 }
 
+function paintSpicy() {
+  const on = spicyOn();
+  $("#spicy-toggle").setAttribute("aria-pressed", String(on));
+  usView.querySelector('[data-pane="jogos"]').classList.toggle("spicy", on);
+}
+
+async function toggleSpicy() {
+  if (!spicyOn()) {
+    const ok = await confirmDialog({ title: "Ligar o modo +18?", text: "Verdade ou desafio, quem é mais provável, isso ou aquilo e perguntinha passam a vir com cartas apimentadas, só para o casal. Só para maiores de 18 anos.", confirm: "Ligar 🔥" });
+    if (!ok) return;
+    store.set("localStorage", SPICY_KEY, true);
+    sound.play("sparkle");
+  } else {
+    store.remove("localStorage", SPICY_KEY);
+    sound.play("tap");
+  }
+  paintSpicy();
+}
+
 usView.querySelector('[data-pane="jogos"]').addEventListener("click", (event) => {
+  if (event.target.closest("#spicy-toggle")) return toggleSpicy();
   const start = event.target.closest("[data-game-new]");
-  if (start) return startGame(start.dataset.gameNew);
+  if (start) return startGame(start.dataset.gameNew, spicyOn() && SPICY_GAMES.includes(start.dataset.gameNew));
   const open = event.target.closest("[data-open-game]");
   if (open) openTable(open.dataset.openGame);
 });
 
 // Nova partida: a mesinha abre aqui mesmo, e o convite vai para a conversa (é lá que a outra pessoa fica sabendo).
-function startGame(type) {
+function startGame(type, spicy = false) {
   if (!socket?.connected) return toast("Sem conexão agora. Tente de novo em instantes.", "error");
   sound.play("tap");
-  socket.timeout(15000).emit("game", { op: "new", type }, (error, result) => {
+  socket.timeout(15000).emit("game", { op: "new", type, spicy }, (error, result) => {
     if (error || !result?.ok) {
       toast(result?.error || "O joguinho não começou. Tente de novo.", "error");
       sound.play("error");
@@ -9188,6 +9977,7 @@ function gameCard(message) {
   const head = el("div", "game-head");
   const name = el("span", "game-name");
   name.append(iconBadge(GAME_ICONS[game.type] || "dice", `game-mark game-${game.type}`), GAME_NAMES[game.type] || "Joguinho");
+  if (game.spicy) name.append(el("span", "game-spicy", "🔥 +18"));
   head.append(name, el("small", "", message.sender === me ? "você começou" : `${message.sender} começou`));
   box.append(head);
   if (BOARD_GAMES.includes(game.type)) boardSummary(message, box);
@@ -9299,8 +10089,9 @@ function boardSummary(message, box) {
   const game = message.game;
   const yourTurn = !game.winner && game.type !== "stop" && game.turn === me;
   box.append(el("p", `game-status${yourTurn ? " your-turn" : ""}`, boardStatus(game)));
-  if (game.type === "memoria" || game.type === "stop") {
-    const scores = game.type === "memoria" ? game.scores : game.totals;
+  if (game.type === "forca") box.append(el("p", "forca-mini", (game.word && game.winner ? [...game.word] : game.mask.map((char) => char ?? "_")).join(" ")));
+  if (game.type === "memoria" || game.type === "stop" || game.type === "forca") {
+    const scores = game.type === "stop" ? game.totals : game.scores;
     box.append(el("p", "game-score", game.seats.map((name) => `${who(name)} ${scores[name] ?? 0}`).join("  ×  ")));
   }
   if (game.type === "velha") {
@@ -9323,6 +10114,7 @@ const stopper = (name) => (name === me ? "você pediu" : `${name} pediu`);
 
 function boardStatus(game) {
   if (game.winner) {
+    if (game.hanged) return `A forca ganhou! Era “${game.word}”.`;
     const result = game.winner === "empate" ? "Deu empate!" : game.winner === me ? "Você venceu!" : `${game.winner} venceu!`;
     return game.resigned ? `${result} (${who(game.resigned)} desistiu)` : result;
   }
@@ -9335,7 +10127,7 @@ function playGame(message, action, raw, article) {
   const value = raw === undefined ? undefined : JSON.parse(raw);
   if (action === "open") return openTable(message.id);
   if (action === "reply") return startReply(message);
-  if (action === "again") return startGame(message.game.type);
+  if (action === "again") return startGame(message.game.type, Boolean(message.game.spicy));
   if (action === "pick") return gameMove(message, "pick", { choice: value });
   if (action === "vote") return gameMove(message, "vote", { value });
   if (action === "answer") {
@@ -9395,10 +10187,17 @@ const tableEl = $("#game-table");
 const table = { id: "", selected: null, built: "", busy: false };
 // Na dama, drawn = o tabuleiro desenhado (a mesma jogada chegando de novo não o refaz, para não cortar a animação) e
 // ply = a última jogada animada (null = acabou de abrir: nada anima).
-const tableFresh = () => ({ shown: [], matched: [], missKey: "", board: null, line: null, choice: null, done: false, dealt: false, drawn: "", ply: null });
+// No 4 em linha, drop = a última peça desenhada (-1 = acabou de abrir: nada cai); na forca, wrong = os erros já
+// desenhados; ended = a partida já tinha acabado quando foi desenhada (a faixa do fim só pula quando acaba agora).
+const tableFresh = () => ({ shown: [], matched: [], missKey: "", board: null, line: null, choice: null, done: false, dealt: false, drawn: "", ply: null, drop: -1, wrong: -1, ended: null });
 let stopTimer = 0;
 
 function onTableKey(event) {
+  // Forca no computador: digitar a letra é o mesmo que tocar nela.
+  if (/^[a-zçãáâéêíóôõú]$/i.test(event.key) && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    tableEl.querySelector(`[data-letter="${foldText(event.key)}"]:not(:disabled)`)?.click();
+    return;
+  }
   if (event.key !== "Escape" || !document.querySelector("#confirm.hidden")) return;
   event.stopPropagation();
   closeTable();
@@ -9429,14 +10228,15 @@ function paintTable() {
   const game = message.game;
   const board = BOARD_GAMES.includes(game.type);
   setIcon($("#table-icon use"), GAME_ICONS[game.type]);
-  $("#table-title").textContent = GAME_NAMES[game.type];
+  $("#table-title").textContent = `${GAME_NAMES[game.type]}${game.spicy ? " 🔥 +18" : ""}`;
   const status = $("#table-status");
   status.textContent = board ? boardStatus(game) : cardStatus(game);
   status.classList.toggle("your-turn", myTurn(game));
   tableEl.querySelector(".table-card").dataset.type = game.type;
   if (board) {
     paintPlayers(game);
-    ({ velha: paintVelha, dama: paintDama, memoria: paintMemory, stop: paintStop })[game.type](message);
+    ({ velha: paintVelha, dama: paintDama, memoria: paintMemory, stop: paintStop, linha4: paintLinha4, forca: paintForca })[game.type](message);
+    paintBanner(game);
   } else {
     // Carta: uma carta de verdade na mesa, com a ilustração do jogo. Chega girando; no verdade ou desafio, vira quando
     // a escolha é feita; o resultado pula quando os dois tiverem ido.
@@ -9473,11 +10273,14 @@ function paintPlayers(game) {
     const detail = game.type === "velha" ? (seat === 0 ? "joga com X" : "joga com O")
       : game.type === "dama" ? (seat === 0 ? "brancas" : "pretas")
       : game.type === "memoria" ? `${game.scores[name] ?? 0} ${game.scores[name] === 1 ? "par" : "pares"}`
+      : game.type === "linha4" ? (seat === 0 ? "vermelhas" : "amarelas")
+      : game.type === "forca" ? countOf(game.scores[name] ?? 0, "ponto", "pontos")
       : `${game.totals[name] ?? 0} pontos`;
     const text = el("span", "player-text");
     text.append(el("strong", "", who(name)), el("small", "", detail));
     chip.append(face, text);
     if (game.type === "dama") chip.append(el("span", `stone mini ${seat === 0 ? "w" : "b"}`));
+    if (game.type === "linha4") chip.append(el("span", `disc mini ${seat === 0 ? "red" : "yellow"}`));
     if (game.type === "stop" && game.phase === "playing") chip.append(el("b", "player-fill", `${game.filled[name] ?? 0}/${game.categories.length}`));
     return chip;
   }));
@@ -9791,6 +10594,91 @@ tableEl.addEventListener("submit", (event) => {
 tableEl.addEventListener("input", onGameInput);
 tableEl.addEventListener("keydown", onGameEnter);
 
+// Fim da partida: uma faixa grande em cima do tabuleiro (troféu, empate ou derrota). Pula quando acaba com a mesinha aberta.
+function paintBanner(game) {
+  $("#table-board .table-banner")?.remove();
+  if (game.winner) {
+    const won = game.winner === me;
+    const tie = game.winner === "empate";
+    const banner = el("div", `table-banner${won ? " win" : tie ? " tie" : " lose"}`);
+    banner.append(el("span", "banner-emoji", game.hanged ? "🪢" : won ? "🏆" : tie ? "🤝" : "😢"), el("strong", "", boardStatus(game)));
+    $("#table-board").append(banner);
+    if (table.ended === false) fx.pop(banner);
+  }
+  table.ended = Boolean(game.winner);
+}
+
+// 4 em linha: as colunas são os botões (a peça cai na casa vazia mais baixa, quicando); a linha da vitória brilha.
+function paintLinha4(message) {
+  const game = message.game;
+  const canPlay = !game.winner && game.turn === me && !table.busy;
+  const board = el("div", `linha4-board${canPlay ? " playable" : ""} ${game.seats.indexOf(me) === 1 ? "as-yellow" : "as-red"}`);
+  const falls = table.drop !== -1 && game.last !== null && game.last !== table.drop;
+  for (let col = 0; col < 7; col += 1) {
+    const column = el("button", "linha4-col");
+    column.type = "button";
+    column.dataset.col = String(col);
+    column.disabled = !canPlay || game.board[col] !== "";
+    column.setAttribute("aria-label", `Coluna ${col + 1}`);
+    for (let row = 0; row < 6; row += 1) {
+      const cell = row * 7 + col;
+      const hole = el("span", `linha4-hole${game.line?.includes(cell) ? " win" : ""}`);
+      if (game.board[cell]) {
+        const disc = el("span", `disc ${game.board[cell] === "R" ? "red" : "yellow"}`);
+        if (falls && cell === game.last) {
+          disc.classList.add("falling");
+          disc.style.setProperty("--rows", String(row + 1));
+        }
+        hole.append(disc);
+      }
+      column.append(hole);
+    }
+    board.append(column);
+  }
+  $("#table-board").replaceChildren(board);
+  if (falls) sound.play("tap");
+  table.drop = game.last ?? -2;
+}
+
+// Forca: o boneco ganha uma parte a cada erro (traçada na hora), a dica, a palavra com as letras já achadas e o teclado
+// (verde = tem, vermelho = não tem). No computador, dá para digitar a letra.
+const FORCA_PARTS = ["M80 26a10 10 0 1 1-.1 0", "M80 46v32", "M80 56l-14 12", "M80 56l14 12", "M80 78l-12 20", "M80 78l12 20"];
+
+function paintForca(message) {
+  const game = message.game;
+  const canPlay = !game.winner && game.turn === me && !table.busy;
+  const wrap = el("div", "forca");
+  const art = svgNode("svg", { viewBox: "0 0 120 140", class: "forca-art", "aria-hidden": "true" });
+  for (const d of ["M12 132h64", "M30 132V10", "M30 10h50", "M80 10v16", "M30 30l20-20"]) art.append(svgNode("path", { d, class: "frame" }));
+  FORCA_PARTS.slice(0, game.wrong).forEach((d, index) => {
+    art.append(svgNode("path", { d, class: `part${table.wrong !== -1 && index >= table.wrong ? " fresh" : ""}` }));
+  });
+  const hint = el("p", "forca-hint");
+  hint.append(el("small", "", "Dica"), el("strong", "", game.hint));
+  const word = el("div", "forca-word");
+  game.mask.forEach((char, index) => {
+    const real = game.word ? [...game.word][index] : null;
+    if (char === " " || real === " ") return word.append(el("span", "forca-space"));
+    word.append(el("span", `forca-letter${char ? " shown" : real ? " missed" : ""}`, char || real || ""));
+  });
+  const keys = el("div", "forca-keys");
+  for (const letter of "abcdefghijklmnopqrstuvwxyz") {
+    const used = game.guessed.includes(letter);
+    const hit = used && game.mask.some((char) => char && foldText(char) === letter);
+    const key = el("button", `forca-key${used ? (hit ? " hit" : " miss") : ""}`, letter.toUpperCase());
+    key.type = "button";
+    key.dataset.letter = letter;
+    key.disabled = !canPlay || used;
+    keys.append(key);
+  }
+  const left = game.lives - game.wrong;
+  wrap.append(art, el("div", "forca-side"), keys);
+  wrap.querySelector(".forca-side").append(hint, word, el("p", `forca-lives${left <= 2 ? " low" : ""}`, game.winner ? "" : `${countOf(left, "chance", "chances")} sobrando`));
+  $("#table-board").replaceChildren(wrap);
+  if (table.wrong !== -1 && game.wrong > table.wrong) sound.play("error");
+  table.wrong = game.wrong;
+}
+
 function paintTableActions(game) {
   const actions = [];
   const button = (label, action, className) => {
@@ -9840,6 +10728,19 @@ tableEl.addEventListener("click", async (event) => {
   }
   const square = event.target.closest("[data-square]");
   if (square) return pickSquare(message, Number(square.dataset.square));
+  const column = event.target.closest("[data-col]");
+  if (column && !table.busy) {
+    table.busy = true;
+    paintTable();
+    return gameMove(message, "drop", { col: Number(column.dataset.col) });
+  }
+  const letter = event.target.closest("[data-letter]");
+  if (letter && !table.busy) {
+    table.busy = true;
+    sound.play("tap");
+    paintTable();
+    return gameMove(message, "guess", { letter: letter.dataset.letter });
+  }
   const card = event.target.closest("[data-card]");
   if (card && !table.busy) {
     table.busy = true;
@@ -9849,7 +10750,7 @@ tableEl.addEventListener("click", async (event) => {
   const action = event.target.closest("[data-table-action]")?.dataset.tableAction;
   if (action === "again") {
     closeTable();
-    startGame(game.type);
+    startGame(game.type, Boolean(game.spicy));
   } else if (action === "chat") {
     closeTable();
     showTab("chat");

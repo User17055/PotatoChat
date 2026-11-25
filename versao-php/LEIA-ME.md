@@ -57,6 +57,8 @@ Foto, tema, notificações, sons e *Sair* ficam juntos na aba **Perfil**, separa
 - **Senha:** fica no banco só como *hash* (`pass_hash` na tabela `potato_users`), nunca o texto da senha.
 - **Foto:** no Perfil, clique na foto ou em *Trocar foto* e escolha uma imagem. O navegador recorta o centro num quadrado, reduz e envia. GIF animado também vale (até 700 KB): ele vai inteiro, sem recorte, para não perder a animação. A foto fica no banco e aparece para a outra pessoa na conversa, nas chamadas e nas notificações.
 - **Tema:** também no Perfil. Cada pessoa escolhe o seu, e ele só muda para ela. A escolha fica na conta (coluna `theme`), então vale em qualquer aparelho em que ela entrar, e as outras abas abertas mudam na hora. O navegador guarda uma cópia para o tema aparecer já na tela de login, sem piscar. No tema Claro, a chamada continua escura, porque o vídeo fica melhor assim.
+- **Mais temas:** Vinho, Oceano, Coral e **Natal 🎄**. O Natal deixa o site inteiro natalino para quem escolher: neve caindo (com "reduzir movimento" ligado no aparelho, os flocos ficam parados), gorro de Papai Noel em todas as fotos de perfil, luzinhas piscando no topo e as cores vermelho, verde e dourado.
+- **Letra e balões da conversa:** no Perfil, embaixo dos temas: a letra (Pequena, Normal, Grande ou Enorme) e o formato dos balões (Arredondados, Bolha ou Retos). Vale só para o aparelho.
 - **Papel de parede:** no Perfil, em *Escolher foto*. Antes de aplicar, uma prévia com balões de exemplo mostra como fica, com três ajustes: **Iluminação** (do mais escuro ao mais claro), **Desfoque** e **Cor do tema por cima** (mistura a cor do tema na foto, para a conversa combinar). Como o tema, só muda para quem escolheu e vale em todos os aparelhos dela. A foto é reduzida no navegador e fica no banco (colunas `wallpaper*` em `potato_users`). Para mudar só os ajustes, use *Ajustar*; para voltar ao fundo normal, *Remover*.
 - **Esqueceu a senha?** No phpMyAdmin, abra a tabela `potato_users`, edite a linha da pessoa e marque `pass_hash` como `NULL`. As sessões dela caem, e no próximo login ela escolhe uma senha nova com o mesmo nome. As mensagens não mudam.
 
@@ -70,6 +72,16 @@ O botão **GIF**, ao lado do campo de mensagem, abre os GIFs em alta e uma busca
 Sem a chave, o botão continua lá, mas avisa que os GIFs ainda não foram ativados. A chave começa como *beta*, com limite de 100 buscas por hora, o que sobra para duas pessoas. Se um dia não bastar, peça a chave de produção no próprio painel do GIPHY.
 
 A busca é feita direto pelo navegador, como o GIPHY pede, então a chave chega a quem está logado no chat (ela foi feita para isso). No banco fica só o endereço do GIF (coluna `media` em `potato_messages`), e o servidor só aceita endereços de imagem do próprio GIPHY.
+
+## Figurinhas
+
+O painel do **GIF** tem duas abas: **GIFs** (a busca do GIPHY) e **Figurinhas** (a sua coleção, que só você vê).
+
+- **Salvar:** a estrela no canto de cada GIF da busca; ou, no menu de uma mensagem com GIF, foto ou figurinha (botão direito ou segurando no celular), o ícone de figurinha. Assim dá para guardar a figurinha que a outra pessoa mandou.
+- **Criar:** em *Criar*, escolha uma imagem do aparelho. Ela é reduzida (lado maior até 512 px, guardando a transparência); GIF vai inteiro, até 3 MB.
+- **Enviar:** um toque. Na conversa, a figurinha vai solta, sem balão, como no WhatsApp.
+- **Organizar:** tira figurinhas da coleção (as já enviadas continuam aparecendo).
+- Ficam na tabela `potato_items` (`kind = sticker`, até 300 por pessoa); as imagens, em `potato_files`, presas à figurinha. Salvar a figurinha de uma mensagem faz uma cópia, então apagar a mensagem não apaga a figurinha.
 
 ## Fotos e arquivos
 
@@ -156,6 +168,7 @@ Escolher é como no Rave: um catálogo com os serviços (no celular, os cartões
 | Twitch | O nome do canal (ao vivo; aí só dá para pausar, não avançar) ou o link de um vídeo gravado (`twitch.tv/videos/…`) |
 | Do aparelho | Um escolhe o arquivo (MP4, WebM ou MOV, até 4 GB) e ele sobe para o servidor, com a porcentagem na tela; quando termina, começa para os dois, que assistem de lá. Quem mandou pode sair que o vídeo continua |
 
+- **Tela:** o botão de quadradinhos na barra do vídeo alterna entre a conversa ao lado, o **modo cinema** (só o vídeo, a tela toda) e a **conversa flutuante** (transparente, por cima do vídeo, no canto). Vale só para o aparelho.
 - **Vistos por vocês:** o que vocês já assistiram juntos fica numa fileira no começo do catálogo (e na tela de cada serviço). Um toque assiste de novo, para os dois.
 - Quando um vídeo começa, a sala abre para os dois. Cada um sai quando quiser (o vídeo continua para o outro, e o botão de TV fica com um pontinho vermelho). O **X** embaixo do vídeo para para os dois.
 - Começar um vídeo pausa a música do bot. Clipes da Twitch não têm como sincronizar.
@@ -172,6 +185,10 @@ Os filmes da Netflix e da HBO Max são protegidos contra cópia: só tocam no si
 - **No celular:** os apps da Netflix e da HBO Max não deixam nenhum outro app mandar no player nem dizer o que está passando. Escolha no app, volte para a sala e toque em **Começar a sessão**; depois, use a **Contagem 3, 2, 1**, que aparece nos dois aparelhos no mesmo instante, para darem o play juntos. Quando alguém pausa, o outro recebe o aviso para pausar também.
 - A sala mostra o título, o relógio da sessão (igual para os dois) e o botão **Abrir na Netflix** / **Abrir na HBO Max**.
 - **Nenhuma senha fica guardada:** salvar a senha da Netflix ou da HBO Max no banco não faria o filme tocar dentro do site e ainda deixaria as contas em risco.
+
+## Contagem regressiva
+
+Uma faixa no topo da conversa conta os dias, horas, minutos e segundos até o próximo encontro, igual para os dois (no horário de cada aparelho). Começa marcada para **12 de dezembro de 2026**, "Até a gente se ver". Tocar nela muda o texto, o dia e a hora (se quiser) ou desliga; a mudança aparece na hora para a outra pessoa. No dia, vira "É hoje! 💛"; depois, some. Fica na tabela `potato_settings` (nome `countdown`) e some durante a chamada e a Watch Party.
 
 ## Nosso cantinho
 
@@ -210,6 +227,10 @@ Os sonhos dos dois, cada um com ícone, nome, anotação e, se quiser, **quanto 
 
 O blog de cartinhas: escreva quando quiser, num papel de cor (creme, rosa, azul, lilás ou verde). Para a outra pessoa, a cartinha nova aparece com o selo **Nova!** (e o número no menu) até ser aberta; ao abrir, um envelope chega e abre, e a carta sobe. Quem escreveu vê quando foi lida e pode editar ou apagar. O rascunho (o título, o papel, a letra e o texto) fica guardado no aparelho até ser enviado.
 
+- **Editor como um Word:** a barra em cima do papel tem letra e tamanho, negrito, itálico, sublinhado, riscado, cor da letra, marca-texto, alinhamento (esquerda, centro, direita, justificado), listas, título, tirar a formatação, desfazer e refazer. Colar traz só o texto; colar uma imagem a coloca solta no papel.
+- **Imagens e figurinhas soltas no papel:** *Imagem* e *Figurinha* (da sua coleção) colocam a imagem num canto do papel. Arraste para onde quiser; a alça do canto muda o tamanho, a de cima gira, e a barrinha da imagem troca a moldura (polaroide, redonda, fita, sombra ou nenhuma), traz para a frente ou tira. As posições ficam em fração do papel, então a cartinha chega igual em qualquer tela. Até 16 por cartinha.
+- **Papel:** 10 cores (creme, rosa, azul, lilás, verde, branco, amarelo, pêssego, kraft e noite) ou qualquer cor (a paleta na barra), com a tinta clara ou escura conforme o papel; fundo pautado, liso, quadriculado, de pontinhos, de corações ou de estrelas; e borda simples, dupla, pontilhada ou rosinha.
+- **Segurança:** o servidor filtra o texto formatado (só as marcas e os estilos de formatação passam; script, eventos, links e imagens de fora somem). O texto puro sai dele para a prévia da lista.
 - **Letra:** *Clássica*, *À mão*, *Cursiva*, *Bilhetinho*, *Máquina* (de escrever) ou *Moderna*. O campo do texto já mostra a letra e o papel escolhidos, e a cartinha chega igual para a outra pessoa. As letras vêm do Google Fonts (Caveat, Dancing Script, Patrick Hand e Special Elite), junto com a do site.
 - **Fotos:** até 6 por cartinha. Elas sobem reduzidas, como as da conversa, e aparecem no fim da carta como polaroides; tocar abre grande.
 - **Áudios:** até 3, logo embaixo do título (dá para ouvir enquanto lê), com o mesmo player das mensagens de voz. *Gravar* grava ali mesmo (com a redução de ruído, se estiver ligada no Perfil); *Escolher áudio* pega um arquivo do aparelho (MP3, M4A, OGG ou WAV, como uma música de vocês), e a forma de onda é medida no próprio aparelho. Dá para ouvir antes de enviar.
@@ -229,21 +250,27 @@ Em *Jogos* (no menu, ou no clipe da conversa → *Joguinhos*), cada jogo tem um 
 | Verdade ou desafio | A outra pessoa escolhe verdade ou desafio e a carta vira, com uma pergunta ou um desafio fofinho; ela responde na conversa e pode desafiar de volta |
 | Isso ou aquilo | Duas opções; cada um escolhe sem ver a escolha do outro. Será que combinam? |
 | Perguntinha | Uma pergunta para os dois; as respostas aparecem quando os dois responderem |
+| 4 em linha | Quem começa fica com as vermelhas. A peça cai na coluna (e quica); 4 seguidas em qualquer direção ganha, com a linha brilhando |
+| Forca | Uma palavra com dica. Cada um chuta uma letra na sua vez: acertou, ganha um ponto por letra e joga de novo; errou, o boneco ganha uma parte e a vez passa. No computador, dá para digitar a letra. A palavra nunca sai do servidor antes do fim |
+
+- **Modo +18 🔥:** a chave no topo dos jogos (pede confirmação; vale só para o aparelho) faz verdade ou desafio, quem é mais provável, isso ou aquilo e perguntinha virem do baralho apimentado, só para o casal. A partida fica marcada com 🔥 +18, e a revanche continua no +18.
+- **Fim da partida:** uma faixa com troféu, empate ou derrota aparece em cima do tabuleiro, com confete para quem ganhou, e o *Revanche* começa outra igual.
 
 As partidas que ainda estão rolando (até 20) vão junto com o histórico: mesmo que a partida tenha começado lá atrás na conversa, a mesinha continua aberta e recebendo as jogadas quando o chat recarrega (por exemplo, depois de o celular ficar um tempo bloqueado). E, se a conexão cair no meio de uma jogada, o tabuleiro volta a responder.
 
-As cartas de verdade ou desafio, quem é mais provável, isso ou aquilo e perguntinha estão em `site/lib/jogos.php` (dá para acrescentar à vontade) e não se repetem até o baralho acabar. As ilustrações dos jogos ficam em `site/img/jogos`.
+As cartas de verdade ou desafio, quem é mais provável, isso ou aquilo, perguntinha (e as +18, com 18 no fim do nome) e as palavras da forca estão em `site/lib/jogos.php` (dá para acrescentar à vontade) e não se repetem até o baralho acabar. As ilustrações dos jogos ficam em `site/img/jogos`.
 
 ## Chamadas e transmissão de tela
 
-Os botões do topo da conversa ligam por voz, por vídeo ou já transmitindo a tela; durante a chamada, a barra de baixo liga e desliga microfone, câmera e transmissão.
+O botão de telefone no topo da conversa abre o menu: chamada de voz, de vídeo ou já transmitindo a tela; durante a chamada, a barra de baixo liga e desliga microfone, câmera e transmissão.
 
 - **Ligar com a outra pessoa offline:** a sala fica guardada no servidor e toca por 1 minuto. Sem a outra pessoa entrar, encerra após 5 minutos de espera. Quando alguém sai de uma chamada em andamento, a sala fica disponível por mais 5 minutos, mesmo com a outra pessoa esperando. Se os dois saírem, a segunda saída não estende esse prazo. Uma entrada ou reentrada real renova a espera; com os dois presentes, a contagem é cancelada.
 - **Voltar à chamada:** ao recarregar ou entrar novamente na conta, quem já participava volta automaticamente à mesma sala, preservando o microfone silenciado. Também há o botão **Entrar novamente**, com a contagem do tempo restante. Uma chamada nova exige atendimento; outra aba não toma uma chamada ativa automaticamente. O compartilhamento de tela precisa ser iniciado novamente, com a autorização exigida pelo navegador/Android.
 - **Na conversa,** cada chamada vira uma linha, como no Discord: "André iniciou uma chamada que durou 9 minutos.", "Você perdeu uma chamada de André que durou poucos segundos.", "Duda recusou a sua chamada." No celular vai a versão curta, que cabe numa linha com a hora ("André iniciou uma chamada · 9 min", "Chamada perdida de André"). Enquanto a chamada espera você, a linha tem o botão Entrar. Essas linhas (e os cartões de música e de jogo) não se apagam.
 - **Conversas separadas:** o banco já guarda cada conversa à parte (tabelas `rooms`, `reads` e `invites`, versão 9, migrada sozinha no primeiro acesso: tudo o que havia vira a conversa do casal). O convite para adicionar outra pessoa existe no servidor, mas o botão está escondido: o chat continua só de vocês dois.
 
-- **Transmitir a tela:** antes de começar, uma janela pergunta a qualidade (*Leve* 720p, *Nítida* 1080p, *Fluida* 1080p a 60 fps) e se o som do que estiver tocando vai junto. Depois o navegador pergunta qual tela, janela ou aba mostrar. Quem transmite vê a própria tela só como uma prévia pequena no canto, com o botão *Parar*; quem assiste vê a transmissão grande, com volume, tela cheia e **janelinha flutuante** (para continuar assistindo enquanto usa outras coisas).
+- **Layout:** o botão de quadradinhos na barra da chamada alterna entre *Grade*, *Foco* (a outra pessoa grande e você numa janelinha no canto), *Lado a lado* (com transmissão, as câmeras numa coluna ao lado da tela, sem cobrir nada) e *Só a outra pessoa*. Vale só para o aparelho.
+- **Transmitir a tela:** antes de começar, uma janela pergunta a qualidade (*Leve* 720p, *Nítida* 1080p, *Fluida* 1080p a 60 fps, *Ultra* 1440p e *Ultra fluida* 1440p a 60 fps; as duas últimas pedem internet boa e, no app do Android, a captura vai até 1080p) e se o som do que estiver tocando vai junto. Depois o navegador pergunta qual tela, janela ou aba mostrar. Quem transmite vê a própria tela só como uma prévia pequena no canto, com o botão *Parar*; quem assiste vê a transmissão grande, com volume, tela cheia e **janelinha flutuante** (para continuar assistindo enquanto usa outras coisas).
 - **No celular dá para assistir, mas não para transmitir:** os navegadores de celular (Chrome no Android, Safari no iPhone) não deixam nenhum site capturar a tela. O botão continua lá e explica isso; para transmitir, use o Chrome, o Edge ou o Firefox no computador.
 - **Enquadramento:** cada câmera aparece no formato dela (celular em pé fica em pé), sem cortar o rosto.
 

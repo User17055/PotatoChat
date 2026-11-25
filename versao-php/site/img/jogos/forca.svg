@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 260">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7ee0b0"/><stop offset=".55" stop-color="#2fb48a"/><stop offset="1" stop-color="#16725f"/></linearGradient>
+    <filter id="sh" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#06322a" flood-opacity=".4"/></filter>
+  </defs>
+  <rect width="400" height="260" fill="url(#bg)"/>
+  <circle cx="352" cy="34" r="96" fill="#fff" opacity=".09"/>
+  <circle cx="36" cy="236" r="78" fill="#fff" opacity=".07"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round" filter="url(#sh)">
+    <g stroke="#fff" stroke-width="10"><path d="M58 228h96M86 228V42h78v26M86 82l36-40"/></g>
+    <g stroke="#0d3b31" stroke-width="8"><circle cx="164" cy="86" r="18"/><path d="M164 104v52M164 120l-22 20M164 120l22 20M164 156l-18 32M164 156l18 32"/></g>
+  </g>
+  <g font-family="Georgia, serif" font-weight="700" font-size="34" fill="#fff" filter="url(#sh)">
+    <text x="226" y="150">A</text><text x="262" y="150">M</text><text x="306" y="150">O</text><text x="342" y="150">R</text>
+  </g>
+  <g stroke="#fff" stroke-width="5" stroke-linecap="round" opacity=".9"><path d="M224 164h24M262 164h28M304 164h24M340 164h24"/></g>
+  <g fill="#ffd23f"><path d="M262 64l5 10 11 2-8 8 2 11-10-5-10 5 2-11-8-8 11-2z"/></g>
+</svg>

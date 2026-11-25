@@ -40,7 +40,7 @@ const CALL_WAIT_MS = 300000;
 const CALL_NAMES = ['audio' => 'Chamada de voz', 'video' => 'Chamada de vídeo', 'screen' => 'Transmissão de tela'];
 require_once __DIR__ . '/local-music.php';
 // Mesma lista do app.js (THEMES). O primeiro é o padrão.
-const THEMES = ['escuro', 'preto', 'rosa', 'roxo', 'azul', 'verde', 'claro'];
+const THEMES = ['escuro', 'preto', 'rosa', 'roxo', 'azul', 'verde', 'claro', 'vinho', 'oceano', 'coral', 'natal'];
 
 final class HttpError extends RuntimeException
 {
@@ -1824,7 +1824,10 @@ const LETTER_MAX = 20000;
 const REPEATS = ['none', 'weekly', 'monthly', 'yearly'];
 // Minutos antes do compromisso (0 = na hora; 1440 = um dia antes).
 const REMINDERS = [0, 15, 30, 60, 120, 1440];
-const PAPERS = ['creme', 'rosa', 'azul', 'lilas', 'verde'];
+const PAPERS = ['creme', 'rosa', 'azul', 'lilas', 'verde', 'branco', 'amarelo', 'pessego', 'kraft', 'noite'];
+// Fundo e borda do papel (mesmas listas do app.js; o primeiro é o padrão).
+const LETTER_PATTERNS = ['linhas', 'liso', 'quadriculado', 'pontos', 'coracoes', 'estrelas'];
+const LETTER_BORDERS = ['nenhuma', 'simples', 'dupla', 'pontilhada', 'rosa'];
 // Letras da cartinha (mesma lista do app.js; o primeiro é o padrão) e quantas fotos e áudios cabem nela.
 const LETTER_FONTS = ['classica', 'mao', 'cursiva', 'bilhete', 'maquina', 'moderna'];
 const LETTER_PHOTOS = 6;
@@ -2162,9 +2165,153 @@ function letter_public(array $row, bool $full = false): array
     $item = item_public($row);
     if (!$full) {
         $item['preview'] = text_slice(preg_replace('/\s+/u', ' ', (string) ($item['body'] ?? '')) ?? '', 140);
-        unset($item['body']);
+        unset($item['body'], $item['html'], $item['decor']);
     }
     return $item;
+}
+
+// Texto com formatação (o editor da cartinha, como num Word): só as marcas de LETTER_TAGS e os estilos de clean_style
+// passam, sem nenhum outro atributo. Marca desconhecida sai e o texto dela fica; script, style e afins somem inteiros.
+const LETTER_TAGS = ['p', 'div', 'br', 'span', 'b', 'strong', 'i', 'em', 'u', 's', 'strike', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'blockquote', 'font'];
+const LETTER_DROP = ['script', 'style', 'iframe', 'object', 'embed', 'svg', 'math', 'template', 'noscript', 'head', 'title', 'meta', 'link', 'img', 'video', 'audio', 'form', 'input', 'button', 'textarea', 'select', 'frame', 'frameset'];
+const LETTER_HTML_MAX = 150000;
+// As letras do editor (mesmas do app.js e do styles.css): o nome que o navegador escreve → a fonte com o reserva.
+const LETTER_FAMILIES = [
+    'georgia' => 'Georgia, "Times New Roman", serif', 'caveat' => '"Caveat", cursive', 'dancing script' => '"Dancing Script", cursive',
+    'patrick hand' => '"Patrick Hand", cursive', 'special elite' => '"Special Elite", "Courier New", monospace', 'poppins' => '"Poppins", sans-serif',
+];
+const LETTER_SIZES = ['x-small', 'small', 'medium', 'large', 'x-large', 'xx-large', 'xxx-large'];
+
+function clean_css_color(string $value): ?string
+{
+    $value = strtolower(trim($value));
+    if (preg_match('/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/', $value)) return $value;
+    if (preg_match('/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*(0|1|0?\.\d+)\s*)?\)$/', $value, $m) && max($m[1], $m[2], $m[3]) <= 255) {
+        return isset($m[4]) ? "rgba($m[1], $m[2], $m[3], $m[4])" : "rgb($m[1], $m[2], $m[3])";
+    }
+    return $value === 'transparent' ? $value : null;
+}
+
+function clean_style(string $style): string
+{
+    $out = [];
+    foreach (explode(';', $style) as $rule) {
+        $parts = explode(':', $rule, 2);
+        if (count($parts) < 2) continue;
+        $prop = strtolower(trim($parts[0]));
+        $value = strtolower(trim(str_ireplace('!important', '', $parts[1])));
+        switch ($prop) {
+            case 'color':
+            case 'background-color':
+                $color = clean_css_color($value);
+                if ($color) $out[$prop] = $color;
+                break;
+            case 'font-size':
+                if (in_array($value, LETTER_SIZES, true)) $out[$prop] = $value;
+                elseif (preg_match('/^(\d{1,2}(?:\.\d{1,2})?)px$/', $value, $m) && $m[1] >= 8 && $m[1] <= 72) $out[$prop] = $value;
+                break;
+            case 'font-family':
+                $family = trim(explode(',', $value)[0], " \"'");
+                if (isset(LETTER_FAMILIES[$family])) $out[$prop] = LETTER_FAMILIES[$family];
+                break;
+            case 'font-weight':
+                if (preg_match('/^(bold|bolder|normal|[1-9]00)$/', $value)) $out[$prop] = $value;
+                break;
+            case 'font-style':
+                if (in_array($value, ['italic', 'normal'], true)) $out[$prop] = $value;
+                break;
+            case 'text-decoration':
+            case 'text-decoration-line':
+                $lines = array_values(array_intersect(preg_split('/\s+/', $value), ['underline', 'line-through', 'none']));
+                if ($lines) $out['text-decoration-line'] = implode(' ', $lines);
+                break;
+            case 'text-align':
+                if (in_array($value, ['left', 'center', 'right', 'justify', 'start', 'end'], true)) $out[$prop] = $value;
+                break;
+        }
+    }
+    return implode('; ', array_map(fn($prop, $value) => "$prop: $value", array_keys($out), $out));
+}
+
+function letter_nodes(DOMNode $node, int $depth = 0): string
+{
+    $out = '';
+    foreach ($node->childNodes as $child) {
+        if ($child instanceof DOMText) {
+            $out .= htmlspecialchars($child->nodeValue, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8');
+            continue;
+        }
+        if (!$child instanceof DOMElement) continue;
+        $tag = strtolower($child->tagName);
+        if (in_array($tag, LETTER_DROP, true) || $depth > 40) continue;
+        if ($tag === 'br') {
+            $out .= '<br>';
+            continue;
+        }
+        $inner = letter_nodes($child, $depth + 1);
+        if (!in_array($tag, LETTER_TAGS, true)) {
+            $out .= $inner;
+            continue;
+        }
+        $style = $child->getAttribute('style');
+        // <font> (alguns navegadores ainda escrevem assim) vira <span> com o mesmo estilo.
+        if ($tag === 'font') {
+            $tag = 'span';
+            $size = (int) $child->getAttribute('size');
+            if ($size >= 1 && $size <= 7) $style .= ';font-size:' . LETTER_SIZES[$size - 1];
+            if ($child->hasAttribute('color')) $style .= ';color:' . $child->getAttribute('color');
+            if ($child->hasAttribute('face')) $style .= ';font-family:' . $child->getAttribute('face');
+        }
+        $style = clean_style($style);
+        $attrs = $style !== '' ? ' style="' . htmlspecialchars($style, ENT_QUOTES, 'UTF-8') . '"' : '';
+        $out .= "<$tag$attrs>$inner</$tag>";
+    }
+    return $out;
+}
+
+function clean_letter_html(string $html): string
+{
+    if (trim($html) === '') return '';
+    // Sem a extensão DOM do PHP (rara numa hospedagem), a cartinha vai como texto puro.
+    if (!class_exists('DOMDocument')) return htmlspecialchars(html_entity_decode(strip_tags(preg_replace('#<br>|</(?:p|div|li|h\d)>#i', "\n", $html) ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8'), ENT_QUOTES, 'UTF-8');
+    $doc = new DOMDocument();
+    $errors = libxml_use_internal_errors(true);
+    $doc->loadHTML('<?xml encoding="utf-8"?><body>' . $html . '</body>', LIBXML_NONET);
+    libxml_clear_errors();
+    libxml_use_internal_errors($errors);
+    $body = $doc->getElementsByTagName('body')->item(0);
+    return $body ? letter_nodes($body) : '';
+}
+
+// O texto puro da cartinha formatada (prévia da lista e o "tem alguma coisa escrita?").
+function letter_text(string $html): string
+{
+    $text = preg_replace('#<br>|</(?:p|div|li|h1|h2|h3|blockquote)>#', "\n", $html) ?? $html;
+    return clean_body(html_entity_decode(strip_tags($text), ENT_QUOTES | ENT_HTML5, 'UTF-8'), LETTER_MAX);
+}
+
+// Imagens e figurinhas soltas no papel, cada uma onde a pessoa deixou: x e y (o centro) e w (a largura) em fração do
+// papel, rot em graus, z (quem fica por cima) e a moldura. Foto: uma imagem enviada (como as fotos da cartinha).
+// Figurinha: da coleção de quem escreve, ou que já estava na cartinha ($old: endereço → [largura, altura]).
+const LETTER_DECOR = 16;
+const DECOR_FRAMES = ['none', 'polaroid', 'round', 'tape', 'shadow'];
+
+function letter_decor($item, string $owner, string $itemId, array $old): ?array
+{
+    if (!is_array($item)) return null;
+    $number = fn($key, float $min, float $max, float $default): float => is_numeric($item[$key] ?? null) ? round(max($min, min($max, (float) $item[$key])), 4) : $default;
+    $place = ['x' => $number('x', 0, 1, .5), 'y' => $number('y', 0, 1, .5), 'w' => $number('w', .06, 1, .3), 'rot' => $number('rot', -180, 180, 0),
+        'z' => (int) $number('z', 0, 99, 1), 'frame' => clean_choice($item['frame'] ?? 'none', DECOR_FRAMES, 'none')];
+    $type = $item['type'] ?? '';
+    if ($type === 'photo') {
+        $photo = item_photo($item, $owner, $itemId);
+        return $photo ? ['type' => 'photo'] + $photo + $place : null;
+    }
+    if ($type !== 'sticker') return null;
+    $url = str($item['url'] ?? '');
+    if (isset($old[$url])) return ['type' => 'sticker', 'url' => $url, 'width' => $old[$url][0], 'height' => $old[$url][1]] + $place;
+    $sticker = sticker_media($item, $owner);
+    return $sticker ? ['type' => 'sticker', 'url' => $sticker['url'], 'width' => $sticker['width'], 'height' => $sticker['height']] + $place : null;
 }
 
 // ---- lembretes ----
@@ -2343,24 +2490,37 @@ function us_act(array $me, array $body): array
             if ($id !== '' && !$row) return ['ok' => false, 'error' => 'Essa cartinha foi apagada.'];
             if ($row && $row['owner'] !== $me['name']) return ['ok' => false, 'error' => 'Só quem escreveu muda a cartinha.'];
             $itemId = $row['id'] ?? uuid();
-            $text = clean_body($body['body'] ?? '', LETTER_MAX);
+            // Formatada (html, do editor) ou texto puro (body, como antes).
+            $html = clean_letter_html(str($body['html'] ?? ''));
+            if (strlen($html) > LETTER_HTML_MAX) return ['ok' => false, 'error' => 'A cartinha ficou grande demais. Tire um pouco da formatação.'];
+            $text = $html !== '' ? letter_text($html) : clean_body($body['body'] ?? '', LETTER_MAX);
+            if ($text === '') $html = '';
             $photos = array_values(array_filter(array_map(fn($photo) => item_photo($photo, $me['name'], $itemId), array_slice((array) ($body['photos'] ?? []), 0, LETTER_PHOTOS))));
             $audios = array_values(array_filter(array_map(fn($audio) => item_audio($audio, $me['name'], $itemId), array_slice((array) ($body['audios'] ?? []), 0, LETTER_AUDIOS))));
-            if ($text === '' && !$photos && !$audios) return ['ok' => false, 'error' => 'Escreva alguma coisa na cartinha.'];
             $old = $row ? item_data($row) : [];
+            $oldStickers = [];
+            foreach ((array) ($old['decor'] ?? []) as $piece) if (($piece['type'] ?? '') === 'sticker') $oldStickers[$piece['url']] = [$piece['width'], $piece['height']];
+            $decor = array_values(array_filter(array_map(fn($piece) => letter_decor($piece, $me['name'], $itemId, $oldStickers), array_slice((array) ($body['decor'] ?? []), 0, LETTER_DECOR))));
+            if ($text === '' && !$photos && !$audios && !$decor) return ['ok' => false, 'error' => 'Escreva alguma coisa na cartinha.'];
+            $paperColor = preg_match('/^#[0-9a-f]{6}$/i', str($body['paperColor'] ?? '')) ? strtolower($body['paperColor']) : '';
             $letter = [
                 'title' => clean_line($body['title'] ?? '', 120) ?: 'Cartinha',
                 'body' => $text,
+                'html' => $html,
                 'paper' => in_array($body['paper'] ?? '', PAPERS, true) ? $body['paper'] : 'creme',
+                'paperColor' => $paperColor,
+                'pattern' => clean_choice($body['pattern'] ?? '', LETTER_PATTERNS, LETTER_PATTERNS[0]),
+                'border' => clean_choice($body['border'] ?? '', LETTER_BORDERS, LETTER_BORDERS[0]),
                 'font' => in_array($body['font'] ?? '', LETTER_FONTS, true) ? $body['font'] : LETTER_FONTS[0],
                 'photos' => $photos,
                 'audios' => $audios,
+                'decor' => $decor,
                 'to' => $old['to'] ?? peer_of($me['name']),
                 'readAt' => $old['readAt'] ?? null,
                 'edited' => (bool) $row,
             ];
             $saved = save_item($row, $itemId, 'letter', $me['name'], null, $letter);
-            keep_photos($itemId, $me['name'], array_merge(array_column($photos, 'key'), array_column($audios, 'key')));
+            keep_photos($itemId, $me['name'], array_merge(array_column($photos, 'key'), array_column($audios, 'key'), array_column(array_filter($decor, fn($piece) => $piece['type'] === 'photo'), 'key')));
             emit_us(['kind' => 'letter', 'by' => $me['name'], 'item' => letter_public($saved), 'action' => $row ? 'edit' : 'new']);
             return ['ok' => true, 'item' => letter_public($saved, true)];
 
@@ -2405,12 +2565,24 @@ function us_act(array $me, array $body): array
 //              lados, dama anda e captura de longe, captura é obrigatória e continua enquanto der;
 //   memoria  → jogo da memória: 8 pares de figuras; acertou, joga de novo. As cartas viradas para baixo nunca saem do servidor;
 //   stop     → stop (adedonha): uma letra por rodada; quem preencher tudo pede STOP e a rodada acaba para os dois.
-//              10 pontos por resposta certa, 5 se os dois escreveram a mesma.
+//              10 pontos por resposta certa, 5 se os dois escreveram a mesma;
+//   linha4   → 4 em linha (as vermelhas são de quem começou): a peça cai na coluna, 4 seguidas em qualquer direção ganha;
+//   forca    → forca com a palavra e a dica de lib/jogos.php: acertou a letra, pontua e joga de novo. A palavra nunca
+//              sai do servidor antes do fim.
+// Cartas com spicy (modo +18): o baralho com 18 no fim do nome.
 
 const GAME_NAMES = [
     'vd' => 'Verdade ou desafio', 'quem' => 'Quem é mais provável?', 'isso' => 'Isso ou aquilo', 'pergunta' => 'Perguntinha',
     'velha' => 'Jogo da velha', 'dama' => 'Dama', 'memoria' => 'Jogo da memória', 'stop' => 'Stop',
+    'linha4' => '4 em linha', 'forca' => 'Forca',
 ];
+// 4 em linha: 7 colunas e 6 linhas (casas 0 a 41, linha a linha de cima para baixo); a peça cai até a casa vazia mais
+// baixa da coluna. Forca: quantos erros até o boneco ficar completo.
+const LINHA4_COLS = 7;
+const LINHA4_ROWS = 6;
+const FORCA_LIVES = 6;
+// Os jogos de carta com baralho +18 (modo 🔥): o baralho "verdade18", "quem18"…
+const SPICY_GAMES = ['vd', 'quem', 'isso', 'pergunta'];
 // As figuras das cartas da memória (ícones do sprite no index.php).
 const MEMORY_FACES = ['heart', 'star', 'dog', 'cat', 'pizza', 'flower', 'music', 'moon', 'sun', 'cloud', 'gift', 'coffee', 'fish', 'cherry', 'gem', 'cake'];
 const STOP_CATEGORIES = ['Nome', 'Animal', 'Comida', 'Lugar', 'Objeto', 'Coisa fofa'];
@@ -2605,8 +2777,80 @@ function board_play(array &$game, string $me, string $op, array $body): ?string
             $game['scores'][$me]++;
             if (!in_array(null, $game['matched'], true)) $game['winner'] = best_of($game['scores']);
             return null;
+
+        case 'linha4:drop':
+            $col = $body['col'] ?? null;
+            if (!is_int($col) || $col < 0 || $col >= LINHA4_COLS) return 'Escolha uma coluna.';
+            $cell = null;
+            for ($row = LINHA4_ROWS - 1; $row >= 0 && $cell === null; $row--) if ($game['board'][$row * LINHA4_COLS + $col] === '') $cell = $row * LINHA4_COLS + $col;
+            if ($cell === null) return 'Essa coluna está cheia.';
+            $piece = $seat === 0 ? 'R' : 'Y';
+            $game['board'][$cell] = $piece;
+            $game['last'] = $cell;
+            $line = linha4_line($game['board'], $cell);
+            if ($line) {
+                $game['winner'] = $me;
+                $game['line'] = $line;
+            } elseif (!in_array('', $game['board'], true)) {
+                $game['winner'] = 'empate';
+            } else {
+                $game['turn'] = $other;
+            }
+            return null;
+
+        // Forca: acertou, ganha um ponto por letra que apareceu e joga de novo; errou, o boneco ganha uma parte e a vez
+        // passa. Palavra completa: ganha quem fez mais pontos. Boneco completo: ninguém ganha.
+        case 'forca:guess':
+            $letter = fold(str($body['letter'] ?? ''));
+            if (!preg_match('/^[a-z]$/', $letter)) return 'Escolha uma letra.';
+            if (in_array($letter, $game['guessed'], true)) return 'Essa letra já foi.';
+            $game['guessed'][] = $letter;
+            $hits = substr_count(fold($game['word']), $letter);
+            $game['last'] = ['by' => $me, 'letter' => $letter, 'hits' => $hits];
+            if ($hits) {
+                $game['scores'][$me] += $hits;
+                if (!in_array(null, forca_mask($game), true)) $game['winner'] = best_of($game['scores']);
+            } elseif (++$game['wrong'] >= FORCA_LIVES) {
+                $game['winner'] = 'empate';
+                $game['hanged'] = true;
+            } else {
+                $game['turn'] = $other;
+            }
+            return null;
     }
     return 'Jogada desconhecida.';
+}
+
+// As 4 (ou mais) casas em linha que passam pela peça que acabou de cair, ou null.
+function linha4_line(array $board, int $cell): ?array
+{
+    $piece = $board[$cell];
+    $row = intdiv($cell, LINHA4_COLS);
+    $col = $cell % LINHA4_COLS;
+    foreach ([[0, 1], [1, 0], [1, 1], [1, -1]] as [$dr, $dc]) {
+        $line = [$cell];
+        foreach ([1, -1] as $sign) {
+            for ($step = 1; $step < 4; $step++) {
+                $r = $row + $dr * $step * $sign;
+                $c = $col + $dc * $step * $sign;
+                if ($r < 0 || $r >= LINHA4_ROWS || $c < 0 || $c >= LINHA4_COLS || $board[$r * LINHA4_COLS + $c] !== $piece) break;
+                $line[] = $r * LINHA4_COLS + $c;
+            }
+        }
+        if (count($line) >= 4) {
+            sort($line);
+            return $line;
+        }
+    }
+    return null;
+}
+
+// A palavra da forca como o navegador vê: as letras já chutadas (com o acento de verdade), null nas que faltam, e
+// espaço e hífen à mostra.
+function forca_mask(array $game): array
+{
+    return array_map(fn($char) => preg_match('/^[a-z]$/', fold($char)) ? (in_array(fold($char), $game['guessed'], true) ? $char : null) : $char,
+        preg_split('//u', $game['word'], -1, PREG_SPLIT_NO_EMPTY));
 }
 
 function draw_card(string $deck)
@@ -2653,6 +2897,12 @@ function game_public(array $game): array
             $game['totals'] = (object) $game['totals'];
             unset($game['fills'], $game['used']);
             break;
+        // A palavra só sai do servidor quando a partida acaba.
+        case 'forca':
+            $game['mask'] = forca_mask($game);
+            $game['scores'] = (object) $game['scores'];
+            if (!$game['winner']) unset($game['word']);
+            break;
     }
     return $game;
 }
@@ -2664,16 +2914,27 @@ function game_act(array $me, array $body): array
         $type = str($body['type'] ?? '');
         if (!$me['room']) return ['ok' => false, 'error' => 'Escolha uma conversa para jogar.'];
         $peer = room_peer($me['room'], $me['name']);
+        // Modo +18: o baralho apimentado (verdade18, quem18…), marcado na partida com spicy.
+        $spicy = ($body['spicy'] ?? false) === true && in_array($type, SPICY_GAMES, true);
+        $deck = fn(string $name): string => $spicy ? $name . '18' : $name;
         switch ($type) {
             case 'vd':
                 $game = ['type' => 'vd', 'for' => $peer, 'choice' => null, 'prompt' => null];
                 break;
             case 'quem':
             case 'pergunta':
-                $game = ['type' => $type, 'prompt' => draw_card($type), ($type === 'quem' ? 'votes' : 'answers') => []] + ($type === 'quem' ? ['names' => [$me['name'], $peer]] : []);
+                $game = ['type' => $type, 'prompt' => draw_card($deck($type)), ($type === 'quem' ? 'votes' : 'answers') => []] + ($type === 'quem' ? ['names' => [$me['name'], $peer]] : []);
                 break;
             case 'isso':
-                $game = ['type' => 'isso', 'options' => draw_card('isso'), 'votes' => []];
+                $game = ['type' => 'isso', 'options' => draw_card($deck('isso')), 'votes' => []];
+                break;
+            case 'linha4':
+                $game = ['type' => 'linha4', 'seats' => [$me['name'], $peer], 'turn' => $me['name'], 'board' => array_fill(0, LINHA4_COLS * LINHA4_ROWS, ''), 'last' => null, 'winner' => null, 'line' => null];
+                break;
+            case 'forca':
+                [$word, $hint] = draw_card('forca');
+                $game = ['type' => 'forca', 'seats' => [$me['name'], $peer], 'turn' => $me['name'], 'word' => $word, 'hint' => $hint, 'guessed' => [], 'wrong' => 0,
+                    'lives' => FORCA_LIVES, 'last' => null, 'scores' => [$me['name'] => 0, $peer => 0], 'winner' => null];
                 break;
             case 'velha':
                 $game = ['type' => 'velha', 'seats' => [$me['name'], $peer], 'turn' => $me['name'], 'board' => array_fill(0, 9, ''), 'winner' => null, 'line' => null];
@@ -2697,6 +2958,7 @@ function game_act(array $me, array $body): array
             default:
                 return ['ok' => false, 'error' => 'Jogo desconhecido.'];
         }
+        if ($spicy) $game['spicy'] = true;
         $row = [
             'id' => uuid(), 'client_id' => null, 'sender' => $me['name'], 'text' => '', 'created_at' => iso(), 'reply_to' => null,
             'reactions' => '{}', 'deleted' => 0, 'source' => 'game', 'media' => encode(['game' => $game]), 'room' => $me['room']['id'],
@@ -2745,7 +3007,7 @@ function game_act(array $me, array $body): array
             if ($game['choice']) return ['ok' => true, 'message' => to_message($row)];
             if (!in_array($choice, ['verdade', 'desafio'], true)) return ['ok' => false, 'error' => 'Escolha verdade ou desafio.'];
             $game['choice'] = $choice;
-            $game['prompt'] = draw_card($choice);
+            $game['prompt'] = draw_card($choice . (empty($game['spicy']) ? '' : '18'));
             break;
         case 'vote':
             $value = $body['value'] ?? null;
@@ -2954,6 +3216,8 @@ function history(string $me, ?array $room): array
         'theme' => find_account($me)['theme'] ?? null,
         'wallpaper' => wallpaper_info(find_account($me)),
         'gifKey' => str(config()['giphy_key']),
+        'stickers' => sticker_list($me),
+        'countdown' => in_array($me, users(), true) ? countdown_state() : null,
         'fileMax' => file_max(),
         'watchChunk' => watch_chunk(),
         'transcribe' => str(config()['transcribe_key']) !== '',
@@ -3216,6 +3480,14 @@ function act(array $me, string $event, $data)
 
         case 'game':
             return game_act($me, $body);
+
+        case 'sticker':
+            return sticker_act($me, $body);
+
+        // Contagem regressiva do topo (só do casal).
+        case 'countdown':
+            if (!in_array($name, users(), true)) return ['ok' => false, 'error' => 'A contagem é só do casal.'];
+            return countdown_act($me, $body);
 
         // Tema escolhido: fica na conta e muda na hora nas outras abas da mesma pessoa.
         case 'theme':
@@ -3573,6 +3845,121 @@ function clean_gif($gif)
     return ['url' => $url, 'width' => $width, 'height' => $height, 'title' => text_slice(text_trim(str($gif['title'] ?? '')), 120)];
 }
 
+// ---------- contagem regressiva (topo do site) ----------
+// Até o próximo encontro: o dia (e a hora, se quiser) e o texto, iguais para os dois (settings, nome "countdown").
+// shortcut: sem nada gravado, vale a viagem de 12/12/2026 que o casal pediu; depois de mudar no site, vale o que foi gravado.
+const COUNTDOWN_DEFAULT = ['day' => '2026-12-12', 'time' => null, 'label' => 'Até a gente se ver', 'by' => null];
+
+function countdown_state(): ?array
+{
+    $raw = query('SELECT value FROM ' . t('settings') . " WHERE name = 'countdown'")->fetchColumn();
+    if ($raw === false) return COUNTDOWN_DEFAULT;
+    $state = json_decode((string) $raw, true);
+    return is_array($state) && !empty($state['day']) ? $state : null;
+}
+
+// Marcar (day, time opcional, label) ou desligar (off).
+function countdown_act(array $me, array $body): array
+{
+    if (($body['off'] ?? false) === true) {
+        $state = null;
+    } else {
+        $day = clean_day($body['day'] ?? '');
+        if (!$day) return ['ok' => false, 'error' => 'Escolha o dia.'];
+        $time = ($body['time'] ?? null) === null || $body['time'] === '' ? null : clean_clock($body['time']);
+        if (($body['time'] ?? null) && !$time) return ['ok' => false, 'error' => 'Hora inválida.'];
+        $state = ['day' => $day, 'time' => $time, 'label' => clean_line($body['label'] ?? '', 60) ?: COUNTDOWN_DEFAULT['label'], 'by' => $me['name']];
+    }
+    query('INSERT INTO ' . t('settings') . " (name, value) VALUES ('countdown', ?) ON DUPLICATE KEY UPDATE value = VALUES(value)", [encode($state ?? ['off' => true])]);
+    emit('countdown', ['countdown' => $state], 'all', null, null, couple_room()['id'] ?? null);
+    return ['ok' => true, 'countdown' => $state];
+}
+
+// ---------- figurinhas ----------
+// Cada pessoa tem a sua coleção (items, kind sticker): GIFs do GIPHY (só o endereço) e imagens (foto ou GIF do
+// aparelho, ou copiada de uma mensagem), guardadas em files presas à figurinha (message_id = id da figurinha). Na
+// conversa, a figurinha é um GIF com sticker = true (aparece sem balão).
+const STICKERS_MAX = 300;
+const STICKER_FILE_MAX = 3000000;
+const STICKER_FILE_URL = '#^api\.php\?action=file&k=([0-9a-f]{32})$#';
+
+function sticker_list(string $owner): array
+{
+    return array_map('item_public', query('SELECT * FROM ' . t('items') . " WHERE kind = 'sticker' AND owner = ? ORDER BY n DESC", [$owner])->fetchAll());
+}
+
+// Figurinha que vai numa mensagem: GIF do GIPHY ou imagem de uma figurinha da coleção de quem manda.
+function sticker_media($gif, string $owner)
+{
+    $url = str($gif['url'] ?? '');
+    if (!preg_match(STICKER_FILE_URL, $url, $match)) {
+        $clean = clean_gif($gif);
+        return $clean ? ['title' => '', 'sticker' => true] + $clean : false;
+    }
+    $file = query('SELECT f.width, f.height FROM ' . t('files') . ' f JOIN ' . t('items') . " i ON i.id = f.message_id AND i.kind = 'sticker' WHERE f.file_key = ? AND f.kind = 'image' AND i.owner = ?", [$match[1], $owner])->fetch();
+    return $file ? ['url' => $url, 'width' => (int) $file['width'], 'height' => (int) $file['height'], 'title' => '', 'sticker' => true] : false;
+}
+
+// Copia uma imagem de files para uma figurinha nova (a da mensagem some quando a mensagem é apagada).
+function copy_sticker_file(string $key, string $owner, string $itemId): ?array
+{
+    $file = query('SELECT width, height, size FROM ' . t('files') . " WHERE file_key = ? AND kind = 'image'", [$key])->fetch();
+    if (!$file || (int) $file['size'] > STICKER_FILE_MAX) return null;
+    $copy = bin2hex(random_bytes(16));
+    query('INSERT INTO ' . t('files') . ' (file_key, owner, name, type, kind, size, width, height, data, message_id, created_at) SELECT ?, ?, name, type, kind, size, width, height, data, ?, ? FROM ' . t('files') . ' WHERE file_key = ?',
+        [$copy, $owner, $itemId, now_ms(), $key]);
+    return ['url' => file_url($copy), 'width' => (int) $file['width'], 'height' => (int) $file['height']];
+}
+
+// add: de um GIF do GIPHY (gif), de uma imagem que acabou de subir (file) ou de uma mensagem com GIF, foto ou
+// figurinha (message). delete: tira da coleção.
+function sticker_act(array $me, array $body): array
+{
+    $name = $me['name'];
+    $op = str($body['op'] ?? '');
+    if ($op === 'delete') {
+        $row = find_item('sticker', str($body['id'] ?? ''));
+        if (!$row || $row['owner'] !== $name) return ['ok' => false, 'error' => 'Essa figurinha não está mais aqui.'];
+        // shortcut: só o registro sai; a imagem fica em files para as figurinhas já enviadas continuarem aparecendo.
+        query('DELETE FROM ' . t('items') . ' WHERE n = ?', [$row['n']]);
+    } elseif ($op === 'add') {
+        if (count(sticker_list($name)) >= STICKERS_MAX) return ['ok' => false, 'error' => 'A coleção está cheia (' . STICKERS_MAX . ' figurinhas). Tire alguma antes.'];
+        $itemId = uuid();
+        $sticker = null;
+        $gif = $body['gif'] ?? null;
+        if (isset($body['message'])) {
+            $row = member_message($name, str($body['message']));
+            $media = $row && !$row['deleted'] && $row['media'] ? json_decode((string) $row['media'], true) : null;
+            // Foto/GIF enviado ou figurinha de imagem: copia o arquivo. GIF do GIPHY: só o endereço.
+            $key = $media['file']['key'] ?? (preg_match(STICKER_FILE_URL, (string) ($media['url'] ?? ''), $match) ? $match[1] : null);
+            $gif = $key === null && isset($media['url']) ? $media : null;
+            if ($key !== null) $sticker = copy_sticker_file((string) $key, $name, $itemId);
+            if (!$sticker && !$gif) return ['ok' => false, 'error' => 'Só dá para salvar fotos e GIFs (até 3 MB) como figurinha.'];
+        }
+        if (!$sticker && isset($body['file'])) {
+            $key = str($body['file']);
+            $file = query('SELECT width, height, size FROM ' . t('files') . " WHERE file_key = ? AND owner = ? AND kind = 'image' AND message_id IS NULL", [$key, $name])->fetch();
+            if (!$file) return ['ok' => false, 'error' => 'Essa imagem não serve para figurinha.'];
+            if ((int) $file['size'] > STICKER_FILE_MAX) return ['ok' => false, 'error' => 'Figurinha muito grande (até 3 MB).'];
+            query('UPDATE ' . t('files') . ' SET message_id = ? WHERE file_key = ?', [$itemId, $key]);
+            $sticker = ['url' => file_url($key), 'width' => (int) $file['width'], 'height' => (int) $file['height']];
+        }
+        if (!$sticker && $gif !== null) {
+            $clean = clean_gif($gif);
+            if (!$clean) return ['ok' => false, 'error' => 'GIF inválido.'];
+            foreach (sticker_list($name) as $old) if ($old['url'] === $clean['url']) return ['ok' => true, 'stickers' => sticker_list($name), 'already' => true];
+            $sticker = ['url' => $clean['url'], 'width' => $clean['width'], 'height' => $clean['height']];
+        }
+        if (!$sticker) return ['ok' => false, 'error' => 'Escolha um GIF ou uma imagem.'];
+        save_item(null, $itemId, 'sticker', $name, null, $sticker);
+    } else {
+        return ['ok' => false, 'error' => 'Ação desconhecida.'];
+    }
+    $list = sticker_list($name);
+    emit('stickers', ['stickers' => $list], 'self', $me);
+    return ['ok' => true, 'stickers' => $list];
+}
+
 // Texto curto da mensagem para a citação de uma resposta.
 function preview_text(array $row): string
 {
@@ -3587,7 +3974,7 @@ function preview_text(array $row): string
     if (isset($media['music'])) return text_slice('Música: ' . $media['music']['title'], 160);
     if (isset($media['game'])) return GAME_NAMES[$media['game']['type']] ?? 'Joguinho';
     if (isset($media['call'])) return call_label($media['call']);
-    return $media ? 'GIF' : '';
+    return $media ? (!empty($media['sticker']) ? 'Figurinha' : 'GIF') : '';
 }
 
 function send_message(array $me, array $body): array
@@ -3596,7 +3983,7 @@ function send_message(array $me, array $body): array
     $room = $me['room']['id'];
     // Foto ou arquivo já enviado em api.php?action=upload (chave). Áudio gravado no chat vem com voice.
     $fileKey = str($body['file'] ?? '');
-    $gif = $fileKey === '' ? clean_gif($body['gif'] ?? null) : null;
+    $gif = $fileKey === '' ? (!empty($body['gif']['sticker']) ? sticker_media($body['gif'], $me['name']) : clean_gif($body['gif'] ?? null)) : null;
     if ($gif === false) return ['ok' => false, 'error' => 'GIF inválido.'];
     // Mensagem com GIF não leva texto.
     $text = $gif ? '' : text_slice(text_trim(str($body['text'] ?? '')), 2000);

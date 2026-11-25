@@ -61,6 +61,8 @@ await fs.writeFile(configFile, `<?php return ${phpValue({ token_secret: secret, 
 function phpValue(value) {
   if (value === null) return "null";
   if (typeof value === "boolean") return value ? "true" : "false";
+  // "" em vez de '': uma linha de comando com muitos '' seguidos é barrada (EPERM) pelo antivírus do Windows.
+  if (value === "") return '""';
   if (typeof value === "string") return `'${value.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`;
   if (typeof value === "number") return String(value);
   if (Array.isArray(value)) return `[${value.map(phpValue).join(", ")}]`;
@@ -401,6 +403,40 @@ try {
   assert.match((await fetch(`${photoUrl}&dl=1`)).headers.get("content-disposition"), /^attachment;/);
   const photoReply = await withAck(second, "message", { text: "Que foto linda", clientId: "cliente-foto-3", replyTo: photoMessage.id });
   assert.equal(photoReply.message.replyTo.text, "Foto");
+  // Figurinhas: cada um tem a sua coleção (vem com o histórico). A foto da mensagem é copiada (a da mensagem some
+  // quando ela é apagada); GIF do GIPHY guarda só o endereço, sem repetir; imagem do aparelho sobe e vira figurinha.
+  assert.deepEqual(first.history.stickers, []);
+  const stickerOf = (socket, data) => withAck(socket, "sticker", data);
+  const fromPhoto = await stickerOf(first, { op: "add", message: photoMessage.id });
+  assert.equal(fromPhoto.ok, true);
+  const [photoSticker] = fromPhoto.stickers;
+  assert.match(photoSticker.url, /^api\.php\?action=file&k=[0-9a-f]{32}$/);
+  assert.notEqual(photoSticker.url, photoMessage.file.url);
+  assert.deepEqual([photoSticker.width, photoSticker.height, photoSticker.owner], [64, 48, "Pessoa 1"]);
+  const stickerSent = await withAck(first, "message", { gif: { url: photoSticker.url, width: 1, height: 1, sticker: true }, clientId: "cliente-figurinha" });
+  assert.equal(stickerSent.ok, true, JSON.stringify(stickerSent));
+  assert.deepEqual(stickerSent.message.gif, { url: photoSticker.url, width: 64, height: 48, title: "", sticker: true }, "o tamanho vem do arquivo");
+  assert.equal((await withAck(second, "message", { text: "kkk", clientId: "cliente-figurinha-2", replyTo: stickerSent.message.id })).message.replyTo.text, "Figurinha");
+  // A figurinha de imagem só vai por quem tem ela na coleção; a outra pessoa pode salvar uma cópia.
+  assert.equal((await withAck(second, "message", { gif: { url: photoSticker.url, width: 64, height: 48, sticker: true }, clientId: "figurinha-alheia" })).error, "GIF inválido.");
+  const copied = await stickerOf(second, { op: "add", message: stickerSent.message.id });
+  assert.equal(copied.stickers.length, 1);
+  assert.notEqual(copied.stickers[0].url, photoSticker.url);
+  assert.equal((await withAck(second, "message", { gif: { url: copied.stickers[0].url, sticker: true }, clientId: "figurinha-copiada" })).ok, true);
+  assert.equal((await stickerOf(first, { op: "add", gif })).stickers.length, 2);
+  assert.equal((await stickerOf(first, { op: "add", gif })).already, true);
+  assert.equal((await stickerOf(first, { op: "add", gif: { ...gif, url: "https://exemplo.com/x.gif" } })).error, "GIF inválido.");
+  const ownImage = await upload(firstLogin.body.token, "figurinha.png", makePng(32, 32), "image/png");
+  const fromFile = await stickerOf(first, { op: "add", file: ownImage.body.file.key });
+  assert.equal(fromFile.stickers.length, 3);
+  assert.equal((await stickerOf(second, { op: "add", file: ownImage.body.file.key })).error, "Essa imagem não serve para figurinha.");
+  assert.equal((await stickerOf(first, { op: "add", message: gifReply.message.id })).error, "Só dá para salvar fotos e GIFs (até 3 MB) como figurinha.");
+  // Tirar da coleção não apaga a imagem: a figurinha já enviada continua aparecendo.
+  assert.equal((await stickerOf(second, { op: "delete", id: fromPhoto.stickers.at(-1).id })).error, "Essa figurinha não está mais aqui.");
+  assert.equal((await stickerOf(first, { op: "delete", id: photoSticker.id })).stickers.length, 2);
+  assert.equal((await fetch(`${baseUrl}/${photoSticker.url}`)).status, 200);
+  // As mensagens de figurinha saem (o resto do teste conta as mensagens da conversa).
+  sql("DELETE FROM {p}messages WHERE client_id IN ('cliente-figurinha', 'cliente-figurinha-2', 'figurinha-copiada')");
   // HTML disfarçado vira arquivo comum: sempre baixa, nunca abre dentro do site.
   const htmlUp = await upload(firstLogin.body.token, "pagina.html", Buffer.from("<script>alert(1)</script>"), "text/html");
   assert.equal(htmlUp.body.file.kind, "file");
@@ -471,6 +507,22 @@ try {
   assert.equal(firstTab3.history.theme, "rosa");
   firstTab3.disconnect();
   assert.equal(sql("SELECT theme FROM {p}users WHERE name = 'Pessoa 1'")[0].theme, "rosa");
+  // Os temas novos (o Natal também é um tema, salvo na conta).
+  for (const theme of ["vinho", "oceano", "coral", "natal"]) assert.deepEqual(await withAck(second, "theme", { theme }), { ok: true }, theme);
+
+  // Contagem regressiva do topo: sem nada gravado, a viagem de 12/12; mudar vale para os dois na hora; dá para desligar.
+  assert.deepEqual(first.history.countdown, { day: "2026-12-12", time: null, label: "Até a gente se ver", by: null });
+  const countdownSeen = next(second, "countdown");
+  const trip = await withAck(first, "countdown", { day: "2026-12-12", time: "9:05", label: "  Chegada em São Paulo  " });
+  assert.deepEqual(trip.countdown, { day: "2026-12-12", time: "09:05", label: "Chegada em São Paulo", by: "Pessoa 1" });
+  assert.deepEqual((await countdownSeen).countdown, trip.countdown);
+  assert.equal((await withAck(first, "countdown", { day: "2026-02-31" })).error, "Escolha o dia.");
+  assert.equal((await withAck(first, "countdown", { day: "2026-12-12", time: "25:00" })).error, "Hora inválida.");
+  assert.deepEqual((await withAck(second, "countdown", { off: true })).countdown, null);
+  const afterOff = await connect(firstLogin.body.token);
+  assert.equal(afterOff.history.countdown, null);
+  afterOff.disconnect();
+  assert.equal((await withAck(first, "countdown", { day: "2026-12-12", label: "" })).countdown.label, "Até a gente se ver");
 
   // Papel de parede: fica na conta, muda nas outras abas da mesma pessoa e não vai para a outra pessoa.
   assert.equal(first.history.wallpaper, null);
@@ -1106,6 +1158,36 @@ try {
     await us(us2, { op: "letter:delete", id: stolen.item.id });
     assert.equal((await us(us1, { op: "letter:delete", id: rich.item.id })).ok, true);
     assert.equal(sql(`SELECT COUNT(*) AS total FROM {p}files WHERE message_id = '${rich.item.id}'`)[0].total, 0);
+    // Cartinha formatada (o editor): o HTML passa pelo filtro (só formatação, nada de script, evento ou link), o texto
+    // puro sai dele, e as imagens soltas ficam onde a pessoa deixou (foto de quem escreve, figurinha da coleção dela).
+    const decorPhoto = (await upload(firstLogin.body.token, "canto.png", makePng(6, 4))).body.file;
+    const giphySticker = { url: "https://media.giphy.com/media/abc/200.gif", width: 200, height: 150 };
+    const formatted = await us(us1, {
+      op: "letter:save", title: "Formatada", paper: "noite", pattern: "coracoes", border: "dupla", paperColor: "#FFAACC",
+      html: '<div style="text-align: center; position: fixed">Oi <b onclick="x()">amor</b><script>alert(1)</script></div><span style="color: rgb(1, 2, 3); font-family: Caveat; background-image: url(x)">rosa</span><a href="javascript:x">link</a>',
+      decor: [
+        { type: "photo", key: decorPhoto.key, x: 1.4, y: 0.1, w: 0.01, rot: 400, z: 3, frame: "polaroid" },
+        { type: "sticker", ...giphySticker, x: 0.2, y: 0.9, w: 0.3, rot: -10, frame: "moldura-falsa" },
+        { type: "sticker", url: "api.php?action=file&k=" + "0".repeat(32), width: 9, height: 9 },
+        { type: "photo", key: peerLetterPhoto.key }
+      ]
+    });
+    assert.equal(formatted.ok, true, JSON.stringify(formatted));
+    assert.equal(formatted.item.html, '<div style="text-align: center">Oi <b>amor</b></div><span style="color: rgb(1, 2, 3); font-family: &quot;Caveat&quot;, cursive">rosa</span>link');
+    assert.equal(formatted.item.body, "Oi amor\nrosalink");
+    assert.deepEqual([formatted.item.paper, formatted.item.pattern, formatted.item.border, formatted.item.paperColor], ["noite", "coracoes", "dupla", "#ffaacc"]);
+    assert.deepEqual(formatted.item.decor.map(({ type, x, y, w, rot, z, frame, width }) => [type, x, y, w, rot, z, frame, width]),
+      [["photo", 1, 0.1, 0.06, 180, 3, "polaroid", 6], ["sticker", 0.2, 0.9, 0.3, -10, 1, "none", 200]]);
+    const formattedListed = (await us(us2, { op: "load" })).letters.find((item) => item.id === formatted.item.id);
+    assert.deepEqual([formattedListed.html, formattedListed.decor, formattedListed.preview], [undefined, undefined, "Oi amor rosalink"]);
+    assert.equal((await us(us2, { op: "letter:open", id: formatted.item.id })).item.decor.length, 2);
+    // Editar mantendo a figurinha (mesmo fora da coleção) e tirando a foto: a foto sai do banco.
+    const reformatted = await us(us1, { op: "letter:save", id: formatted.item.id, title: "Formatada", html: "<p>Só texto</p>", decor: [formatted.item.decor[1]] });
+    assert.deepEqual([reformatted.item.body, reformatted.item.decor.length, reformatted.item.pattern, reformatted.item.border, reformatted.item.paperColor], ["Só texto", 1, "linhas", "nenhuma", ""]);
+    assert.equal(sql(`SELECT COUNT(*) AS total FROM {p}files WHERE file_key = '${decorPhoto.key}'`)[0].total, 0);
+    assert.equal((await us(us1, { op: "letter:save", title: "Vazia", html: "<div><br></div><script>x</script>" })).error, "Escreva alguma coisa na cartinha.");
+    assert.equal((await us(us1, { op: "letter:save", title: "Gigante", html: "<b>a</b>".repeat(30000) })).error, "A cartinha ficou grande demais. Tire um pouco da formatação.");
+    assert.equal((await us(us1, { op: "letter:delete", id: formatted.item.id })).ok, true);
     assert.equal((await us(us1, { op: "nada" })).error, "Ação desconhecida.");
 
     // ---------- Joguinhos ----------
@@ -1239,6 +1321,48 @@ try {
     assert.equal((await game(us1, { op: "end", id: stop.message.id })).message.game.winner, "Pessoa 1");
     // Placar: as partidas de tabuleiro que acabaram (a memória ainda não acabou), por jogo.
     assert.deepEqual((await game(us2, { op: "score" })).score, { velha: { wins: { "Pessoa 1": 1 }, ties: 0 }, dama: { wins: { "Pessoa 2": 1 }, ties: 0 }, stop: { wins: { "Pessoa 1": 1 }, ties: 0 } });
+    // Modo +18: as cartas vêm do baralho apimentado e a partida fica marcada; nos de tabuleiro, não vale.
+    const spicyDecks = JSON.parse(execFileSync("php", [...phpArgs, "-r", `echo json_encode(require ${phpValue(path.join(site, "lib", "jogos.php").replaceAll("\\", "/"))}, JSON_UNESCAPED_UNICODE);`]).toString());
+    const hotPair = await game(us1, { op: "new", type: "isso", spicy: true });
+    assert.equal(hotPair.message.game.spicy, true);
+    assert.ok(spicyDecks.isso18.some((options) => JSON.stringify(options) === JSON.stringify(hotPair.message.game.options)), "isso ou aquilo +18");
+    const hotDare = await game(us1, { op: "new", type: "vd", spicy: true });
+    assert.ok(spicyDecks.desafio18.includes((await game(us2, { op: "pick", id: hotDare.message.id, choice: "desafio" })).message.game.prompt), "desafio +18");
+    assert.equal((await game(us1, { op: "new", type: "pergunta", spicy: "sim" })).message.game.spicy, undefined, "só com true");
+    // 4 em linha: a peça cai até embaixo; coluna cheia não vale; 4 seguidas ganha (e a linha vem junto).
+    const four = await game(us1, { op: "new", type: "linha4" });
+    assert.deepEqual([four.message.game.board.length, four.message.game.seats, four.message.game.spicy], [42, ["Pessoa 1", "Pessoa 2"], undefined]);
+    const drop = (socket, col) => game(socket, { op: "drop", id: four.message.id, col });
+    assert.equal((await drop(us2, 0)).error, "Não é a sua vez.");
+    assert.equal((await drop(us1, 7)).error, "Escolha uma coluna.");
+    let dropped = await drop(us1, 3);
+    assert.deepEqual([dropped.message.game.board[38], dropped.message.game.last, dropped.message.game.turn], ["R", 38, "Pessoa 2"]);
+    for (const [socket, col] of [[us2, 3], [us1, 3], [us2, 3], [us1, 3], [us2, 3]]) dropped = await drop(socket, col);
+    assert.equal((await drop(us1, 3)).error, "Essa coluna está cheia.");
+    for (const [socket, col] of [[us1, 0], [us2, 6], [us1, 1], [us2, 6], [us1, 2]]) dropped = await drop(socket, col);
+    assert.deepEqual([dropped.message.game.winner, dropped.message.game.line], ["Pessoa 1", [35, 36, 37, 38]]);
+    assert.equal((await drop(us2, 6)).error, "Esse jogo já acabou.");
+    // Forca: a palavra não sai do servidor antes do fim; acertou, pontua e joga de novo; errou, passa a vez.
+    const hang = await game(us1, { op: "new", type: "forca" });
+    assert.equal(hang.message.game.word, undefined);
+    assert.ok(hang.message.game.hint && hang.message.game.mask.length > 2);
+    sql(`UPDATE {p}messages SET media = JSON_SET(media, '$.game.word', 'pão doce') WHERE id = '${hang.message.id}'`);
+    const guess = (socket, letter) => game(socket, { op: "guess", id: hang.message.id, letter });
+    let guessed = await guess(us1, "P");
+    assert.deepEqual([guessed.message.game.mask, guessed.message.game.turn, guessed.message.game.scores], [["p", null, null, " ", null, null, null, null], "Pessoa 1", { "Pessoa 1": 1, "Pessoa 2": 0 }]);
+    assert.equal((await guess(us1, "p")).error, "Essa letra já foi.");
+    assert.equal((await guess(us1, "ab")).error, "Escolha uma letra.");
+    guessed = await guess(us1, "x");
+    assert.deepEqual([guessed.message.game.wrong, guessed.message.game.turn], [1, "Pessoa 2"]);
+    for (const letter of ["o", "d", "c", "e"]) guessed = await guess(us2, letter);
+    assert.equal((await guess(us2, "á")).message.game.winner, "Pessoa 2", "ã vale como a");
+    const finished = (await game(us1, { op: "get", id: hang.message.id })).message.game;
+    assert.deepEqual([finished.word, finished.mask.join(""), finished.scores], ["pão doce", "pão doce", { "Pessoa 1": 1, "Pessoa 2": 6 }]);
+    const hanged = await game(us1, { op: "new", type: "forca" });
+    sql(`UPDATE {p}messages SET media = JSON_SET(media, '$.game.word', 'zz') WHERE id = '${hanged.message.id}'`);
+    let miss;
+    for (const [socket, letter] of [[us1, "a"], [us2, "b"], [us1, "c"], [us2, "d"], [us1, "e"], [us2, "f"]]) miss = await game(socket, { op: "guess", id: hanged.message.id, letter });
+    assert.deepEqual([miss.message.game.winner, miss.message.game.hanged, miss.message.game.word], ["empate", true, "zz"]);
     // Responder a uma carta cita o nome do jogo; o jogo não conta como mensagem no perfil; o histórico vem escondido.
     assert.equal((await withAck(us2, "message", { text: "Eu!", clientId: "cliente-jogo", replyTo: likely.message.id })).message.replyTo.text, "Quem é mais provável?");
     const reopenedGames = await connect(secondLogin.body.token);
@@ -1497,7 +1621,7 @@ try {
   for (let i = 0; i < 14; i += 1) if ((await login("Pessoa 1", "errada")).status === 429) blocked += 1;
   assert.ok(blocked >= 1);
 
-  console.log("Integração PHP + MySQL aprovada: atualização do banco antigo, página, contas com senha própria, sala de duas pessoas, GIFs, fotos e arquivos (envio, entrega protegida, faixas de bytes, limpeza), foto de perfil (também em GIF), perfil da outra pessoa, tema, papel de parede, bot de música, mensagens de voz (áudio do navegador em MP4 e WebM, duração, forma de onda e transcrição), pesquisa na conversa, trechos antigos e hora da leitura, nosso cantinho (o dia de cada um com fotos, hábitos, resposta aos lembretes, agenda com repetições, sonhos e metas, cartinhas com fotos, áudios e letra), joguinhos (cartas, velha, dama, memória e stop), extensão, confirmação, deduplicação, respostas, reações, leitura, apagar, digitando (e gravando áudio), chamadas, long polling, sessões da versão Node, paginação, senha esquecida e persistência.");
+  console.log("Integração PHP + MySQL aprovada: atualização do banco antigo, página, contas com senha própria, sala de duas pessoas, GIFs, fotos e arquivos (envio, entrega protegida, faixas de bytes, limpeza), foto de perfil (também em GIF), perfil da outra pessoa, tema, papel de parede, bot de música, mensagens de voz (áudio do navegador em MP4 e WebM, duração, forma de onda e transcrição), pesquisa na conversa, trechos antigos e hora da leitura, nosso cantinho (o dia de cada um com fotos, hábitos, resposta aos lembretes, agenda com repetições, sonhos e metas, cartinhas com fotos, áudios, letra, formatação e imagens soltas), figurinhas, joguinhos (cartas, modo +18, velha, dama, memória, stop, 4 em linha e forca), extensão, confirmação, deduplicação, respostas, reações, leitura, apagar, digitando (e gravando áudio), chamadas, long polling, sessões da versão Node, paginação, senha esquecida e persistência.");
 } finally {
   servers.forEach((server) => server.kill());
   transcriberServer.close();
