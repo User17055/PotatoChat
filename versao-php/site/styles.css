@@ -2974,10 +2974,6 @@ button.w-note { cursor: pointer; }
 
 /* O botão de entretenimento no topo: no computador, com o nome do lado (é o lugar de tudo); no celular, só o ícone. */
 .hub-label { display: none; }
-@media (min-width: 761px) {
-  .icon-button.hub-button { display: inline-flex; align-items: center; width: auto; gap: 8px; padding: 0 16px 0 12px; border-radius: 999px; }
-  .hub-label { display: inline; font-size: 13px; font-weight: 700; }
-}
 .hub-card .watch-source[data-us-open="jogos"] { --brand: #2fbf71; }
 .hub-card .watch-source[data-us-open="nos"] { --brand: #ff7eb6; }
 .hub-card .watch-source[data-us-open="cartinhas"] { --brand: #ff8c1a; }
