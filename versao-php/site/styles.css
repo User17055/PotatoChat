@@ -2900,10 +2900,11 @@ button.w-note { cursor: pointer; }
 .trip-today { display: none; font-size: 13px; font-weight: 800; color: var(--accent); }
 .trip-clock.today .trip-today { display: inline; }
 @media (max-width: 760px) {
-  .trip-clock { gap: 6px; margin-left: 8px; }
-  .trip-clock > .icon, .clock-unit.seconds { display: none; }
-  .clock-box { width: 24px; height: 24px; border-radius: 6px; }
-  .clock-box b { font-size: 12px; }
+  .trip-clock { gap: 4px; margin-left: 6px; }
+  .trip-clock > .icon { display: none; }
+  .clock-units { gap: 3px; }
+  .clock-box { width: 22px; height: 24px; border-radius: 6px; }
+  .clock-box b { font-size: 11px; }
   .clock-unit small { font-size: 8px; }
 }
 

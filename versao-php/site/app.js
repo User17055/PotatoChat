@@ -7544,12 +7544,32 @@ function paintSideAgenda() {
 
 function setMenu(open) {
   if (matchMedia("(min-width: 761px)").matches) {
-    chatView.classList.toggle("sidebar-collapsed", open);
+    const sidebar = $("#sidebar");
+    const gsap = window.gsap;
+    const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
     document.querySelectorAll("[data-menu]").forEach((button) => {
       button.setAttribute("aria-expanded", String(!open));
       button.setAttribute("aria-label", open ? "Mostrar menu" : "Ocultar menu");
       button.title = open ? "Mostrar menu" : "Ocultar menu";
     });
+    if (gsap && !reduced) {
+      gsap.killTweensOf([chatView, sidebar]);
+      if (open) {
+        chatView.classList.remove("sidebar-collapsed");
+        gsap.set(chatView, { gridTemplateColumns: "0px minmax(0, 1fr)" });
+        gsap.set(sidebar, { x: -18, opacity: 0, display: "flex" });
+        gsap.to(chatView, { gridTemplateColumns: "280px minmax(0, 1fr)", duration: 0.38, ease: "power2.out", clearProps: "gridTemplateColumns" });
+        gsap.to(sidebar, { x: 0, opacity: 1, duration: 0.34, ease: "power2.out", clearProps: "transform,opacity" });
+      } else {
+        gsap.to(chatView, { gridTemplateColumns: "0px minmax(0, 1fr)", duration: 0.34, ease: "power2.inOut", onComplete: () => {
+          chatView.classList.add("sidebar-collapsed");
+          gsap.set(chatView, { clearProps: "gridTemplateColumns" });
+        } });
+        gsap.to(sidebar, { x: -18, opacity: 0, duration: 0.26, ease: "power2.in", onComplete: () => gsap.set(sidebar, { clearProps: "transform,opacity" }) });
+      }
+    } else {
+      chatView.classList.toggle("sidebar-collapsed", open);
+    }
     if (open) sound.play("tap");
     return;
   }
