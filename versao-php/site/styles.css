@@ -3035,3 +3035,8 @@ button.w-note { cursor: pointer; }
 .hub-button { position: relative; }
 .hub-dot { position: absolute; top: 3px; right: 3px; width: 10px; height: 10px; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 2px var(--bg); }
 .hub-dot.hidden { display: none; }
+
+/* Na Watch Party o topo fica na coluna estreita da conversa: o Entretenimento volta a ser só o ícone redondo, para não
+   cobrir a foto e o nome da pessoa. */
+.app-shell.watching .icon-button.hub-button { display: grid; width: 42px; padding: 0; border-radius: 50%; }
+.app-shell.watching .hub-label { display: none; }
