@@ -3044,3 +3044,22 @@ button.w-note { cursor: pointer; }
 /* Os botões do topo do Nosso cantinho (ligar, Watch Party e Entretenimento), no canto direito. */
 .us-actions { flex: none; display: flex; gap: 8px; margin-left: auto; }
 @media (max-width: 760px) { .us-actions { gap: 4px; } }
+
+/* Cartinha em tela inteira, como no Word: o cartão ocupa a tela toda (vence o .wide de 640 px) e a folha tem largura de
+   página, centralizada. A cartinha aberta usa a mesma largura de folha, para as linhas e as fotos soltas caírem no mesmo
+   lugar em que foram postas. */
+.letter-composer .modal-card.sheet-card.wide { width: 100%; max-width: none; height: 100%; max-height: none; border-radius: 0; }
+.letter-composer .sheet-body > [data-field="body"] .letter-page { width: 100%; max-width: 820px; margin: 0 auto; }
+.letter-composer .sheet-body > :not([data-field="title"]):not([data-field="body"]) { max-width: 820px; width: 100%; margin-inline: auto; }
+.letter-composer .sheet-body > [data-field="title"] { max-width: 820px; width: 100%; margin-inline: auto; }
+.letter-composer .rich-bar { max-width: 820px; width: 100%; margin-inline: auto; }
+.letter-paper { width: min(100%, 880px); }
+
+/* A folha da cartinha como num documento: altura de página (quase a tela toda), a área rola inteira com a barra de
+   formatação presa no alto, e as opções de papel ficam embaixo da folha. */
+.letter-composer .sheet-body { grid-template-rows: none; grid-auto-rows: auto; align-content: start; overflow-x: hidden; overflow-y: auto; }
+.letter-composer .sheet-body > [data-field] { grid-row: auto; }
+.letter-composer .sheet-body > [data-field="body"] { display: grid; grid-template-rows: none; min-height: 0; gap: 10px; }
+.letter-composer .sheet-body > [data-field="body"] .rich-bar { position: sticky; top: 0; z-index: 6; }
+.letter-composer .sheet-body > [data-field="body"] .letter-page { height: auto; min-height: max(520px, calc(100dvh - 250px)); overflow: visible; }
+.letter-composer .sheet-body > [data-field="body"] .letter-rich { min-height: max(490px, calc(100dvh - 280px)); }

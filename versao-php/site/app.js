@@ -9887,9 +9887,32 @@ function richField(wrap, field) {
   editor.setAttribute("aria-label", "Texto da cartinha");
   editor.dataset.placeholder = "Escreva com o coração…";
   editor.innerHTML = field.value.html || "";
+  // Imagem dentro do texto (soltada em cima dele, ou de um rascunho antigo) não mexe e o servidor tira ao enviar: ela sai
+  // do texto e vira uma foto solta no papel, com as alças de mover, aumentar, diminuir e girar.
+  const liftImages = () => {
+    for (const image of editor.querySelectorAll("img")) {
+      const source = image.getAttribute("src") || "";
+      image.remove();
+      if (!/^(blob:|data:image\/|https?:)/.test(source)) continue;
+      fetch(source).then((response) => response.blob()).then((blob) => {
+        if (blob.type.startsWith("image/")) addDecorPhoto(wrap, new File([blob], "foto", { type: blob.type }));
+      }).catch(() => toast("Não deu para trazer essa imagem. Use o botão de imagem da barra.", "error"));
+    }
+  };
   editor.addEventListener("input", () => {
+    liftImages();
     // Apagou tudo: sem o <br> que sobra, o "Escreva com o coração…" volta.
     if (!editor.textContent.trim() && !editor.querySelector("li")) editor.innerHTML = "";
+  });
+  // Soltar no texto: imagem vira foto solta no papel; o resto entra como texto puro (sem a formatação de fora).
+  editor.addEventListener("drop", (event) => {
+    const files = [...(event.dataTransfer?.files || [])].filter((file) => file.type.startsWith("image/"));
+    const plain = event.dataTransfer?.getData("text/plain");
+    if (!files.length && plain == null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (files.length) return files.forEach((file) => addDecorPhoto(wrap, file));
+    document.execCommand("insertText", false, plain);
   });
   // Colar vem sem a formatação de fora (o texto puro); imagem colada vira imagem solta no papel.
   editor.addEventListener("paste", (event) => {
@@ -9907,6 +9930,7 @@ function richField(wrap, field) {
   const stickerPicker = el("div", "decor-stickers hidden");
   wrap.append(bar, stickerPicker, page);
   paintDecor(wrap);
+  liftImages();
 
   // Os botões da barra não tiram o foco do texto (a seleção continua lá).
   bar.addEventListener("mousedown", (event) => {
