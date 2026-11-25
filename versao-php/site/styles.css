@@ -2953,7 +2953,13 @@ button.w-note { cursor: pointer; }
   .clock-box { width: 22px; height: 24px; border-radius: 6px; }
   .clock-box b { font-size: 11px; }
   .clock-unit small { font-size: 8px; }
+  /* Os botões do topo (lupa, telefone e TV) nunca encolhem nem saem da tela: quem cede é a contagem e o nome. */
+  .topbar .actions { flex: none; }
 }
+/* Celular estreito (ou com o zoom de tela do Android maior): a contagem fica só com dias, horas e minutos, e depois só
+   dias e horas, para a TV continuar à vista. */
+@media (max-width: 400px) { .clock-unit.seconds { display: none; } }
+@media (max-width: 345px) { .clock-unit:nth-child(3) { display: none; } }
 
 .trip-change { margin-top: 10px; padding: 8px 16px; border: 1px solid #ffffff33; border-radius: 999px; background: transparent; color: #fff; font-size: 13px; font-weight: 600; }
 
@@ -2964,3 +2970,6 @@ button.w-note { cursor: pointer; }
 .watch-source[data-us-open="jogos"] { --brand: #2fbf71; }
 .watch-source[data-us-open="nos"] { --brand: #ff7eb6; }
 .watch-source span { text-align: center; }
+
+/* Figurinhas e GIFs do painel: tocar manda; segurar não arrasta nem abre o menu de imagem do celular. */
+:is(.sticker-item, .gif-item) img { -webkit-user-drag: none; -webkit-touch-callout: none; user-select: none; }

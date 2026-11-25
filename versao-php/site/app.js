@@ -1270,6 +1270,7 @@ function addGif(found) {
   image.decoding = "async";
   image.width = found.thumb.width;
   image.height = found.thumb.height;
+  image.draggable = false;
   button.append(image);
   const cell = el("div", "gif-cell");
   const star = el("button", "gif-save");
@@ -1460,6 +1461,8 @@ function paintStickers() {
     image.alt = "";
     image.loading = "lazy";
     image.decoding = "async";
+    // Tocar manda; segurar não começa um "arrastar imagem" do navegador (que mostrava a tela de soltar arquivo).
+    image.draggable = false;
     button.append(image);
     if (stickerEditing) button.append(el("span", "sticker-remove", "×"));
     return button;
@@ -1707,11 +1710,27 @@ document.addEventListener("dragstart", (event) => {
   if (gif) event.dataTransfer.setData(STICKER_DRAG, JSON.stringify(gif));
 });
 const dragsFiles = (event) => [...(event.dataTransfer?.types || [])].some((type) => type === "Files" || type === STICKER_DRAG);
+const dragsSticker = (event) => [...(event.dataTransfer?.types || [])].includes(STICKER_DRAG);
+// A figurinha ou o GIF arrastado: pela marca do arraste ou, sem ela (de outra aba do Potato), pelo endereço da imagem.
+function draggedSticker(event) {
+  const marked = event.dataTransfer.getData(STICKER_DRAG);
+  if (marked) return JSON.parse(marked);
+  const url = (event.dataTransfer.getData("text/uri-list") || "").split("\n")[0].trim();
+  if (!url) return null;
+  const mine = stickers.find((item) => new URL(item.url, document.baseURI).href === url);
+  if (mine) return { url: mine.url, width: mine.width, height: mine.height, title: "", sticker: true };
+  return /^https:\/\/(?:media\d*|i)\.giphy\.com\//.test(url) ? { url, width: 200, height: 200, title: "", sticker: true } : null;
+}
 
 conversationEl.addEventListener("dragenter", (event) => {
   if (!dragsFiles(event)) return;
   event.preventDefault();
-  if (dragDepth++ === 0) fx.show(dropZone, { scale: 0.98 });
+  if (dragDepth++ === 0) {
+    // Figurinha ou GIF: a tela de soltar diz isso (não "arquivo").
+    const sticker = dragsSticker(event);
+    dropZone.querySelector("span").replaceChildren(icon(sticker ? "sticker" : "paperclip"), sticker ? "Solte para mandar a figurinha" : "Solte para enviar");
+    fx.show(dropZone, { scale: 0.98 });
+  }
 });
 conversationEl.addEventListener("dragover", (event) => {
   if (!dragsFiles(event)) return;
@@ -1728,9 +1747,8 @@ conversationEl.addEventListener("drop", (event) => {
   event.preventDefault();
   dragDepth = 0;
   dropZone.classList.add("hidden");
-  const dragged = event.dataTransfer.getData(STICKER_DRAG);
-  if (dragged) {
-    const gif = JSON.parse(dragged);
+  const gif = draggedSticker(event);
+  if (gif) {
     // Figurinha de imagem da outra pessoa: só dá para mandar depois de salvar (pelo menu da mensagem).
     if (gif.sticker && gif.url.startsWith("api.php") && !stickers.some((item) => item.url === gif.url)) return toast("Salve essa figurinha primeiro (menu da mensagem) para mandar.");
     send("", gif);
