@@ -302,20 +302,11 @@ function asset(string $file): string
       <!-- Barra lateral: as conversas (os contatos e o Adicionar pessoa), as partes do Nosso cantinho (só do casal) e o
            perfil. No celular, vira uma gaveta (botão de menu). -->
       <aside id="sidebar" class="sidebar" aria-label="Menu">
-        <div>
+        <div class="sidebar-top">
           <div class="brand-row"><svg class="potato-mini" viewBox="0 0 142 100" aria-hidden="true"><use href="#potato" /></svg><strong>Potato</strong></div>
           <button class="side-link side-chat-link" type="button" data-tab-target="chat"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-chat" /></svg></span><span class="side-text"><strong>Chat</strong><small>Voltar à conversa</small></span></button>
           <div class="room-label">Conversas</div>
           <div id="people" class="people"></div>
-          <div class="room-label couple-only">Nosso cantinho</div>
-          <nav class="side-nav couple-only" aria-label="Nosso cantinho">
-            <button class="side-link" type="button" data-us-open="hoje"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-sun" /></svg></span><span class="side-text"><strong>Rotina do dia</strong><small>Acordar, refeições e hábitos</small></span></button>
-            <button class="side-link" type="button" data-us-open="agenda"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-calendar" /></svg></span><span class="side-text"><strong>Agenda</strong><small id="side-agenda">Os compromissos dos dois</small></span></button>
-            <button class="side-link" type="button" data-us-open="sonhos"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-sparkles" /></svg></span><span class="side-text"><strong>Sonhos e metas</strong><small>O que vamos realizar juntos</small></span></button>
-            <button class="side-link" type="button" data-us-open="nos"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-heart" /></svg></span><span class="side-text"><strong>Nós</strong><small>Dias juntos, distância e desenhos</small></span></button>
-            <button class="side-link" type="button" data-us-open="cartinhas"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-mail" /></svg></span><span class="side-text"><strong>Cartinhas</strong><small>O nosso blog de cartas</small></span><b class="us-count letters-new hidden"></b></button>
-            <button class="side-link" type="button" data-us-open="jogos"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-gamepad" /></svg></span><span class="side-text"><strong>Entretenimento</strong><small>Jogos ilustrados para jogar juntos</small></span><b class="us-count games-turn hidden"></b></button>
-          </nav>
         </div>
         <!-- Seu perfil: foto, tema, notificações, sons e sair ficam todos na aba Perfil. -->
         <div class="sidebar-bottom">
@@ -362,6 +353,7 @@ function asset(string $file): string
             <button id="hub-button" class="icon-button hub-button" type="button" title="Entretenimento" aria-label="Abrir o entretenimento: jogos, desenhos, cartinhas e mais" aria-haspopup="dialog" aria-controls="hub-view">
               <svg class="icon"><use href="#i-apps" /></svg>
               <span class="hub-label">Entretenimento</span>
+              <i class="hub-dot hidden" aria-hidden="true"></i>
             </button>
             <button id="music-button" class="icon-button music-button hidden" type="button" title="Música tocando" aria-label="Abrir o tocador de música" aria-expanded="false" aria-controls="music-panel">
               <span id="music-mini-art" class="mini-art" aria-hidden="true"></span>
@@ -1237,11 +1229,11 @@ function asset(string $file): string
                 </div>
                                 <p class="watch-more-title">Nosso cantinho</p>
                 <div class="watch-sources watch-more" aria-label="Nosso cantinho">
-                  <button type="button" class="watch-source hub" data-hub-go data-us-open="jogos"><svg class="icon"><use href="#i-gamepad" /></svg><span>Jogos</span></button>
+                  <button type="button" class="watch-source hub" data-hub-go data-us-open="jogos"><svg class="icon"><use href="#i-gamepad" /></svg><span>Jogos</span><b class="us-count games-turn hidden"></b></button>
                   <button type="button" class="watch-source hub" data-hub-go data-us-open="nos"><svg class="icon"><use href="#i-heart" /></svg><span>Nós e desenhos</span></button>
-                  <button type="button" class="watch-source hub" data-hub-go data-us-open="cartinhas"><svg class="icon"><use href="#i-mail" /></svg><span>Cartinhas</span></button>
+                  <button type="button" class="watch-source hub" data-hub-go data-us-open="cartinhas"><svg class="icon"><use href="#i-mail" /></svg><span>Cartinhas</span><b class="us-count letters-new hidden"></b></button>
                   <button type="button" class="watch-source hub" data-hub-go data-us-open="hoje"><svg class="icon"><use href="#i-sun" /></svg><span>Rotina do dia</span></button>
-                  <button type="button" class="watch-source hub" data-hub-go data-us-open="agenda"><svg class="icon"><use href="#i-calendar" /></svg><span>Agenda</span></button>
+                  <button type="button" class="watch-source hub" data-hub-go data-us-open="agenda"><svg class="icon"><use href="#i-calendar" /></svg><span>Agenda</span><small id="side-agenda" class="hub-next"></small></button>
                   <button type="button" class="watch-source hub" data-hub-go data-us-open="sonhos"><svg class="icon"><use href="#i-sparkles" /></svg><span>Sonhos e metas</span></button>
                 </div>
       </div>

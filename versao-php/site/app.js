@@ -7577,6 +7577,8 @@ function paintUsBadge() {
     });
   }
   usNews = letters + turns + (tab === "us" ? 0 : usUnseen);
+  // O botão Entretenimento (onde ficam as cartinhas e os jogos) ganha o pontinho quando tem novidade lá.
+  $(".hub-dot").classList.toggle("hidden", !usNews);
   paintMenuDot();
   paintSideAgenda();
 }
@@ -7590,7 +7592,7 @@ function paintSideAgenda() {
     if (event) next = [event, day];
   }
   const when = next && (next[1] === todayKey() ? "Hoje" : next[1] === shiftDay(todayKey(), 1) ? "Amanhã" : shortDate(next[1]));
-  $("#side-agenda").textContent = next ? `${when}${next[0].time ? ` ${next[0].time}` : ""} · ${next[0].title}` : "Os compromissos dos dois";
+  $("#side-agenda").textContent = next ? `${when}${next[0].time ? ` ${next[0].time}` : ""} · ${next[0].title}` : "";
 }
 
 // ---- menu: a barra lateral (no celular, uma gaveta que abre pelo botão de menu) ----
