@@ -7307,6 +7307,10 @@ function onHubKey(event) {
 // O mesmo Entretenimento no topo do Nosso cantinho (para trocar de opção sem voltar para a conversa).
 document.addEventListener("click", (event) => {
   if (event.target.closest("[data-open-hub]")) $("#hub-button").click();
+  // Os botões do topo do Nosso cantinho fazem o mesmo que os do topo da conversa.
+  const proxy = event.target.closest("[data-proxy]");
+  if (proxy && proxy.dataset.proxy === "#watch-button" && tab !== "chat") showTab("chat");
+  if (proxy) $(proxy.dataset.proxy).click();
 });
 $("#hub-button").addEventListener("click", () => {
   fx.press($("#hub-button"));
@@ -11738,7 +11742,7 @@ const FORCA_PARTS = ["M112 36a14 14 0 1 1-.1 0", "M112 64v40", "M112 74 94 90", 
 function paintForca(message) {
   const game = message.game;
   const canPlay = !game.winner && game.turn === me && !table.busy;
-  const wrap = el("div", "forca");
+  const wrap = el("div", "forca-board");
   const art = svgNode("svg", { viewBox: "0 0 160 176", class: "forca-art", "aria-hidden": "true" });
   for (const d of ["M18 160h124", "M48 160V18", "M48 18h64", "M112 18v18", "M48 42l28-24"]) art.append(svgNode("path", { d, class: "frame" }));
   FORCA_PARTS.slice(0, game.wrong).forEach((d, index) => {

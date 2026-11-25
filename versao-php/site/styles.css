@@ -2471,7 +2471,7 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
 .modal-card.table-card[data-type="forca"] { width: min(100%, 780px); max-height: min(900px, calc(100dvh - 32px)); padding: 22px 24px 20px; background: radial-gradient(110% 120% at 8% 0%, color-mix(in srgb, #2fb48a 14%, var(--surface)), var(--surface) 65%); }
 .table-card[data-type="forca"]::before { height: 180px; opacity: .14; }
 .table-card[data-type="forca"] .table-board { padding: 14px 18px 18px; border: 1px solid color-mix(in srgb, #2fb48a 22%, var(--line)); border-radius: 24px; background: color-mix(in srgb, var(--surface) 80%, transparent); }
-.forca { display: grid; grid-template-columns: 190px minmax(0, 1fr); grid-template-areas: "art side" "keys keys"; align-items: center; gap: 14px 24px; width: 100%; max-width: none; }
+.forca-board { display: grid; grid-template-columns: 190px minmax(0, 1fr); grid-template-areas: "art side" "keys keys"; align-items: center; gap: 14px 24px; width: 100%; max-width: none; }
 .forca-art { grid-area: art; display: block; width: 100%; height: auto; overflow: visible; }
 .forca-art path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
 .forca-art .frame { stroke: color-mix(in srgb, var(--accent) 62%, var(--muted)); stroke-width: 7; }
@@ -2496,7 +2496,7 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
 .forca-key.hit { border-color: transparent; background: color-mix(in srgb, var(--ok, #3ba55d) 30%, var(--surface-2)); opacity: 1; }
 .forca-key.miss { border-color: transparent; background: color-mix(in srgb, var(--danger) 22%, var(--surface-2)); text-decoration: line-through; }
 .forca-mini { margin: 0; font: 700 17px/1.4 Georgia, serif; letter-spacing: .12em; text-transform: uppercase; }
-@media (max-width: 600px) { .modal-card.table-card[data-type="forca"] { width: 100%; padding: 16px 12px 14px; } .table-card[data-type="forca"] .table-board { padding: 10px; } .forca { grid-template-columns: 92px minmax(0, 1fr); gap: 10px; } .forca-side { gap: 10px; padding: 12px; } .forca-letter { width: 28px; height: 40px; font-size: 20px; } .forca-keys { grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 5px; } .forca-key { height: 40px; border-radius: 10px; font-size: 13px; } }
+@media (max-width: 600px) { .modal-card.table-card[data-type="forca"] { width: 100%; padding: 16px 12px 14px; } .table-card[data-type="forca"] .table-board { padding: 10px; } .forca-board { grid-template-columns: 92px minmax(0, 1fr); gap: 10px; } .forca-side { gap: 10px; padding: 12px; } .forca-letter { width: 28px; height: 40px; font-size: 20px; } .forca-keys { grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 5px; } .forca-key { height: 40px; border-radius: 10px; font-size: 13px; } }
 
 /* ---------- fim da partida: a faixa em cima do tabuleiro ---------- */
 #table-board { position: relative; }
@@ -3041,5 +3041,6 @@ button.w-note { cursor: pointer; }
   .app-shell.watching:not(.watch-cinema):has(.watch-panel.expanded) .conversation { padding-top: 52dvh; }
 }
 
-/* O Entretenimento no topo do Nosso cantinho, no canto direito. */
-.us-top .us-hub { flex: none; margin-left: auto; }
+/* Os botões do topo do Nosso cantinho (ligar, Watch Party e Entretenimento), no canto direito. */
+.us-actions { flex: none; display: flex; gap: 8px; margin-left: auto; }
+@media (max-width: 760px) { .us-actions { gap: 4px; } }

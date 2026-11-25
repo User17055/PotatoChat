@@ -829,8 +829,12 @@ function asset(string $file): string
         <header class="profile-top us-top">
           <button class="menu-button" type="button" data-menu title="Menu" aria-label="Abrir o menu" aria-controls="sidebar" aria-expanded="false"><svg class="icon"><use href="#i-menu" /></svg><i class="menu-dot hidden" aria-hidden="true"></i></button>
           <h2 id="us-title"><span class="us-title-icon" aria-hidden="true"><svg class="icon"><use id="us-title-icon" href="#i-sun" /></svg></span><span id="us-title-text">Rotina do dia</span></h2>
-          <!-- O Entretenimento também aqui: dá para trocar de opção sem voltar para a conversa. -->
-          <button class="icon-button us-hub" type="button" data-open-hub title="Entretenimento" aria-label="Abrir o entretenimento"><svg class="icon"><use href="#i-apps" /></svg></button>
+          <!-- Os mesmos botões do topo da conversa (menos a lupa): ligar, Watch Party e o Entretenimento, para trocar de opção. -->
+          <div class="us-actions">
+            <button class="icon-button" type="button" data-proxy="#call-button" title="Ligar por voz" aria-label="Ligar por voz"><svg class="icon"><use href="#i-phone" /></svg></button>
+            <button class="icon-button" type="button" data-proxy="#watch-button" title="Batata Watch Party" aria-label="Abrir a Batata Watch Party"><svg class="icon"><use href="#i-tv" /></svg></button>
+            <button class="icon-button us-hub" type="button" data-open-hub title="Entretenimento" aria-label="Abrir o entretenimento"><svg class="icon"><use href="#i-apps" /></svg></button>
+          </div>
         </header>
         <div id="us-scroll" class="us-scroll">
           <!-- Hoje: o dia de cada um, lado a lado (no celular, um embaixo do outro). Dá para voltar aos dias anteriores. -->
@@ -1224,13 +1228,11 @@ function asset(string $file): string
           <h2 id="hub-title">Entretenimento</h2>
           <button id="hub-close" class="peer-close" type="button" title="Fechar" aria-label="Fechar"><svg class="icon"><use href="#i-x" /></svg></button>
         </header>
-                                <p class="watch-more-title">Fazer junto</p>
-                <div class="watch-sources watch-more" aria-label="Fazer junto">
-                  <button id="video-call" type="button" class="watch-source" data-hub-go title="Chamada de vídeo" data-title="Chamada de vídeo"><svg class="icon"><use href="#i-video" /></svg><span>Chamada de vídeo</span></button>
-                  <button id="share-screen" type="button" class="watch-source" data-hub-go title="Transmitir tela" data-title="Transmitir tela"><svg class="icon"><use href="#i-monitor-up" /></svg><span>Transmitir a tela</span></button>
-                  <button id="audio-call" type="button" hidden title="Chamada de voz" data-title="Chamada de voz"></button>
-                </div>
-                                <p class="watch-more-title">Nosso cantinho</p>
+                <!-- Vídeo e tela ficam na ligação (o telefone do topo); estes, escondidos, servem aos atalhos (o perfil da pessoa). -->
+                <button id="audio-call" type="button" hidden title="Chamada de voz" data-title="Chamada de voz"></button>
+                <button id="video-call" type="button" hidden title="Chamada de vídeo" data-title="Chamada de vídeo"></button>
+                <button id="share-screen" type="button" hidden title="Transmitir tela" data-title="Transmitir tela"></button>
+                <p class="watch-more-title">Nosso cantinho</p>
                 <div class="watch-sources watch-more" aria-label="Nosso cantinho">
                   <button type="button" class="watch-source hub" data-hub-go data-us-open="jogos"><svg class="icon"><use href="#i-gamepad" /></svg><span>Jogos</span><b class="us-count games-turn hidden"></b></button>
                   <button type="button" class="watch-source hub" data-hub-go data-us-open="nos"><svg class="icon"><use href="#i-heart" /></svg><span>Nós e desenhos</span></button>
