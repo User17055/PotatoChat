@@ -5764,7 +5764,7 @@ peopleEl.addEventListener("click", (event) => {
   if (event.target.closest("[data-add-person]")) return openAddPerson();
   const row = event.target.closest("[data-room]");
   if (!row) return;
-  setMenu(false);
+  setSidebarVisible(false);
   openRoom(row.dataset.room).then((opened) => { if (opened) showTab("chat"); });
 });
 
@@ -5808,7 +5808,7 @@ const addSheet = $("#add-person");
 let pendingInvite = "";
 
 function openAddPerson() {
-  setMenu(false);
+  setSidebarVisible(false);
   $("#invite-link").value = "";
   $("#invite-code").value = "";
   $("#invite-state").textContent = "Criando o link…";
@@ -6351,7 +6351,7 @@ async function returnToCall() {
   if (call !== active) return;
   active.minimized = false;
   showTab("chat");
-  setMenu(false);
+  setSidebarVisible(false);
   paintCallDock();
   $("#call-minimize").focus({ preventScroll: true });
 }
@@ -7546,19 +7546,27 @@ function paintSideAgenda() {
 
 // ---- menu: a barra lateral (no celular, uma gaveta que abre pelo botão de menu) ----
 
-function setMenu(open) {
+let desktopSidebarOpen = !chatView.classList.contains("sidebar-collapsed");
+document.querySelectorAll("[data-menu]").forEach((button) => {
+  const visible = matchMedia("(min-width: 761px)").matches ? desktopSidebarOpen : chatView.classList.contains("menu-open");
+  button.setAttribute("aria-expanded", String(visible));
+  button.setAttribute("aria-label", visible ? "Ocultar menu" : "Abrir menu");
+  button.title = visible ? "Ocultar menu" : "Abrir menu";
+});
+
+function setSidebarVisible(visible) {
   if (matchMedia("(min-width: 761px)").matches) {
     const sidebar = $("#sidebar");
     const gsap = window.gsap;
     const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
     document.querySelectorAll("[data-menu]").forEach((button) => {
-      button.setAttribute("aria-expanded", String(!open));
-      button.setAttribute("aria-label", open ? "Mostrar menu" : "Ocultar menu");
-      button.title = open ? "Mostrar menu" : "Ocultar menu";
+      button.setAttribute("aria-expanded", String(visible));
+      button.setAttribute("aria-label", visible ? "Ocultar menu" : "Abrir menu");
+      button.title = visible ? "Ocultar menu" : "Abrir menu";
     });
     if (gsap && !reduced) {
       gsap.killTweensOf([chatView, sidebar]);
-      if (open) {
+      if (visible) {
         chatView.classList.remove("sidebar-collapsed");
         gsap.set(chatView, { gridTemplateColumns: "0px minmax(0, 1fr)" });
         gsap.set(sidebar, { x: -18, opacity: 0, display: "flex" });
@@ -7572,29 +7580,34 @@ function setMenu(open) {
         gsap.to(sidebar, { x: -18, opacity: 0, duration: 0.26, ease: "power2.in", onComplete: () => gsap.set(sidebar, { clearProps: "transform,opacity" }) });
       }
     } else {
-      chatView.classList.toggle("sidebar-collapsed", open);
+      chatView.classList.toggle("sidebar-collapsed", !visible);
     }
-    if (open) sound.play("tap");
+    desktopSidebarOpen = visible;
+    sound.play("tap");
     return;
   }
-  chatView.classList.toggle("menu-open", open);
-  document.querySelectorAll("[data-menu]").forEach((button) => button.setAttribute("aria-expanded", String(open)));
-  if (open) sound.play("tap");
+  chatView.classList.toggle("menu-open", visible);
+  document.querySelectorAll("[data-menu]").forEach((button) => {
+    button.setAttribute("aria-expanded", String(visible));
+    button.setAttribute("aria-label", visible ? "Fechar menu" : "Abrir menu");
+    button.title = visible ? "Fechar menu" : "Abrir menu";
+  });
+  sound.play("tap");
 }
 
 document.addEventListener("click", (event) => {
   if (event.target.closest("[data-menu]")) {
     const desktop = matchMedia("(min-width: 761px)").matches;
-    return setMenu(!(desktop ? chatView.classList.contains("sidebar-collapsed") : chatView.classList.contains("menu-open")));
+    return setSidebarVisible(desktop ? !desktopSidebarOpen : !chatView.classList.contains("menu-open"));
   }
-  if (event.target.closest("#menu-backdrop")) return setMenu(false);
-  if (event.target.closest(".sidebar [data-tab-target], .sidebar [data-us-open]") && !matchMedia("(min-width: 761px)").matches) setMenu(false);
+  if (event.target.closest("#menu-backdrop")) return setSidebarVisible(false);
+  if (event.target.closest(".sidebar [data-tab-target], .sidebar [data-us-open]") && !matchMedia("(min-width: 761px)").matches) setSidebarVisible(false);
 });
 
 window.addEventListener("keydown", (event) => {
   if (event.key !== "Escape" || !chatView.classList.contains("menu-open")) return;
   event.stopImmediatePropagation();
-  setMenu(false);
+  setSidebarVisible(false);
 }, true);
 
 function openUs() {
@@ -9604,14 +9617,14 @@ function writeLetter(letter = null) {
       return true;
     }
   });
-  const controls = el("aside", "letter-controls");
-  controls.setAttribute("aria-label", "Opções da cartinha");
-  controls.append(el("h4", "letter-controls-title", "Personalizar a folha"));
+  const editor = sheetForm.querySelector('[data-field="body"]');
+  const styleBar = el("div", "letter-style-tools");
+  styleBar.setAttribute("aria-label", "Opções do papel e anexos");
   for (const name of ["paper", "pattern", "border", "font", "photos", "audios"]) {
     const field = sheetForm.querySelector(`[data-field="${name}"]`);
-    if (field) controls.append(field);
+    if (field) styleBar.append(field);
   }
-  sheetForm.querySelector("#sheet-body").append(controls);
+  editor.insertBefore(styleBar, editor.querySelector(".letter-page"));
 }
 
 // ---- editor da cartinha (como num Word) ----
