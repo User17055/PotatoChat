@@ -3566,12 +3566,16 @@ const tripLeftText = () => {
 function rollDigit(box, value) {
   const current = box.querySelector("b:last-child");
   if (current?.textContent === value) return;
+  const digitKey = current?.dataset.clock;
   const gsap = matchMedia("(prefers-reduced-motion: reduce)").matches ? null : window.gsap;
   if (!current || !gsap) {
-    box.replaceChildren(el("b", "", value));
+    const next = el("b", "", value);
+    if (digitKey) next.dataset.clock = digitKey;
+    box.replaceChildren(next);
     return;
   }
   const next = el("b", "", value);
+  if (digitKey) next.dataset.clock = digitKey;
   box.append(next);
   gsap.fromTo(next, { yPercent: 100, opacity: 0 }, { yPercent: 0, opacity: 1, duration: 0.45, ease: "power3.out" });
   gsap.to(current, { yPercent: -100, opacity: 0, duration: 0.45, ease: "power3.out", onComplete: () => current.remove() });
@@ -4186,7 +4190,7 @@ const MUSIC_COMMANDS = [
   { name: "skip", icon: "skip", text: "Pula para a próxima da fila" },
   { name: "stop", icon: "stop", text: "Para e limpa a fila" },
   { name: "fila", icon: "list-music", text: "Abre o tocador com a fila" },
-  { name: "watchparty", args: "nome ou link (YouTube ou Twitch)", icon: "tv", text: "Abre a Batata Watch Party: YouTube, Twitch, Netflix, HBO Max ou vídeo do aparelho" }
+  { name: "watchparty", args: "nome ou link do YouTube", icon: "tv", text: "Abre a Batata Watch Party para assistir YouTube junto" }
 ];
 const COMMAND_ALIAS = { tocar: "play", continuar: "play", resume: "play", pausar: "pause", pular: "skip", next: "skip", proxima: "skip", parar: "stop", queue: "fila", watch: "watchparty", assistir: "watchparty", wp: "watchparty", ver: "watchparty" };
 // Aviso quando a outra pessoa mexe no tocador: ícone e texto.
@@ -5256,7 +5260,7 @@ function paintWatchPicker() {
   const notice = $("#watch-browsing");
   notice.classList.toggle("hidden", !chooser);
   if (chooser) notice.textContent = chooser.service === "local" ? `${chooser.name} está enviando um vídeo do aparelho…` : `${chooser.name} está escolhendo ${WATCH_WHERE[chooser.service] || "algo"}…`;
-  const recent = watch.recent || [];
+  const recent = (watch.recent || []).filter((entry) => entry.source === "youtube");
   $("#watch-recent").classList.toggle("hidden", !recent.length);
   paintWatchRow($("#watch-recent-list"), recent);
   if (WATCH_LAUNCH[screen]) paintWatchLaunch(screen);
@@ -5385,8 +5389,8 @@ $("#catalog-form").addEventListener("submit", (event) => {
   const input = $("#catalog-query");
   const query = input.value.trim();
   if (!query) return input.focus();
-  // Link colado (YouTube, Twitch, Netflix ou HBO Max): abre direto.
-  if (/^https?:\/\/|youtu\.?be|twitch\.tv|netflix\.com|max\.com/i.test(query)) {
+  // Link do YouTube: abre direto. Outros endereços viram busca no catálogo do YouTube.
+  if (/youtu\.be|youtube\.com/i.test(query)) {
     input.value = "";
     return watchCommand("start", { query });
   }
@@ -7583,7 +7587,8 @@ document.addEventListener("click", (event) => {
     const desktop = matchMedia("(min-width: 761px)").matches;
     return setMenu(!(desktop ? chatView.classList.contains("sidebar-collapsed") : chatView.classList.contains("menu-open")));
   }
-  if (event.target.closest("#menu-backdrop") || event.target.closest(".sidebar [data-tab-target], .sidebar [data-us-open]")) setMenu(false);
+  if (event.target.closest("#menu-backdrop")) return setMenu(false);
+  if (event.target.closest(".sidebar [data-tab-target], .sidebar [data-us-open]") && !matchMedia("(min-width: 761px)").matches) setMenu(false);
 });
 
 window.addEventListener("keydown", (event) => {
@@ -9547,6 +9552,7 @@ function writeLetter(letter = null) {
     title: letter ? "Editar cartinha" : `Cartinha para ${peerName || "o seu amor"}`,
     icon: "mail",
     wide: true,
+    fullScreen: true,
     submit: letter ? "Salvar" : "Enviar",
     fields: [
       { name: "title", type: "text", label: "Título", value: letter?.title ?? draft?.title, placeholder: "Para o meu amor", max: 120 },
@@ -9555,7 +9561,7 @@ function writeLetter(letter = null) {
       { name: "pattern", type: "chips", label: "Fundo", value: style.pattern, options: LETTER_PATTERNS.map(([value, label]) => [value, label]), onPick: restyle("pattern") },
       { name: "border", type: "chips", label: "Borda", value: style.border, options: LETTER_BORDERS.map(([value, label]) => [value, label]), onPick: restyle("border") },
       { name: "font", type: "chips", label: "Letra", value: style.font, options: LETTER_FONTS.map(([value, label]) => [value, label, `font-chip font-${value}`]), onPick: restyle("font") },
-      { name: "photos", type: "photos", label: "Fotos no fim (polaroides)", value: letter?.photos, limit: LETTER_PHOTOS },
+      { name: "photos", type: "photos", label: "Fotos extras", value: letter?.photos, limit: LETTER_PHOTOS },
       { name: "audios", type: "audios", label: "Áudios", value: letter?.audios, limit: LETTER_AUDIOS, hint: "Uma mensagem de voz ou uma música (MP3, M4A, OGG ou WAV)." }
     ],
     // O rascunho (o texto formatado e o papel; sem as fotos, os áudios e as imagens soltas, que ainda não subiram) fica
@@ -9598,6 +9604,14 @@ function writeLetter(letter = null) {
       return true;
     }
   });
+  const controls = el("aside", "letter-controls");
+  controls.setAttribute("aria-label", "Opções da cartinha");
+  controls.append(el("h4", "letter-controls-title", "Personalizar a folha"));
+  for (const name of ["paper", "pattern", "border", "font", "photos", "audios"]) {
+    const field = sheetForm.querySelector(`[data-field="${name}"]`);
+    if (field) controls.append(field);
+  }
+  sheetForm.querySelector("#sheet-body").append(controls);
 }
 
 // ---- editor da cartinha (como num Word) ----
@@ -9660,6 +9674,12 @@ function decorNode(piece, index = -1, picked = false) {
       button.append(icon(iconName));
       bar.append(button);
     }
+    const position = el("select", "decor-position");
+    position.title = "Posição da imagem";
+    position.setAttribute("aria-label", "Posição da imagem");
+    const positions = [[.18, .18, "Alto à esquerda"], [.5, .18, "Alto no centro"], [.82, .18, "Alto à direita"], [.18, .5, "Centro à esquerda"], [.5, .5, "Centro"], [.82, .5, "Centro à direita"], [.18, .82, "Embaixo à esquerda"], [.5, .82, "Embaixo no centro"], [.82, .82, "Embaixo à direita"]];
+    positions.forEach(([x, y, label]) => position.append(Object.assign(el("option", "", label), { value: `${x},${y}`, selected: Math.abs(piece.x - x) < .05 && Math.abs(piece.y - y) < .05 })));
+    bar.append(position);
     node.append(bar, el("span", "decor-handle decor-resize"), el("span", "decor-handle decor-rotate"));
   }
   return node;
@@ -9672,10 +9692,8 @@ function paintDecor(wrap) {
 function addDecor(wrap, piece) {
   if (wrap.decor.length >= LETTER_DECOR) return toast(`Cabem até ${LETTER_DECOR} imagens soltas no papel.`);
   const z = Math.min(99, Math.max(0, ...wrap.decor.map((item) => item.z || 1)) + 1);
-  // Cada nova entra num canto diferente (dá para arrastar depois).
-  const corners = [[0.8, 0.12], [0.2, 0.12], [0.8, 0.88], [0.2, 0.88], [0.5, 0.5]];
-  const [x, y] = corners[wrap.decor.length % corners.length];
-  wrap.decor.push({ x, y, rot: x > 0.5 ? 5 : -5, z, ...piece });
+  // A nova imagem começa no centro da folha; dá para escolher um ponto no menu ou arrastar livremente.
+  wrap.decor.push({ x: 0.5, y: 0.5, rot: 0, z, ...piece });
   wrap.picked = wrap.decor.length - 1;
   paintDecor(wrap);
   sound.play("tap");
@@ -9871,6 +9889,14 @@ function richField(wrap, field) {
     }
     paintDecor(wrap);
   });
+  decor.addEventListener("change", (event) => {
+    const select = event.target.closest(".decor-position");
+    const piece = wrap.decor[wrap.picked];
+    if (!select || !piece) return;
+    [piece.x, piece.y] = select.value.split(",").map(Number);
+    paintDecor(wrap);
+    sheetChanged();
+  });
   // Arrastar: move, muda o tamanho (alça do canto) ou gira (alça de cima). Tocar fora solta a imagem escolhida.
   page.addEventListener("pointerdown", (event) => {
     const node = event.target.closest(".decor-item");
@@ -9881,7 +9907,7 @@ function richField(wrap, field) {
       }
       return;
     }
-    if (event.target.closest("[data-decor-act]")) return;
+    if (event.target.closest("[data-decor-act], .decor-position")) return;
     event.preventDefault();
     const index = Number(node.dataset.decor);
     if (wrap.picked !== index) {
@@ -10107,7 +10133,7 @@ const sheetForm = $("#sheet-form");
 let sheetState = null;
 let sheetTimer = 0;
 
-function openSheet({ title, icon: iconName = "sparkles", fields, submit = "Salvar", cancel = "Cancelar", onSubmit, onDelete = null, deleteLabel = "Apagar", wide = false, onChange = null }) {
+function openSheet({ title, icon: iconName = "sparkles", fields, submit = "Salvar", cancel = "Cancelar", onSubmit, onDelete = null, deleteLabel = "Apagar", wide = false, fullScreen = false, onChange = null }) {
   sheetState = { fields, onSubmit, onDelete, onChange, busy: false };
   $("#sheet-title").textContent = title;
   setIcon($("#sheet-icon use"), iconName);
@@ -10117,6 +10143,7 @@ function openSheet({ title, icon: iconName = "sparkles", fields, submit = "Salva
   $("#sheet-delete").textContent = deleteLabel;
   $("#sheet-delete").classList.toggle("hidden", !onDelete);
   sheetForm.classList.toggle("wide", wide);
+  sheet.classList.toggle("letter-composer", fullScreen);
   sheetForm.classList.remove("busy");
   $("#sheet-body").replaceChildren(...fields.map(fieldNode));
   sheet.classList.remove("hidden");
@@ -10135,6 +10162,7 @@ function closeSheet() {
   if (playback.key.startsWith("draft:")) stopVoice();
   sheetState = null;
   sheet.classList.add("hidden");
+  sheet.classList.remove("letter-composer");
   document.removeEventListener("keydown", onSheetKey, true);
 }
 

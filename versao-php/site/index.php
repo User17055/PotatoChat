@@ -458,7 +458,7 @@ function asset(string $file): string
           </div>
         </div>
 
-        <!-- Assistir junto: um vídeo para os dois (YouTube, Twitch ou do aparelho), com o mesmo play/pause. -->
+        <!-- Assistir junto: um vídeo do YouTube para os dois, com o mesmo play/pause. -->
         <div id="watch-panel" class="watch-panel hidden" aria-label="Watch Party">
           <header class="watch-head">
             <span class="watch-badge"><svg class="potato-mark" viewBox="0 0 142 100" aria-hidden="true"><use href="#potato" /></svg>Batata Watch Party</span>
@@ -477,10 +477,6 @@ function asset(string $file): string
                 <!-- No celular, a fileira passa para o lado. -->
                 <div class="watch-sources" aria-label="Onde escolher">
                   <button type="button" class="watch-source" data-watch-source="youtube"><svg class="brand" aria-hidden="true"><use href="#b-youtube" /></svg><span>YouTube</span></button>
-                  <button type="button" class="watch-source" data-watch-source="netflix"><b class="wordmark netflix">NETFLIX</b><span>Netflix</span></button>
-                  <button type="button" class="watch-source" data-watch-source="max"><b class="wordmark max">max</b><span>HBO Max</span></button>
-                  <button type="button" class="watch-source" data-watch-source="twitch"><svg class="brand" aria-hidden="true"><use href="#b-twitch" /></svg><span>Twitch</span></button>
-                  <button type="button" class="watch-source" data-watch-source="local"><svg class="icon"><use href="#i-file" /></svg><span>Do aparelho</span></button>
                 </div>
                 <section id="watch-recent" class="watch-recent hidden" aria-label="Vistos por vocês">
                   <h3>Vistos por vocês</h3>
