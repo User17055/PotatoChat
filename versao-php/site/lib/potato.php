@@ -16,7 +16,7 @@ const SEARCH_PAGE = 30;
 const REACTIONS = ['❤️', '😂', '😮', '😢', '👍', '🔥'];
 const MAX_BODY = 1000000;
 const EVENT_KEEP_MS = 120000;
-const SCHEMA_VERSION = '9';
+const SCHEMA_VERSION = '10';
 const MIN_PASSWORD = 4;
 const AVATAR_MAX = 400000;
 // GIF animado vai sem recortar (o recorte tiraria a animação): limite maior, que ainda cabe numa requisição.
@@ -34,6 +34,9 @@ const VOICE_PEAKS = 64;
 // Papel de parede: foto reduzida no navegador (lado maior até 1600 px). Cabe numa requisição mesmo em base64.
 const WALLPAPER_MAX = 650000;
 const MUSIC_QUEUE_MAX = 50;
+// Watch Party na Netflix e na HBO Max: em quanto tempo os dois players começam (ou continuam) juntos.
+const STREAM_START_MS = 5000;
+const STREAM_RESUME_MS = 1500;
 // Chamada: quanto tempo ela toca nos aparelhos da outra pessoa (depois, continua aberta esperando). Veja "chamadas".
 const CALL_RING_MS = 60000;
 const CALL_WAIT_MS = 300000;
@@ -374,6 +377,12 @@ function message_columns(): array
     ];
 }
 
+// Até qual mensagem da conversa cada pessoa já recebeu (num aparelho dela; os ✓✓ cinza, como no WhatsApp).
+function read_columns(): array
+{
+    return ['got_id' => 'got_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL'];
+}
+
 // A conversa do evento (vazio = de todos): só as duas pessoas dela recebem.
 function event_columns(): array
 {
@@ -402,7 +411,7 @@ function migrate(PDO $pdo): void
             // Banco vazio: a tabela settings ainda não existe.
         }
         foreach (schema() as $sql) $pdo->exec($sql);
-        foreach (['users' => user_columns(), 'messages' => message_columns(), 'events' => event_columns()] as $table => $wanted) {
+        foreach (['users' => user_columns(), 'messages' => message_columns(), 'events' => event_columns(), 'reads' => read_columns()] as $table => $wanted) {
             $columns = $pdo->query('SHOW COLUMNS FROM ' . t($table))->fetchAll(PDO::FETCH_COLUMN);
             $missing = array_diff_key($wanted, array_flip($columns));
             if (!$missing) continue;
@@ -1428,7 +1437,10 @@ function watch_act(array $me, array $body): array
             $streamed = in_array($item['source'], ['netflix', 'max'], true);
             if ($streamed && ($state['now']['url'] ?? '') === ($item['url'] ?? '')) return ['ok' => true, 'state' => watch_public($state), 'action' => ['op' => 'same', 'by' => $me['name']]];
             // Da extensão vem também o segundo em que o player de lá já está.
-            $state = ['now' => $item, 'playing' => true, 'position' => $streamed ? ($reported ?? 0) : 0, 'updatedAt' => $now, 'browsing' => null, 'recent' => watch_recent($state['recent'], $item)];
+            // Netflix e HBO Max: os dois players ficam parados no mesmo segundo até STREAM_START_MS e começam juntos
+            // (dá tempo de o título carregar no aparelho da outra pessoa), sem contagem na tela.
+            $state = ['now' => $item, 'playing' => true, 'position' => $streamed ? ($reported ?? 0) : 0, 'updatedAt' => $now + ($streamed ? STREAM_START_MS : 0),
+                'browsing' => null, 'recent' => watch_recent($state['recent'], $item)];
             $action['item'] = $item;
             // Os dois sons juntos não dá: a música pausa.
             $music = music_state($room, true);
@@ -1455,16 +1467,9 @@ function watch_act(array $me, array $body): array
             if (!$state['playing']) {
                 if ($reported !== null) $state['position'] = $reported;
                 $state['playing'] = true;
-                $state['updatedAt'] = $now;
+                // Netflix e HBO Max: continuam juntos um instante depois (o aviso chega nos dois antes).
+                $state['updatedAt'] = $now + (in_array($state['now']['source'] ?? '', ['netflix', 'max'], true) ? STREAM_RESUME_MS : 0);
             }
-            break;
-        case 'countdown':
-            // Contagem 3, 2, 1 para os dois darem o play juntos (Netflix e HBO Max no celular).
-            if (!$state['now']) return ['ok' => false, 'error' => 'Nenhum vídeo agora.'];
-            $state['position'] = $at();
-            $state['playing'] = true;
-            $state['updatedAt'] = $now + 4000;
-            $action['at'] = $state['updatedAt'];
             break;
         case 'seek':
             if (!$state['now']) return ['ok' => false, 'error' => 'Nenhum vídeo agora.'];
@@ -2178,7 +2183,7 @@ const LETTER_HTML_MAX = 150000;
 // As letras do editor (mesmas do app.js e do styles.css): o nome que o navegador escreve → a fonte com o reserva.
 const LETTER_FAMILIES = [
     'georgia' => 'Georgia, "Times New Roman", serif', 'caveat' => '"Caveat", cursive', 'dancing script' => '"Dancing Script", cursive',
-    'patrick hand' => '"Patrick Hand", cursive', 'special elite' => '"Special Elite", "Courier New", monospace', 'poppins' => '"Poppins", sans-serif',
+    'patrick hand' => '"Patrick Hand", cursive', 'special elite' => '"Special Elite", "Courier New", monospace', 'poppins' => '"Poppins", sans-serif', 'inter' => '"Inter", sans-serif',
 ];
 const LETTER_SIZES = ['x-small', 'small', 'medium', 'large', 'x-large', 'xx-large', 'xxx-large'];
 
@@ -3199,6 +3204,26 @@ function reads(string $room): array
     return $reads;
 }
 
+// Até onde cada pessoa da conversa já recebeu (nome → id da mensagem).
+function delivered(string $room): array
+{
+    return query('SELECT name, got_id FROM ' . t('reads') . ' WHERE room = ? AND got_id IS NOT NULL', [$room])->fetchAll(PDO::FETCH_KEY_PAIR);
+}
+
+// Um aparelho desta pessoa está conectado (buscou novidades): tudo o que a outra pessoa mandou até agora chegou. Marca em
+// cada conversa dela e avisa quem mandou (os ✓✓ cinza). Só escreve quando tem mensagem nova.
+function mark_delivered(string $name): void
+{
+    foreach (rooms_of($name) as $room) {
+        $last = query('SELECT id, n FROM ' . t('messages') . ' WHERE room = ? AND sender <> ? ORDER BY n DESC LIMIT 1', [$room['id'], $name])->fetch();
+        if (!$last) continue;
+        $got = (int) query('SELECT m.n FROM ' . t('reads') . ' r JOIN ' . t('messages') . ' m ON m.id = r.got_id WHERE r.room = ? AND r.name = ?', [$room['id'], $name])->fetchColumn();
+        if ($got >= (int) $last['n']) continue;
+        query('INSERT INTO ' . t('reads') . ' (room, name, got_id) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE got_id = VALUES(got_id)', [$room['id'], $name, $last['id']]);
+        emit('delivered', ['name' => $name, 'id' => $last['id'], 'room' => $room['id']], 'peer', ['name' => $name], null, $room['id']);
+    }
+}
+
 // Histórico de quem conecta (ou troca de conversa): a conversa aberta (room, com quem é, as mensagens, as leituras, a
 // música, a Watch Party e as partidas dela), a lista de conversas, as chamadas abertas, o tema da conta (null = nunca
 // escolheu) e a chave da busca de GIFs (chave do GIPHY, feita para ficar no navegador; vazia = GIFs desligados).
@@ -3212,6 +3237,7 @@ function history(string $me, ?array $room): array
         'rooms' => room_list($me),
         'couple' => in_array($me, users(), true) && couple_room() !== null,
         'reads' => (object) ($room ? reads($id) : []),
+        'delivered' => (object) ($room ? delivered($id) : []),
         'me' => $me,
         'theme' => find_account($me)['theme'] ?? null,
         'wallpaper' => wallpaper_info(find_account($me)),

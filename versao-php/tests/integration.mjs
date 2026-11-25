@@ -229,7 +229,7 @@ try {
   for (const column of ["pass_hash", "avatar", "avatar_type", "avatar_key", "theme", "wallpaper", "wallpaper_type", "wallpaper_key", "wallpaper_style"]) assert.ok(columns.includes(column), column);
   assert.ok(sql("SHOW COLUMNS FROM {p}messages").some((row) => row.Field === "media"), "media");
   assert.ok(sql("SHOW COLUMNS FROM {p}messages").some((row) => row.Field === "read_at"), "read_at");
-  assert.equal(sql("SELECT value FROM {p}settings WHERE name = 'schema'")[0].value, "9");
+  assert.equal(sql("SELECT value FROM {p}settings WHERE name = 'schema'")[0].value, "10");
   assert.ok(sql("SHOW COLUMNS FROM {p}items").some((row) => row.Field === "data"), "tabela do nosso cantinho");
   for (const table of ["rooms", "reads", "invites"]) assert.ok(sql(`SHOW COLUMNS FROM {p}${table}`).length, `tabela ${table}`);
   assert.ok(sql("SHOW COLUMNS FROM {p}messages").some((row) => row.Field === "room"), "conversa da mensagem");
@@ -296,15 +296,21 @@ try {
   assert.equal(retry.message.id, message.id);
   assert.equal((await withAck(first, "message", { text: "   " })).error, "Mensagem vazia.");
 
+  // Entregue (✓✓ cinza, como no WhatsApp): um aparelho da outra pessoa buscou novidades depois da mensagem.
+  for (let tries = 0; tries < 80 && !sql("SELECT got_id FROM {p}reads WHERE name = 'Pessoa 2' AND got_id IS NOT NULL").length; tries++) await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(sql("SELECT got_id FROM {p}reads WHERE name = 'Pessoa 2'")[0].got_id, message.id);
+
   // Resposta, reação, leitura e apagar.
   assert.deepEqual([message.read, message.readAt], [false, null]);
   const replyRead = until(first, "seen", (receipt) => receipt.name === "Pessoa 2");
+  const replyDelivered = until(second, "delivered", (receipt) => receipt.name === "Pessoa 1");
   const reply = await withAck(second, "message", { text: "Respondendo", clientId: "cliente-2", replyTo: message.id });
   assert.equal(reply.message.replyTo.id, message.id);
   assert.equal(reply.message.replyTo.text, "Mensagem de integração");
   // Responder conta como ler: quem escreveu vê na hora, e a hora fica na mensagem (dados da mensagem).
   assert.deepEqual(await replyRead, { name: "Pessoa 2", id: reply.message.id, at: reply.message.createdAt, room: first.history.room });
   assert.equal(reply.message.read, false);
+  assert.deepEqual(await replyDelivered, { name: "Pessoa 1", id: reply.message.id, room: first.history.room });
 
   const reacted = next(first, "message:update");
   second.emit("react", { id: message.id, emoji: "❤️" });
@@ -847,13 +853,17 @@ try {
   // Trocou de vídeo: o arquivo sai do servidor.
   await withAck(dj2, "watch", { op: "start", query: "twitch.tv/Gaules" });
   assert.equal((await fetch(`${baseUrl}/${local.state.now.url}`)).status, 404);
-  // Netflix e HBO Max: cada um assiste na própria conta; a sala guarda o segundo, faz a contagem e ouve a extensão.
+  // Netflix e HBO Max: cada um assiste na própria conta; a sala guarda o segundo e ouve o player de cada um. Começar
+  // e continuar ficam marcados um pouco à frente, para os dois players saírem juntos (sem contagem na tela).
   const netflix = await withAck(dj1, "watch", { op: "start", query: "Stranger Things", service: "netflix" });
   assert.deepEqual([netflix.state.now.source, netflix.state.now.title, netflix.state.now.url], ["netflix", "Stranger Things", "https://www.netflix.com/search?q=Stranger%20Things"]);
-  const counting = await withAck(dj2, "watch", { op: "countdown" });
-  assert.ok(counting.action.at >= counting.state.serverNow + 3000, "a contagem começa no futuro");
+  assert.ok(netflix.state.updatedAt >= netflix.state.serverNow + 4000, "começam juntos daqui a uns segundos");
+  assert.equal((await withAck(dj2, "watch", { op: "countdown" })).error, "Comando desconhecido.");
   const reported = await withAck(dj2, "watch", { op: "pause", position: 754.2, duration: 3200 });
   assert.deepEqual([reported.state.playing, reported.state.position, reported.state.now.duration], [false, 754.2, 3200]);
+  const resumedTogether = await withAck(dj1, "watch", { op: "resume", position: 754.2 });
+  assert.ok(resumedTogether.state.playing && resumedTogether.state.updatedAt >= resumedTogether.state.serverNow + 1000, "continuam juntos");
+  await withAck(dj1, "watch", { op: "pause", position: 754.2 });
   const hbo = await withAck(dj1, "watch", { op: "start", query: "https://play.max.com/video/watch/abc-1/def-2" });
   assert.deepEqual([hbo.state.now.source, hbo.state.now.url], ["max", "https://play.max.com/video/watch/abc-1/def-2"]);
   assert.equal((await withAck(dj1, "watch", { op: "start", query: "https://www.netflix.com/br/watch/81231974?t=1" })).state.now.url, "https://www.netflix.com/watch/81231974");

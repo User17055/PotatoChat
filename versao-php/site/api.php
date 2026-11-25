@@ -144,6 +144,8 @@ function poll(array $input): array
         $name = $session['name'];
         sweep();
         $isNew = attach($conn, $name, $input);
+        // Este aparelho está buscando novidades: o que mandaram para esta pessoa chegou (✓✓ cinza para quem mandou).
+        mark_delivered($name);
         $last = last_seq();
         $oldest = first_seq();
         // Conexão esquecida pelo servidor ou eventos perdidos: manda o histórico de novo.

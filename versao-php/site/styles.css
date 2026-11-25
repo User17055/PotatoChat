@@ -48,7 +48,8 @@
   --tile: #1c1814;
   --radius: 20px;
   --chat-col: max(280px, 12vw);
-  --font: "Poppins", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Inter: livre e no mesmo estilo da Netflix Sans (que é exclusiva da Netflix), com o espaçamento mais justo. */
+  --font: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
 /* Escuro total: preto de verdade (economiza bateria em telas OLED). */
@@ -134,34 +135,36 @@
   --stage-1: #25160f; --stage-2: #0c0705; --tile: #22140f;
 }
 
-/* Natal: noite verde-escura, vermelho de Papai Noel e dourado. Com ele, a neve cai (app.js), as fotos ganham gorro
-   e o topo ganha luzinhas piscando. */
+/* Natal, nas cores da Netflix: o vermelho vivo (#e50914) sobre o preto dela (#141414), branco e o dourado das luzes.
+   Com ele, a neve cai, o pisca-pisca fica pendurado embaixo do topo, a árvore aparece no canto e a neve se acumula no
+   pé da conversa (app.js, snow). */
 :root[data-theme="natal"] {
-  --bg: #0f1411; --bg-2: #121a15; --ink: #fdf6ec; --muted: #b8b0a0; --faint: #77705f;
-  --surface: #17201a; --surface-2: #1e2a22; --surface-3: #26352b; --line: #314437;
-  --accent: #e8394b; --accent-2: #ff8f8f; --accent-3: #c21f33; --accent-ink: #fff4f4; --read: #2f6fd9;
-  --title: linear-gradient(100deg, #ff6b6b, #f5c04f 50%, #46c27a);
-  --glow-1: #b3202f; --glow-2: #1f6b3e; --glow-3: #8a6a1a; --glow: 1;
-  --field: #0a0e0b80; --glass: #121a1566; --backdrop: #070a08b3;
-  --stage-1: #172019; --stage-2: #070a08; --tile: #17201a;
+  --bg: #141414; --bg-2: #181818; --ink: #ffffff; --muted: #b3b3b3; --faint: #808080;
+  --surface: #1f1f1f; --surface-2: #2a2a2a; --surface-3: #333333; --line: #3a3a3a; --line-soft: #ffffff12; --hover: #ffffff14;
+  --accent: #e50914; --accent-2: #ff3b45; --accent-3: #b20710; --accent-ink: #ffffff; --read: #3fa9ff;
+  --title: linear-gradient(100deg, #ff3b45, #e50914 55%, #ffd23f);
+  --glow-1: #e50914; --glow-2: #7a0510; --glow-3: #8a6a1a; --glow: 1.1; --grain: .03;
+  --field: #00000066; --field-line: #ffffff1f; --glass: #14141499; --backdrop: #000000c2;
+  --stage-1: #1c1c1c; --stage-2: #0a0a0a; --tile: #1f1f1f;
 }
 .snow { position: fixed; inset: 0; z-index: 80; width: 100%; height: 100%; pointer-events: none; }
 /* O gorro: em toda foto de perfil (a especificidade dupla vence o anel da conversa aberta, que usa o mesmo ::before). */
 :root[data-theme="natal"] .avatar.avatar::before {
   content: ""; position: absolute; inset: auto; top: -44%; left: 16%; z-index: 2; width: 82%; height: 74%;
-  border-radius: 0; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 56'%3E%3Cpath d='M8 44C12 22 26 6 44 8c8 1 12 8 14 16l-6 2c-2-6-5-9-9-9-10 0-18 12-21 27z' fill='%23e8394b'/%3E%3Cpath d='M8 44C12 22 26 6 44 8c-6 4-13 16-15 34z' fill='%23c21f33'/%3E%3Crect x='3' y='40' width='34' height='11' rx='5.5' fill='%23fff'/%3E%3Ccircle cx='55' cy='27' r='7' fill='%23fff'/%3E%3C/svg%3E") center / contain no-repeat;
+  border-radius: 0; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 56'%3E%3Cpath d='M8 44C12 22 26 6 44 8c8 1 12 8 14 16l-6 2c-2-6-5-9-9-9-10 0-18 12-21 27z' fill='%23e50914'/%3E%3Cpath d='M8 44C12 22 26 6 44 8c-6 4-13 16-15 34z' fill='%23b20710'/%3E%3Crect x='3' y='40' width='34' height='11' rx='5.5' fill='%23fff'/%3E%3Ccircle cx='55' cy='27' r='7' fill='%23fff'/%3E%3C/svg%3E") center / contain no-repeat;
   -webkit-mask: none; mask: none; animation: none; rotate: -14deg; pointer-events: none; filter: drop-shadow(0 2px 2px #0006);
 }
-/* Luzinhas penduradas embaixo do topo, piscando em duas cores. */
+/* O pisca-pisca pendurado embaixo do topo (o SVG do app.js), com o brilho de cada lâmpada na cor dela. */
 :root[data-theme="natal"] .topbar { position: relative; }
-:root[data-theme="natal"] .topbar::after {
-  content: ""; position: absolute; left: 0; right: 0; bottom: -7px; z-index: 3; height: 12px; pointer-events: none;
-  background: radial-gradient(circle at 12px 6px, #ff4d5e 0 4px, transparent 5px) 0 0 / 48px 12px repeat-x,
-    radial-gradient(circle at 36px 6px, #ffd23f 0 4px, transparent 5px) 0 0 / 48px 12px repeat-x;
-  filter: drop-shadow(0 0 4px #ffd23f99); animation: xmas-lights 1.2s steps(2, jump-none) infinite;
-}
-@keyframes xmas-lights { 50% { filter: drop-shadow(0 0 7px #ff4d5ecc) hue-rotate(120deg); } }
-:root[data-theme="natal"] .brand-row strong::after { content: " 🎄"; }
+.xmas-lights { position: absolute; left: 0; right: 0; top: 100%; z-index: 4; width: 100%; height: 40px; margin-top: -6px; overflow: visible; pointer-events: none; }
+.xmas-lights .wire { fill: none; stroke: #2b2b2b; stroke-width: 1.6; }
+.xmas-lights .bulb { filter: drop-shadow(0 0 5px var(--glow)) drop-shadow(0 0 10px var(--glow)); }
+/* A árvore no canto da conversa e a neve acumulando no pé (por cima das mensagens, sem pegar os toques). */
+.xmas-tree { position: absolute; right: max(14px, calc((100% - 900px) / 2)); bottom: 4px; z-index: 3; width: clamp(70px, 9vw, 110px); height: auto; pointer-events: none; filter: drop-shadow(0 10px 18px #000a); }
+.xmas-tree .ornament { filter: drop-shadow(0 0 3px currentColor); }
+.xmas-drift { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; width: 100%; height: 34px; pointer-events: none; filter: drop-shadow(0 -2px 6px #ffffff33); }
+@media (max-width: 760px) { .xmas-tree { width: 64px; right: 10px; } .xmas-drift { height: 24px; } }
+.in-call :is(.xmas-tree, .xmas-drift), .watching :is(.xmas-tree, .xmas-drift, .xmas-lights) { display: none; }
 
 /* No tema claro a chamada continua escura (vídeo fica melhor assim), com as cores do tema escuro. */
 :root[data-theme="claro"] .call-panel {
@@ -177,6 +180,9 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 15px; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+/* Tipografia no estilo da Netflix: títulos fortes e apertados, texto com um respiro a mais. */
+h1, h2, h3, .sheet-head h3, #room-title { letter-spacing: -.02em; }
+body { letter-spacing: -.006em; font-feature-settings: "cv11", "ss01"; }
 body { min-height: 100vh; min-height: 100dvh; overflow: hidden; }
 button, input, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; -webkit-tap-highlight-color: transparent; }
@@ -379,10 +385,10 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
 .deleted .bubble { border: 1px dashed var(--line); background: transparent; color: var(--faint); font-style: italic; box-shadow: none; }
 .mine.deleted .bubble { color: var(--faint); }
 .text { display: inline; }
-.foot { float: right; display: inline-flex; align-items: center; gap: 4px; margin: 6px 0 -2px 10px; font-size: 10.5px; line-height: 1; white-space: nowrap; opacity: .7; }
+.foot { float: right; display: inline-flex; align-items: center; gap: 3px; margin: 7px 0 -3px 10px; font-size: 9.5px; font-weight: 500; letter-spacing: .02em; line-height: 1; white-space: nowrap; opacity: .5; font-variant-numeric: tabular-nums; }
 .via { font-style: italic; }
 .status { display: inline-grid; }
-.status .icon { width: 15px; height: 15px; stroke-width: 2.4; }
+.status .icon { width: 13px; height: 13px; stroke-width: 2.4; }
 .status[data-state="read"] { color: var(--read); opacity: 1; }
 .status[data-state="failed"] { color: #b3261e; cursor: pointer; }
 .status[data-state="pending"] .icon { width: 12px; height: 12px; }
@@ -1204,10 +1210,6 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
 .watch-stream-note { max-width: 420px; margin: 4px 0 0; color: #ffffff8c; font-size: 12px; line-height: 1.5; }
 .watch-panel[data-source="netflix"] #watch-full, .watch-panel[data-source="max"] #watch-full,
 .watch-panel[data-source="netflix"] .watch-title .brand, .watch-panel[data-source="max"] .watch-title .brand { display: none; }
-.watch-count { position: absolute; inset: 0; z-index: 3; display: grid; place-content: center; justify-items: center; gap: 6px; background: #000000b3; color: #fff; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
-.watch-count span { font-size: clamp(56px, 14vw, 120px); font-weight: 800; line-height: 1; text-shadow: 0 0 40px #a78bfa; }
-.watch-count small { color: #ffffffb3; font-size: 14px; font-weight: 600; }
-.watch-count.go span { color: #3ddc84; text-shadow: 0 0 40px #3ddc84; }
 .watch-upload { position: absolute; inset: 0; z-index: 1; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 20px; background: radial-gradient(circle, #1c1c1c, #000); color: #fff; text-align: center; }
 .watch-upload .icon { width: 34px; height: 34px; color: var(--accent); }
 .watch-upload p { max-width: 380px; margin: 0; color: #ffffffb3; font-size: 13.5px; line-height: 1.5; }
@@ -1243,10 +1245,12 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
 .attach-icon.watch { background: linear-gradient(140deg, #ffb35c, #f0576b); }
 .attach-icon.games { background: linear-gradient(140deg, #5ee0a0, #2f8fe0); }
 /* Contagem regressiva: uma faixa fina embaixo do topo da conversa (some na chamada e na Watch Party). */
-.countdown { flex: none; display: flex; align-items: center; justify-content: center; gap: 12px; margin: 10px max(14px, calc((100% - 760px) / 2)) 0; padding: 8px 18px; border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); border-radius: 999px; background: linear-gradient(100deg, color-mix(in srgb, var(--accent) 22%, var(--surface)), color-mix(in srgb, var(--accent-3) 14%, var(--surface))); color: var(--ink); box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 18%, transparent); text-align: left; transition: transform .2s, box-shadow .2s; }
+.countdown { flex: none; display: flex; align-items: center; justify-content: center; gap: 6px; margin: 10px max(14px, calc((100% - 760px) / 2)) 0; padding: 4px 6px 4px 18px; border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); border-radius: 999px; background: linear-gradient(100deg, color-mix(in srgb, var(--accent) 22%, var(--surface)), color-mix(in srgb, var(--accent-3) 14%, var(--surface))); color: var(--ink); box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 18%, transparent); text-align: left; transition: transform .2s, box-shadow .2s; }
 .countdown:hover { transform: translateY(-1px); box-shadow: 0 10px 28px color-mix(in srgb, var(--accent) 28%, transparent); }
 .countdown.hidden, .in-call .countdown, .watching .countdown { display: none; }
-.countdown-icon { font-size: 22px; animation: countdown-fly 3s ease-in-out infinite; }
+:root[data-theme="natal"] .messages { padding-bottom: 44px; }
+.countdown-icon { display: grid; color: var(--accent); animation: countdown-fly 3s ease-in-out infinite; }
+.countdown-icon .icon { width: 22px; height: 22px; }
 .countdown-text { display: grid; min-width: 0; }
 .countdown-text small { overflow: hidden; color: var(--muted); font-size: 11.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .countdown-text strong { font-size: 15px; font-variant-numeric: tabular-nums; letter-spacing: .01em; background: var(--title); -webkit-background-clip: text; background-clip: text; color: transparent; }
@@ -1254,6 +1258,23 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
 .countdown.today .countdown-icon { animation: none; }
 @keyframes countdown-fly { 50% { transform: translate(3px, -3px) rotate(-6deg); } }
 @media (max-width: 760px) { .countdown { margin: 8px 10px 0; padding: 6px 14px; } .countdown-text strong { font-size: 14px; } }
+.countdown-main { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 12px; padding: 4px 0; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
+.countdown-edit { flex: none; width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--muted); opacity: .6; transition: opacity .2s, background .2s; }
+.countdown-edit:hover { opacity: 1; background: var(--hover); }
+.countdown-edit .icon { width: 14px; height: 14px; }
+/* A viagem: o mapa escuro, a rota tracejada, o rastro que se desenha atrás do avião e a contagem grande. */
+.trip { position: fixed; inset: 0; z-index: 90; display: grid; place-content: center; justify-items: center; gap: 18px; padding: 24px; background: radial-gradient(120% 90% at 50% 30%, #1d1d1d, #0a0a0a 70%); color: #fff; cursor: pointer; }
+.trip-map { width: min(92vw, 820px); height: auto; overflow: visible; }
+.trip-dots { fill: none; stroke: #ffffff2e; stroke-width: 2; stroke-dasharray: 2 10; stroke-linecap: round; }
+.trip-trail { fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round; filter: drop-shadow(0 0 8px var(--accent)); }
+.trip-plane path { fill: #fff; filter: drop-shadow(0 6px 10px #000c); }
+.pin-halo { fill: #ffffff14; stroke: #ffffff33; }
+.pin-dot { fill: #fff; }
+.pin-heart { fill: var(--accent); filter: drop-shadow(0 0 10px var(--accent)); }
+.trip-text { display: grid; justify-items: center; gap: 6px; text-align: center; }
+.trip-text small { color: #b3b3b3; font-size: 13px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
+.trip-text strong { font-size: clamp(30px, 6vw, 56px); font-weight: 800; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.trip-text span { color: #b3b3b3; font-size: 15px; }
 /* Menu do botão de ligar (no topo da conversa): abre para baixo, alinhado à direita. */
 .call-pick { position: relative; }
 .attach-menu.call-menu { left: auto; right: 0; top: calc(100% + 8px); bottom: auto; z-index: 30; }
@@ -1578,21 +1599,6 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
 .theme-choice { display: grid; justify-items: center; gap: 5px; padding: 6px 2px; border: 0; border-radius: 12px; background: transparent; color: var(--muted); font-size: 11px; font-weight: 500; transition: background .2s, color .2s; }
 .theme-choice:hover { background: var(--hover); color: var(--ink); }
 .theme-choice[aria-pressed="true"] { color: var(--ink); font-weight: 600; }
-.look-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
-.look-row button { flex: 1; min-width: 72px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); color: var(--muted); font-size: 12.5px; font-weight: 600; transition: border-color .2s, color .2s; }
-.look-row button[aria-pressed="true"] { border-color: var(--accent); color: var(--ink); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent); }
-.profile-card .picker-label + .look-row { margin-top: 2px; }
-/* Tamanho da letra da conversa. */
-:root[data-text="p"] .bubble { font-size: 13px; }
-:root[data-text="g"] .bubble { font-size: 16.5px; }
-:root[data-text="gg"] .bubble { font-size: 19px; }
-:root[data-text="g"] #message-input { font-size: 16px; }
-:root[data-text="gg"] #message-input { font-size: 18px; }
-/* Formato dos balões: bolha (bem redondo) ou reto (cantos quase retos). */
-:root[data-bubbles="bolha"] .bubble:not(.jumbo):not(.sticker) { border-radius: 24px; }
-:root[data-bubbles="bolha"] .message:not(.mine):not(.grouped) .bubble { border-bottom-left-radius: 6px; border-top-left-radius: 24px; }
-:root[data-bubbles="bolha"] .mine:not(.grouped) .bubble { border-bottom-right-radius: 6px; border-top-right-radius: 24px; }
-:root[data-bubbles="reto"] .bubble:not(.jumbo):not(.sticker) { border-radius: 6px; }
 /* Bolinha do tema: metade fundo, metade destaque. */
 .swatch { width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, var(--sw-bg) 50%, var(--sw-accent) 50%); box-shadow: inset 0 0 0 1px #8080804d; transition: box-shadow .2s, transform .2s; }
 .theme-choice:hover .swatch { transform: scale(1.06); }
@@ -2464,13 +2470,17 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
 #table-board { position: relative; }
 .table-banner { position: absolute; left: 50%; top: 50%; z-index: 6; display: flex; align-items: center; gap: 10px; max-width: 92%; padding: 12px 20px; translate: -50% -50%; border-radius: 18px; background: color-mix(in srgb, var(--surface) 92%, transparent); box-shadow: 0 16px 40px #000a; backdrop-filter: blur(6px); pointer-events: none; }
 .table-banner strong { font-size: 16px; }
-.banner-emoji { font-size: 30px; line-height: 1; }
+.banner-mark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; background: var(--surface-2); color: var(--accent); }
+.banner-mark .icon { width: 20px; height: 20px; }
+.table-banner.win .banner-mark { background: #ffd23f; color: #3a2a00; }
+.game-spicy .icon { width: 11px; height: 11px; }
+.spicy-flame .icon { width: 24px; height: 24px; color: #ff5c3a; }
 .table-banner.win { box-shadow: 0 16px 40px #000a, 0 0 0 2px #ffd23f; }
 .table-banner.lose { opacity: .96; }
 
 /* ---------- modo +18 ---------- */
 .spicy-toggle { display: flex; align-items: center; gap: 12px; width: 100%; margin: 4px 0 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface-2); color: var(--ink); text-align: left; transition: border-color .2s, background .2s, box-shadow .2s; }
-.spicy-flame { font-size: 24px; filter: grayscale(1); opacity: .6; transition: filter .3s, opacity .3s, transform .3s; }
+.spicy-flame { display: grid; filter: grayscale(1); opacity: .6; transition: filter .3s, opacity .3s, transform .3s; }
 .spicy-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .spicy-text small { color: var(--muted); font-size: 12px; line-height: 1.4; }
 .spicy-toggle[aria-pressed="true"] { border-color: #ff5c3a; background: linear-gradient(120deg, color-mix(in srgb, #ff5c3a 18%, var(--surface-2)), color-mix(in srgb, #c81d77 18%, var(--surface-2))); box-shadow: 0 8px 24px color-mix(in srgb, #ff5c3a 25%, transparent); }
@@ -2479,8 +2489,7 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
 .spicy-toggle[aria-pressed="true"] .switch::after { transform: translateX(16px); background: #fff; }
 @keyframes spicy-flicker { 50% { transform: scale(1.2) rotate(-4deg); } }
 /* Com o +18 ligado, os cartões dos jogos de carta ganham a chama. */
-[data-pane="jogos"].spicy :is(.game-tile.vd, .game-tile.quem, .game-tile.isso, .game-tile.pergunta) h3::after { content: " 🔥"; }
-.game-spicy { margin-left: 6px; padding: 1px 7px; border-radius: 999px; background: linear-gradient(120deg, #ff5c3a, #c81d77); color: #fff; font-size: 10.5px; font-weight: 800; }
+.game-spicy { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; padding: 1px 7px; border-radius: 999px; background: linear-gradient(120deg, #ff5c3a, #c81d77); color: #fff; font-size: 10.5px; font-weight: 800; }
 /* A pedra andando (e a comida saindo) por cima das outras casas, sem a transição do CSS atrapalhar o GSAP. */
 .stone.moving { position: relative; z-index: 3; transition: none; pointer-events: none; }
 .stone.moving.eaten { z-index: 2; }
@@ -2777,6 +2786,6 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
   .message.show-tools .bubble, .message.show-tools .bubble::after,
   button.person.active, button.person.active::before, button.person.active .avatar::before,
   .typing.on .typing-bubble, .typing.on .typing-bubble i, .eq i, .music-unblock, .music-empty-art, .marquee > span, .ticker-line,
-  .rec-dot, .rec-slide .icon, .rec-lock .icon, .rec-pill, .rec-stop::before, .recording .mic, .typing-mic, .voice-play.loading::after, .letter-flag.new, .spicy-flame, .countdown-icon, .topbar::after, .sticker-grid.editing .sticker-item { animation: none !important; }
+  .rec-dot, .rec-slide .icon, .rec-lock .icon, .rec-pill, .rec-stop::before, .recording .mic, .typing-mic, .voice-play.loading::after, .letter-flag.new, .spicy-flame, .countdown-icon, .sticker-grid.editing .sticker-item { animation: none !important; }
   .sidebar, .menu-backdrop { transition: none !important; }
 }

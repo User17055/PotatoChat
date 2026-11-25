@@ -60,6 +60,8 @@ const byId = new Map();
 const games = new Map();
 const pending = new Map();
 let reads = {};
+// Até qual mensagem cada um já recebeu num aparelho (nome → id): os ✓✓ cinza, como no WhatsApp.
+let delivered = {};
 let presenceList = [];
 // A pessoa da conversa aberta.
 let peerName = "";
@@ -475,6 +477,11 @@ function connect(token, animate) {
 
   socket.on("message", (message) => receive(message, true));
   socket.on("message:update", updateMessage);
+  socket.on("delivered", ({ name, id, room: where }) => {
+    if (name === me || (where && where !== room)) return;
+    delivered[name] = id;
+    refreshStatuses();
+  });
   socket.on("seen", ({ name, id, at, room: where }) => {
     // Lida em outro aparelho seu: a conversa sai das não lidas.
     if (name === me) markRoomRead(where);
@@ -567,6 +574,7 @@ function applyHistory(payload) {
   indexMessages();
   for (const clientId of pending.keys()) if (payload.items.some((message) => message.clientId === clientId)) pending.delete(clientId);
   reads = payload.reads || {};
+  delivered = payload.delivered || {};
   gifKey = payload.gifKey || "";
   setStickers(payload.stickers);
   setCountdown(payload.countdown);
@@ -956,27 +964,38 @@ function peerReadIndex() {
   return best;
 }
 
+// A última mensagem que chegou num aparelho da outra pessoa (lida também conta como entregue).
+function peerDeliveredIndex() {
+  let best = peerReadIndex();
+  for (const [name, id] of Object.entries(delivered)) if (name !== me) best = Math.max(best, list.findIndex((message) => message.id === id));
+  return best;
+}
+
 // Lida: a mensagem diz (vem do servidor e muda com o "seen") ou, por garantia, está antes da última que a outra pessoa leu.
 const isRead = (message, readIndex = peerReadIndex()) => Boolean(message.read) || list.indexOf(message) <= readIndex;
 
-function paintStatus(article, readIndex = peerReadIndex()) {
+function paintStatus(article, readIndex = peerReadIndex(), deliveredIndex = peerDeliveredIndex()) {
   const holder = article.querySelector(".status");
   const message = article.msg;
   if (!holder || !message) return;
+  // Como no WhatsApp: relógio (sem conexão, esperando para sair), ✓ (no servidor), ✓✓ cinza (chegou no aparelho da
+  // outra pessoa) e ✓✓ azul (lida).
   let state = "sent";
   if (!message.id) state = message.status === "failed" ? "failed" : "pending";
   else if (isRead(message, readIndex)) state = "read";
+  else if (list.indexOf(message) <= deliveredIndex) state = "delivered";
   if (holder.dataset.state === state) return;
   const wasSent = holder.dataset.state === "sent";
   holder.dataset.state = state;
-  holder.title = { pending: "Enviando…", failed: "Não enviada — toque para tentar de novo", sent: "Entregue", read: "Lida" }[state];
-  holder.replaceChildren(icon({ pending: "clock", failed: "alert", sent: "check", read: "check-check" }[state]));
+  holder.title = { pending: socket?.connected ? "Enviando…" : "Sem conexão: sai assim que voltar", failed: "Não enviada — toque para tentar de novo", sent: "Enviada (ainda não chegou no aparelho)", delivered: "Entregue", read: "Lida" }[state];
+  holder.replaceChildren(icon({ pending: "clock", failed: "alert", sent: "check", delivered: "check-check", read: "check-check" }[state]));
   if (state === "read" && wasSent) fx.pop(holder);
 }
 
 function refreshStatuses() {
   const readIndex = peerReadIndex();
-  messagesEl.querySelectorAll(".message.mine").forEach((article) => paintStatus(article, readIndex));
+  const deliveredIndex = peerDeliveredIndex();
+  messagesEl.querySelectorAll(".message.mine").forEach((article) => paintStatus(article, readIndex, deliveredIndex));
 }
 
 // A outra pessoa leu até a mensagem id: as minhas até ali ficam lidas, com a hora (para os dados da mensagem).
@@ -3489,7 +3508,7 @@ const THEMES = [
   { id: "oceano", label: "Oceano", bg: "#06141a", accent: "#2fd6c8" },
   { id: "coral", label: "Coral", bg: "#170e0b", accent: "#ff8a5c" },
   // Natal: o site inteiro natalino (neve caindo, gorro nas fotos e luzinhas no topo).
-  { id: "natal", label: "Natal 🎄", bg: "#0f1411", accent: "#e8394b" }
+  { id: "natal", label: "Natal", bg: "#141414", accent: "#e50914" }
 ];
 // false enquanto a escolha ainda não foi gravada no banco (sem conexão): ao reconectar, ela é enviada de novo.
 let themeSaved = true;
@@ -3538,7 +3557,7 @@ function paintCountdown() {
   $("#countdown-label").textContent = `${countdown.label} · ${when}${countdown.time ? ` às ${countdown.time}` : ""}`;
   box.classList.toggle("today", left <= 0);
   if (left <= 0) {
-    $("#countdown-time").textContent = "É hoje! 💛";
+    $("#countdown-time").textContent = "É hoje!";
   } else {
     const seconds = Math.floor(left / 1000);
     const days = Math.floor(seconds / 86400);
@@ -3553,7 +3572,8 @@ function setCountdown(next) {
   paintCountdown();
 }
 
-$("#countdown").addEventListener("click", () => {
+$("#countdown-fly").addEventListener("click", () => flyToTrip());
+$("#countdown-edit").addEventListener("click", () => {
   openSheet({
     title: "Contagem regressiva",
     icon: "plane",
@@ -3592,6 +3612,75 @@ function countdownCall(data) {
   });
 }
 
+// A viagem (tocar na contagem): uma tela com a rota tracejada em arco, o avião em SVG voando por ela com o GSAP (a linha
+// se desenha atrás dele) até o ponto da viagem que corresponde ao tempo que falta (no dia, chega no destino, com o
+// coração pulsando), e a contagem grande embaixo. Tocar em qualquer lugar fecha.
+const TRIP_SPAN_MS = 30 * 86400000;
+
+function flyToTrip() {
+  const target = countdownTarget();
+  if (!target) return;
+  const left = Math.max(0, target - Date.now());
+  // Quanto da viagem já foi: o último mês é a rota inteira (faltando mais que isso, o avião ainda está saindo).
+  const progress = left <= 0 ? 1 : Math.min(0.96, Math.max(0.06, 1 - left / TRIP_SPAN_MS));
+  const layer = el("div", "trip");
+  layer.setAttribute("role", "dialog");
+  layer.setAttribute("aria-label", "A viagem");
+  const svg = xmasNode("svg", { class: "trip-map", viewBox: "0 0 800 360", "aria-hidden": "true" });
+  const route = "M90 280C220 80 560 60 710 230";
+  const dots = xmasNode("path", { d: route, class: "trip-dots" });
+  const trail = xmasNode("path", { d: route, class: "trip-trail" });
+  const plane = xmasNode("g", { class: "trip-plane" });
+  plane.append(xmasNode("path", { d: "M22 0 5-3.5-6-18h-6l5 14.5-10 1-4.5-6.5h-4l2.5 9-2.5 9h4l4.5-6.5 10 1L-12 18h6L5 3.5z" }));
+  const pin = (x, y, className) => {
+    const group = xmasNode("g", { class: className, transform: `translate(${x} ${y})` });
+    group.append(xmasNode("circle", { r: 16, class: "pin-halo" }), xmasNode("circle", { r: 7, class: "pin-dot" }));
+    return group;
+  };
+  const heart = xmasNode("g", { class: "trip-heart", transform: "translate(710 230)" });
+  heart.append(xmasNode("circle", { r: 22, class: "pin-halo" }), xmasNode("path", { d: "M0 9s-11-6.6-11-14a6.2 6.2 0 0 1 11-3.6A6.2 6.2 0 0 1 11-5c0 7.4-11 14-11 14z", class: "pin-heart" }));
+  svg.append(dots, trail, pin(90, 280, "trip-from"), heart, plane);
+  const text = el("div", "trip-text");
+  const when = new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "long" }).format(target);
+  text.append(el("small", "", countdown.label), el("strong", "", $("#countdown-time").textContent), el("span", "", left <= 0 ? "Chegou o dia" : `Chegada em ${when}${countdown.time ? ` às ${countdown.time}` : ""}`));
+  layer.append(svg, text);
+  document.body.append(layer);
+  const close = () => {
+    window.gsap?.killTweensOf([layer, svg, text, trail]);
+    layer.remove();
+    document.removeEventListener("keydown", onKey, true);
+  };
+  const onKey = (event) => {
+    if (event.key !== "Escape") return;
+    event.stopPropagation();
+    close();
+  };
+  layer.addEventListener("click", close);
+  document.addEventListener("keydown", onKey, true);
+  sound.play("whoosh");
+
+  const length = trail.getTotalLength();
+  trail.style.strokeDasharray = `${length}`;
+  const place = (share) => {
+    const at = Math.max(0.001, share) * length;
+    const point = trail.getPointAtLength(at);
+    const ahead = trail.getPointAtLength(Math.min(length, at + 1));
+    const angle = (Math.atan2(ahead.y - point.y, ahead.x - point.x) * 180) / Math.PI;
+    plane.setAttribute("transform", `translate(${point.x} ${point.y}) rotate(${angle})`);
+    trail.style.strokeDashoffset = `${length * (1 - share)}`;
+  };
+  const gsap = matchMedia("(prefers-reduced-motion: reduce)").matches ? null : window.gsap;
+  if (!gsap) return place(progress);
+  place(0);
+  const state = { share: 0 };
+  gsap.timeline()
+    .fromTo(layer, { opacity: 0 }, { opacity: 1, duration: 0.35, ease: "power2.out" })
+    .fromTo(svg, { y: 30, scale: 0.96 }, { y: 0, scale: 1, duration: 0.6, ease: "power3.out" }, "<")
+    .to(state, { share: progress, duration: 1.6 + progress * 1.4, ease: "power2.inOut", onUpdate: () => place(state.share) }, "-=0.2")
+    .fromTo(text.children, { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, stagger: 0.08, ease: "power3.out" }, "-=0.8")
+    .to(heart, { scale: 1.12, svgOrigin: "710 230", duration: 0.6, ease: "sine.inOut", yoyo: true, repeat: -1 });
+}
+
 // Tela da Watch Party (só neste aparelho): a conversa ao lado (o de sempre), o modo cinema (só o vídeo) ou a conversa
 // flutuando por cima do vídeo. Classe watch-<modo> no .app-shell.
 const WATCH_VIEWS = [["lado", "conversa ao lado"], ["cinema", "modo cinema (só o vídeo)"], ["flutuante", "conversa flutuante"]];
@@ -3614,59 +3703,70 @@ $("#watch-view").addEventListener("click", () => {
 });
 paintWatchView();
 
-// Visual da conversa (só neste aparelho): data-text (letra) e data-bubbles (balões) no <html>; o styles.css faz o resto.
-const LOOK_KEY = "potato.look";
-
-function paintLook() {
-  const look = store.get("localStorage", LOOK_KEY) || {};
-  for (const row of document.querySelectorAll("[data-look]")) {
-    const value = look[row.dataset.look] || "";
-    if (value) document.documentElement.dataset[row.dataset.look] = value;
-    else delete document.documentElement.dataset[row.dataset.look];
-    row.querySelectorAll("[data-look-value]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.lookValue === value)));
-  }
-}
-
-document.addEventListener("click", (event) => {
-  const choice = event.target.closest("[data-look-value]");
-  if (!choice) return;
-  store.set("localStorage", LOOK_KEY, { ...(store.get("localStorage", LOOK_KEY) || {}), [choice.closest("[data-look]").dataset.look]: choice.dataset.lookValue });
-  sound.play("tap");
-  paintLook();
-});
-paintLook();
-
-// Neve do tema Natal: um canvas por cima de tudo (sem pegar os toques), com flocos de tamanhos, velocidades e balanços
-// diferentes. Para com a página escondida; com "reduzir movimento" ligado, os flocos ficam parados.
+// Tema Natal: neve caindo (canvas), pisca-pisca pendurado embaixo do topo, uma árvore desenhada no canto da conversa e a
+// neve que vai se acumulando no pé dela. Tudo em SVG/canvas feito aqui, animado com o GSAP; com "reduzir movimento"
+// ligado, fica parado. Sai inteiro ao trocar de tema.
 let snowfall = null;
+const xmasNode = (tag, attributes = {}) => {
+  const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, value);
+  return node;
+};
 
 function snow(on) {
   if (!on) {
     if (snowfall) {
       cancelAnimationFrame(snowfall.frame);
       removeEventListener("resize", snowfall.resize);
+      window.gsap?.killTweensOf(snowfall.tweened());
       snowfall.canvas.remove();
+      snowfall.decor.forEach((node) => node.remove());
       snowfall = null;
     }
     return;
   }
   if (snowfall) return;
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const gsap = still ? null : window.gsap;
   const canvas = el("canvas", "snow");
   canvas.setAttribute("aria-hidden", "true");
   document.body.append(canvas);
   const context = canvas.getContext("2d");
-  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
   let flakes = [];
+  const lights = xmasLights();
+  const tree = xmasTree();
+  const drift = xmasDrift();
   const resize = () => {
     const ratio = Math.min(2, devicePixelRatio || 1);
     canvas.width = innerWidth * ratio;
     canvas.height = innerHeight * ratio;
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
-    const count = Math.round(Math.min(110, innerWidth / 11));
-    flakes = Array.from({ length: count }, () => ({
-      x: Math.random() * innerWidth, y: Math.random() * innerHeight, r: 1 + Math.random() * 2.6,
-      speed: 0.35 + Math.random() * 0.9, sway: Math.random() * Math.PI * 2, star: Math.random() < 0.12
+    flakes = Array.from({ length: Math.round(Math.min(120, innerWidth / 10)) }, () => ({
+      x: Math.random() * innerWidth, y: Math.random() * innerHeight, r: 0.8 + Math.random() * 2.4,
+      speed: 0.3 + Math.random() * 0.8, sway: Math.random() * Math.PI * 2, spin: Math.random() * Math.PI, crystal: Math.random() < 0.18
     }));
+    paintLights(lights);
+  };
+  // Floco de verdade (seis braços com raminhos) nos maiores; os outros, pontinhos macios.
+  const crystal = (x, y, size, angle) => {
+    context.save();
+    context.translate(x, y);
+    context.rotate(angle);
+    context.strokeStyle = "#ffffff";
+    context.lineWidth = 1.1;
+    context.lineCap = "round";
+    context.beginPath();
+    for (let arm = 0; arm < 6; arm += 1) {
+      context.rotate(Math.PI / 3);
+      context.moveTo(0, 0);
+      context.lineTo(0, -size);
+      context.moveTo(0, -size * 0.55);
+      context.lineTo(size * 0.28, -size * 0.8);
+      context.moveTo(0, -size * 0.55);
+      context.lineTo(-size * 0.28, -size * 0.8);
+    }
+    context.stroke();
+    context.restore();
   };
   const draw = () => {
     context.clearRect(0, 0, innerWidth, innerHeight);
@@ -3674,15 +3774,13 @@ function snow(on) {
       if (!still && !document.hidden) {
         flake.y += flake.speed;
         flake.sway += 0.012;
+        flake.spin += 0.004;
         flake.x += Math.sin(flake.sway) * 0.4;
         if (flake.y > innerHeight + 10) Object.assign(flake, { y: -10, x: Math.random() * innerWidth });
       }
       context.globalAlpha = 0.35 + flake.r / 5;
-      if (flake.star) {
-        context.font = `${8 + flake.r * 4}px sans-serif`;
-        context.fillStyle = "#ffffff";
-        context.fillText("❄", flake.x, flake.y);
-      } else {
+      if (flake.crystal) crystal(flake.x, flake.y, 3 + flake.r * 2.2, flake.spin);
+      else {
         context.beginPath();
         context.arc(flake.x, flake.y, flake.r, 0, Math.PI * 2);
         context.fillStyle = "#ffffff";
@@ -3691,10 +3789,90 @@ function snow(on) {
     }
     if (!still) snowfall.frame = requestAnimationFrame(draw);
   };
-  snowfall = { canvas, resize, frame: 0 };
+  snowfall = {
+    canvas, resize, frame: 0, decor: [lights, tree, drift],
+    tweened: () => [...lights.querySelectorAll(".bulb"), ...tree.querySelectorAll(".tree-star, .ornament"), tree, ...drift.querySelectorAll(".drift-fill")]
+  };
   addEventListener("resize", resize);
   resize();
   draw();
+  if (!gsap) return;
+  // A estrela da árvore pulsa, os enfeites brilham, e a neve sobe devagar no pé da conversa.
+  gsap.to(tree.querySelector(".tree-star"), { scale: 1.15, transformOrigin: "50% 50%", duration: 1.4, ease: "sine.inOut", yoyo: true, repeat: -1 });
+  gsap.fromTo(tree.querySelectorAll(".ornament"), { opacity: 0.55 }, { opacity: 1, duration: 0.9, ease: "sine.inOut", yoyo: true, repeat: -1, stagger: { each: 0.25, from: "random" } });
+  gsap.fromTo(drift.querySelector(".drift-fill"), { scaleY: 0.5, transformOrigin: "50% 100%" }, { scaleY: 1, duration: 90, ease: "power1.out" });
+  gsap.from(tree, { y: 30, opacity: 0, duration: 1.2, ease: "back.out(1.6)" });
+}
+
+// O fio do pisca-pisca, embaixo do topo: barrigas entre os ganchos (a cada ~110 px) e as lâmpadas penduradas ao longo
+// dele, nas cores de Natal, cada uma piscando no seu tempo. Refeito quando a largura muda.
+function xmasLights() {
+  const svg = xmasNode("svg", { class: "xmas-lights", "aria-hidden": "true" });
+  ($(".topbar") || document.body).append(svg);
+  return svg;
+}
+
+function paintLights(svg) {
+  window.gsap?.killTweensOf(svg.querySelectorAll(".bulb"));
+  const width = Math.max(320, Math.round(svg.getBoundingClientRect().width || innerWidth));
+  svg.setAttribute("viewBox", `0 0 ${width} 40`);
+  const spans = Math.max(3, Math.round(width / 110));
+  const step = width / spans;
+  let d = "M0 3";
+  for (let index = 0; index < spans; index += 1) d += ` Q${step * index + step / 2} 24 ${step * (index + 1)} 3`;
+  const wire = xmasNode("path", { d, class: "wire" });
+  svg.replaceChildren(wire);
+  const colors = ["#e50914", "#ffd23f", "#2fbf71", "#ff8c1a", "#3fa9ff"];
+  const length = wire.getTotalLength();
+  const count = Math.round(length / 34);
+  const gsap = matchMedia("(prefers-reduced-motion: reduce)").matches ? null : window.gsap;
+  for (let index = 1; index < count; index += 1) {
+    const point = wire.getPointAtLength((length * index) / count);
+    const color = colors[index % colors.length];
+    const bulb = xmasNode("g", { class: "bulb", transform: `translate(${point.x.toFixed(1)} ${point.y.toFixed(1)})` });
+    bulb.style.setProperty("--glow", color);
+    bulb.append(
+      xmasNode("rect", { x: -2.2, y: -1, width: 4.4, height: 4, rx: 1, fill: "#3b3b3b" }),
+      xmasNode("path", { d: "M0 3c-3.6 0-4.6 4.4-4.2 7 .4 2.8 2.2 4.6 4.2 4.6s3.8-1.8 4.2-4.6c.4-2.6-.6-7-4.2-7z", fill: color }),
+      xmasNode("ellipse", { cx: -1.4, cy: 7.2, rx: 1, ry: 2, fill: "#ffffff", opacity: 0.55 })
+    );
+    svg.append(bulb);
+    if (gsap) gsap.fromTo(bulb, { opacity: 0.35 }, { opacity: 1, duration: 0.5 + Math.random() * 0.8, ease: "sine.inOut", yoyo: true, repeat: -1, delay: Math.random() * 1.5 });
+  }
+}
+
+// A árvore no canto da conversa: três camadas de galhos, o tronco, o festão, os enfeites e a estrela (sem imagem).
+function xmasTree() {
+  const svg = xmasNode("svg", { class: "xmas-tree", viewBox: "0 0 120 150", "aria-hidden": "true" });
+  const defs = xmasNode("defs");
+  const leaf = xmasNode("linearGradient", { id: "xmas-leaf", x1: 0, y1: 0, x2: 0, y2: 1 });
+  leaf.append(xmasNode("stop", { offset: 0, "stop-color": "#2fbf71" }), xmasNode("stop", { offset: 1, "stop-color": "#0f6b3a" }));
+  defs.append(leaf);
+  svg.append(defs,
+    xmasNode("rect", { x: 52, y: 118, width: 16, height: 22, rx: 3, fill: "#6b3f1d" }),
+    xmasNode("path", { d: "M60 74 108 124H12z", fill: "url(#xmas-leaf)" }),
+    xmasNode("path", { d: "M60 44 96 92H24z", fill: "url(#xmas-leaf)" }),
+    xmasNode("path", { d: "M60 16 84 58H36z", fill: "url(#xmas-leaf)" }),
+    xmasNode("path", { d: "M30 98c18 9 42 10 64-4M38 68c14 7 32 8 46-3", fill: "none", stroke: "#ffd23f", "stroke-width": 2.2, "stroke-linecap": "round", opacity: 0.9 }));
+  for (const [cx, cy, color] of [[44, 104, "#e50914"], [72, 110, "#3fa9ff"], [88, 100, "#ffd23f"], [52, 80, "#ffd23f"], [70, 74, "#e50914"], [58, 52, "#3fa9ff"], [30, 116, "#ff8c1a"], [96, 118, "#e50914"]]) {
+    svg.append(xmasNode("circle", { cx, cy, r: 4, fill: color, class: "ornament" }));
+  }
+  svg.append(xmasNode("path", { class: "tree-star", d: "M60 2l3.8 7.7 8.5 1.2-6.2 6 1.5 8.4L60 21.3l-7.6 4 1.5-8.4-6.2-6 8.5-1.2z", fill: "#ffd23f" }));
+  ($(".messages-wrap") || document.body).append(svg);
+  return svg;
+}
+
+// A neve acumulada no pé da conversa: um monte ondulado que sobe devagar (GSAP).
+function xmasDrift() {
+  const svg = xmasNode("svg", { class: "xmas-drift", viewBox: "0 0 1000 60", preserveAspectRatio: "none", "aria-hidden": "true" });
+  const fill = xmasNode("g", { class: "drift-fill" });
+  fill.append(
+    xmasNode("path", { d: "M0 60V34C60 22 110 30 170 26s120-16 190-8 110 18 180 12 120-22 200-16 120 20 260 10V60z", fill: "#ffffff", opacity: 0.5 }),
+    xmasNode("path", { d: "M0 60V42c80-10 150 0 230-6s140-14 230-4 160 12 250 2 180-8 290 4V60z", fill: "#ffffff", opacity: 0.92 })
+  );
+  svg.append(fill);
+  ($(".messages-wrap") || document.body).append(svg);
+  return svg;
 }
 
 // O tema fica na conta (no banco): vale em qualquer aparelho em que a pessoa entrar.
@@ -4799,20 +4977,21 @@ const watchButton = $("#watch-button");
 const watchStage = $("#watch-stage");
 // updatedAt no futuro = contagem para o play: até lá, parado no mesmo segundo.
 const watchAt = () => (watch.playing ? watch.position + Math.max(0, Date.now() + musicClock - watch.updatedAt) / 1000 : watch.position);
-// Netflix e HBO Max: nada toca aqui; cada um assiste na própria conta (a extensão sincroniza; no celular, a contagem).
+// Netflix e HBO Max: nada toca aqui; cada um assiste na própria conta (no computador a extensão sincroniza; no app do
+// Android, o navegador dele).
 const STREAMING = {
   netflix: { name: "Netflix", mark: "NETFLIX", open: "https://www.netflix.com/browse" },
   max: { name: "HBO Max", mark: "max", open: "https://play.hbomax.com/" }
 };
 const streaming = (item) => Boolean(item && STREAMING[item.source]);
 const WATCH_HINT = {
-  streaming: "Pode ser a mesma conta nos dois (com plano de 2 telas) ou uma para cada. No computador, a extensão do Potato Chat faz o player seguir a sala; no celular, a contagem ajuda a darem o play juntos."
+  streaming: "Pode ser a mesma conta nos dois (com plano de 2 telas) ou uma para cada. No computador, a extensão do Potato Chat faz o player seguir a sala; no celular, o app do Potato abre a Netflix e a HBO Max dentro dele, já sincronizadas."
 };
 const WATCH_WHERE = { youtube: "no YouTube", netflix: "na Netflix", max: "na HBO Max", twitch: "na Twitch" };
 // Netflix, HBO Max e Twitch: a tela de cada um no catálogo.
 const WATCH_LAUNCH = {
-  netflix: { title: "Escolha na Netflix", text: "A Netflix abriu: escolha o filme ou o episódio e dê o play. No computador com a extensão do Potato Chat, a sala começa sozinha para os dois. No celular, volte aqui e toque em Começar a sessão." },
-  max: { title: "Escolha na HBO Max", text: "A HBO Max abriu: escolha o filme ou o episódio e dê o play. No computador com a extensão do Potato Chat, a sala começa sozinha para os dois. No celular, volte aqui e toque em Começar a sessão." },
+  netflix: { title: "Escolha na Netflix", text: "A Netflix abriu: escolha o filme ou o episódio e dê o play. No computador com a extensão do Potato Chat, a sala começa sozinha para os dois. No app do Android, elas abrem dentro dele e a sala também começa sozinha." },
+  max: { title: "Escolha na HBO Max", text: "A HBO Max abriu: escolha o filme ou o episódio e dê o play. No computador com a extensão do Potato Chat, a sala começa sozinha para os dois. No app do Android, elas abrem dentro dele e a sala também começa sozinha." },
   twitch: { title: "Qual canal?", text: "O nome do canal (ao vivo) ou o link de um vídeo gravado." }
 };
 // Prateleiras do catálogo do YouTube (as buscas de cada uma ficam no servidor).
@@ -4821,8 +5000,6 @@ let catalogShelf = "alta";
 let catalogAsk = 0;
 const catalogCache = new Map();
 const catalogVideos = new Map();
-let countdownAt = 0;
-let countdownTimer = 0;
 const watchPlayer = createWatchPlayer($("#watch-host"), {
   onReady: () => {
     syncWatch();
@@ -4897,7 +5074,10 @@ function applyWatch(state, measured = false, join = true) {
   if (started && join) setWatchRoom(true);
   paintWatch();
   syncWatch();
-  sendStreamState();
+  // No app do Android, um título da Netflix ou da HBO Max que começou (por qualquer um dos dois) abre aqui também, para
+  // os dois players saírem juntos no instante marcado pela sala.
+  if (started && join && nativeStream() && streaming(state.now) && streamTitle(state.now.url)) openNativeStream(state.now.source, state.now.url);
+  else sendStreamState();
 }
 
 function setWatchRoom(on) {
@@ -4952,7 +5132,7 @@ function openWatchService(source) {
 // O app (1.5.0+) abre o serviço num navegador dele, por cima do chat, com a conta de cada um. O script de lá
 // (android/app/src/main/assets/stream-sync.js) faz o player seguir a sala e conta o que a pessoa faz no player. Este lado
 // só faz a ponte, como a extensão faz no computador: o estado da sala vai para o app, e o que vem de lá vira comando da
-// sala. Assim ninguém precisa da contagem 3, 2, 1.
+// sala. Os dois começam, pausam e continuam juntos, sem contagem.
 const nativeStream = () => inAndroid && Boolean(window.__potatoNativeStream && window.PotatoAndroid);
 const tellStream = (message) => {
   try { window.PotatoAndroid.postMessage(JSON.stringify(message)); } catch {}
@@ -5238,12 +5418,10 @@ function watchCommand(op, extra = {}) {
       return toast(result?.error || "Não deu certo.", "error");
     }
     applyWatch(result.state, true);
-    if (result.action?.op === "countdown") showCountdown(result.action.at);
   });
 }
 
 function watchNotice(action) {
-  if (action?.op === "countdown") showCountdown(action.at);
   if (!action || action.by === me) return;
   // Netflix e HBO Max sem a extensão: o aviso pede para fazer o mesmo no player de lá.
   if (streaming(watch.now) && action.op === "pause") return toast(`${action.by} pausou: pause aí também`, "music", "pause");
@@ -5382,36 +5560,9 @@ watchButton.addEventListener("click", () => {
   setWatchRoom(!watchRoom);
 });
 
-// Contagem 3, 2, 1 nos dois aparelhos ao mesmo tempo (pelo relógio do servidor), para darem o play juntos.
-function showCountdown(at) {
-  if (!at || at === countdownAt) return;
-  countdownAt = at;
-  const box = $("#watch-count");
-  const number = $("#watch-count-number");
-  let shown = "";
-  box.classList.remove("hidden");
-  clearInterval(countdownTimer);
-  countdownTimer = setInterval(() => {
-    const left = at - (Date.now() + musicClock);
-    const next = left > 3000 ? "Prontos?" : left > 0 ? String(Math.ceil(left / 1000)) : "Play!";
-    if (next !== shown) {
-      shown = next;
-      number.textContent = next;
-      box.classList.toggle("go", next === "Play!");
-      fx.pop(number);
-      sound.play(next === "Play!" ? "connected" : "tap");
-    }
-    if (left < -1200) {
-      clearInterval(countdownTimer);
-      box.classList.add("hidden");
-    }
-  }, 80);
-}
-
 watchPanel.addEventListener("click", async (event) => {
   const target = event.target;
   if (target.closest("#watch-leave")) return setWatchRoom(false);
-  if (target.closest("#watch-countdown")) return watchCommand("countdown");
   // No app do Android, "Abrir na Netflix" abre dentro dele, já seguindo a sala.
   const streamLink = target.closest("#watch-launch-open, #watch-stream-open");
   if (streamLink && nativeStream()) {
@@ -5433,7 +5584,6 @@ watchPanel.addEventListener("click", async (event) => {
   const recent = target.closest("[data-recent]");
   if (recent) return replayWatch(recent.dataset.recent);
   // Sem a extensão (no celular): já escolheram lá e deram o play; a sala começa a contar o tempo.
-  if (target.closest("#watch-launch-start")) return watchCommand("start", { service: watchScreen, query: "" });
   if (target.closest("#watch-unblock")) return watchListen();
   if (target.closest("#watch-upload-cancel")) return cancelWatchUpload();
   if (target.closest("#watch-full")) return setWatchExpanded(!watchPanel.classList.contains("expanded"));
@@ -8679,7 +8829,7 @@ function writeLetter(letter = null) {
 // cada uma onde a pessoa deixou: arrastar move, a alça do canto muda o tamanho e a de cima gira; a barrinha dela troca
 // a moldura, traz para frente e tira. As posições são frações do papel, então valem em qualquer tela.
 
-const EDITOR_FONTS = [["Georgia", "Clássica"], ["Caveat", "À mão"], ["Dancing Script", "Cursiva"], ["Patrick Hand", "Bilhetinho"], ["Special Elite", "Máquina"], ["Poppins", "Moderna"]];
+const EDITOR_FONTS = [["Georgia", "Clássica"], ["Caveat", "À mão"], ["Dancing Script", "Cursiva"], ["Patrick Hand", "Bilhetinho"], ["Special Elite", "Máquina"], ["Inter", "Moderna"]];
 const EDITOR_SIZES = [["2", "Pequena"], ["3", "Normal"], ["4", "Média"], ["5", "Grande"], ["6", "Enorme"], ["7", "Gigante"]];
 const DECOR_FRAMES = ["none", "polaroid", "round", "tape", "shadow"];
 const DECOR_FRAME_NAMES = { none: "Sem moldura", polaroid: "Polaroide", round: "Redonda", tape: "Fita", shadow: "Sombra" };
@@ -9951,7 +10101,7 @@ function paintSpicy() {
 
 async function toggleSpicy() {
   if (!spicyOn()) {
-    const ok = await confirmDialog({ title: "Ligar o modo +18?", text: "Verdade ou desafio, quem é mais provável, isso ou aquilo e perguntinha passam a vir com cartas apimentadas, só para o casal. Só para maiores de 18 anos.", confirm: "Ligar 🔥" });
+    const ok = await confirmDialog({ title: "Ligar o modo +18?", text: "Verdade ou desafio, quem é mais provável, isso ou aquilo e perguntinha passam a vir com cartas apimentadas, só para o casal. Só para maiores de 18 anos.", confirm: "Ligar" });
     if (!ok) return;
     store.set("localStorage", SPICY_KEY, true);
     sound.play("sparkle");
@@ -10038,7 +10188,11 @@ function gameCard(message) {
   const head = el("div", "game-head");
   const name = el("span", "game-name");
   name.append(iconBadge(GAME_ICONS[game.type] || "dice", `game-mark game-${game.type}`), GAME_NAMES[game.type] || "Joguinho");
-  if (game.spicy) name.append(el("span", "game-spicy", "🔥 +18"));
+  if (game.spicy) {
+    const badge = el("span", "game-spicy");
+    badge.append(icon("flame"), "+18");
+    name.append(badge);
+  }
   head.append(name, el("small", "", message.sender === me ? "você começou" : `${message.sender} começou`));
   box.append(head);
   if (BOARD_GAMES.includes(game.type)) boardSummary(message, box);
@@ -10289,7 +10443,7 @@ function paintTable() {
   const game = message.game;
   const board = BOARD_GAMES.includes(game.type);
   setIcon($("#table-icon use"), GAME_ICONS[game.type]);
-  $("#table-title").textContent = `${GAME_NAMES[game.type]}${game.spicy ? " 🔥 +18" : ""}`;
+  $("#table-title").textContent = `${GAME_NAMES[game.type]}${game.spicy ? " · +18" : ""}`;
   const status = $("#table-status");
   status.textContent = board ? boardStatus(game) : cardStatus(game);
   status.classList.toggle("your-turn", myTurn(game));
@@ -10662,7 +10816,9 @@ function paintBanner(game) {
     const won = game.winner === me;
     const tie = game.winner === "empate";
     const banner = el("div", `table-banner${won ? " win" : tie ? " tie" : " lose"}`);
-    banner.append(el("span", "banner-emoji", game.hanged ? "🪢" : won ? "🏆" : tie ? "🤝" : "😢"), el("strong", "", boardStatus(game)));
+    const mark = el("span", "banner-mark");
+    mark.append(icon(game.hanged ? "gallows" : won ? "crown" : tie ? "heart" : "x-circle"));
+    banner.append(mark, el("strong", "", boardStatus(game)));
     $("#table-board").append(banner);
     if (table.ended === false) fx.pop(banner);
   }

@@ -24,7 +24,7 @@ function asset(string $file): string
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 142 100'%3E%3Cdefs%3E%3CradialGradient id='g' cx='40%25' cy='30%25' r='78%25'%3E%3Cstop offset='0' stop-color='%23f4d496'/%3E%3Cstop offset='.4' stop-color='%23dcaa62'/%3E%3Cstop offset='.75' stop-color='%23b47c38'/%3E%3Cstop offset='1' stop-color='%236f4419'/%3E%3C/radialGradient%3E%3C/defs%3E%3Cpath fill='url%28%23g%29' d='M11 57C5 40 19 24 41 19c14-3 24 1 38-2 25-5 50 6 54 26 3 18-9 31-27 37-18 6-38 7-58 5-24-2-31-11-37-28Z'/%3E%3Cg fill='%235a3410'%3E%3Cellipse cx='46' cy='38' rx='4' ry='2.6'/%3E%3Cellipse cx='92' cy='27' rx='3.4' ry='2.2'/%3E%3Cellipse cx='106' cy='60' rx='3.8' ry='2.4'/%3E%3Cellipse cx='65' cy='72' rx='4.2' ry='2.7'/%3E%3C/g%3E%3C/svg%3E" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&family=Caveat:wght@400;700&family=Dancing+Script:wght@400;700&family=Patrick+Hand&family=Special+Elite&display=swap" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,400..900;1,14..32,400..600&family=Caveat:wght@400;700&family=Dancing+Script:wght@400;700&family=Patrick+Hand&family=Special+Elite&display=swap" />
     <link rel="stylesheet" href="<?= asset('styles.css') ?>" />
     <link rel="stylesheet" href="<?= asset('emoji-picker.css') ?>" />
     <script>
@@ -32,8 +32,6 @@ function asset(string $file): string
       try { if (JSON.parse(localStorage.getItem("potato.session"))?.token) document.documentElement.classList.add("has-session"); } catch {}
       // Tema escolhido: aplicado antes de desenhar a página, sem piscar o tema padrão.
       try { const theme = JSON.parse(localStorage.getItem("potato.theme")); if (/^[a-z]+$/.test(theme)) document.documentElement.dataset.theme = theme; } catch {}
-      // Letra e balões da conversa (só neste aparelho), também antes de desenhar.
-      try { const look = JSON.parse(localStorage.getItem("potato.look")) || {}; for (const key of ["text", "bubbles"]) if (/^[a-z]+$/.test(look[key] || "")) document.documentElement.dataset[key] = look[key]; } catch {}
     </script>
   </head>
   <body>
@@ -366,10 +364,13 @@ function asset(string $file): string
         </header>
 
         <!-- Contagem regressiva até o próximo encontro (a mesma para os dois). Tocar muda a data ou desliga. -->
-        <button id="countdown" class="countdown hidden" type="button" title="Mudar a contagem">
-          <span class="countdown-icon" aria-hidden="true">✈️</span>
-          <span class="countdown-text"><small id="countdown-label"></small><strong id="countdown-time"></strong></span>
-        </button>
+        <div id="countdown" class="countdown hidden">
+          <button id="countdown-fly" class="countdown-main" type="button" title="Ver a viagem">
+            <span class="countdown-icon" aria-hidden="true"><svg class="icon"><use href="#i-plane" /></svg></span>
+            <span class="countdown-text"><small id="countdown-label"></small><strong id="countdown-time"></strong></span>
+          </button>
+          <button id="countdown-edit" class="countdown-edit" type="button" title="Mudar a contagem" aria-label="Mudar a contagem"><svg class="icon"><use href="#i-pencil" /></svg></button>
+        </div>
         <div id="net-banner" class="net-banner hidden"><span class="spinner"></span><span id="net-text">Reconectando…</span></div>
 
         <div id="available-call" class="available-call hidden" role="region" aria-label="Chamada disponível para reentrar">
@@ -506,7 +507,6 @@ function asset(string $file): string
                 <p id="watch-launch-text" class="watch-hint"></p>
                 <div id="watch-launch-actions" class="launch-actions">
                   <a id="watch-launch-open" class="music-pill" href="https://www.netflix.com/browse" target="_blank" rel="noopener noreferrer"><svg class="icon"><use href="#i-external" /></svg><span>Abrir a Netflix</span></a>
-                  <button id="watch-launch-start" class="watch-ghost" type="button" title="Sem a extensão (no celular): a sala começa a contar o tempo para os dois"><svg class="icon"><use href="#i-play" /></svg>Começar a sessão</button>
                 </div>
                 <form id="watch-twitch" class="watch-form hidden">
                   <input id="watch-twitch-query" type="search" autocomplete="off" enterkeyhint="go" placeholder="Nome do canal" aria-label="Nome do canal da Twitch ou link de um vídeo" />
@@ -525,11 +525,9 @@ function asset(string $file): string
               <span id="watch-stream-state" class="watch-stream-state"></span>
               <div class="watch-stream-actions">
                 <a id="watch-stream-open" class="music-pill" href="https://www.netflix.com/" target="_blank" rel="noopener noreferrer"><svg class="icon"><use href="#i-external" /></svg><span>Abrir na Netflix</span></a>
-                <button id="watch-countdown" class="watch-ghost" type="button" title="Contagem nos dois aparelhos ao mesmo tempo, para darem o play juntos"><svg class="icon"><use href="#i-play" /></svg>Contagem 3, 2, 1</button>
               </div>
               <p id="watch-stream-note" class="watch-stream-note"></p>
             </div>
-            <div id="watch-count" class="watch-count hidden" aria-live="assertive"><span id="watch-count-number"></span><small>deem o play juntos</small></div>
             <!-- Vídeo do aparelho subindo para o servidor (só para quem mandou; a outra pessoa vê "Ana está enviando um vídeo…"). -->
             <div id="watch-upload" class="watch-upload hidden">
               <svg class="icon"><use href="#i-file" /></svg>
@@ -782,20 +780,6 @@ function asset(string $file): string
           <section class="profile-card">
             <p class="picker-label">Tema <small>· só muda para você</small></p>
             <div id="themes" class="themes" role="group" aria-label="Tema do chat"></div>
-            <!-- Visual da conversa (só neste aparelho): o tamanho da letra e o formato dos balões. -->
-            <p class="picker-label">Letra da conversa</p>
-            <div class="look-row" role="group" aria-label="Tamanho da letra" data-look="text">
-              <button type="button" data-look-value="p">Pequena</button>
-              <button type="button" data-look-value="">Normal</button>
-              <button type="button" data-look-value="g">Grande</button>
-              <button type="button" data-look-value="gg">Enorme</button>
-            </div>
-            <p class="picker-label">Balões</p>
-            <div class="look-row" role="group" aria-label="Formato dos balões" data-look="bubbles">
-              <button type="button" data-look-value="">Arredondados</button>
-              <button type="button" data-look-value="bolha">Bolha</button>
-              <button type="button" data-look-value="reto">Retos</button>
-            </div>
           </section>
 
           <section class="profile-card">
@@ -940,7 +924,7 @@ function asset(string $file): string
             </section>
             <!-- Modo +18 (só neste aparelho): as cartas do casal ficam apimentadas. -->
             <button id="spicy-toggle" class="spicy-toggle" type="button" aria-pressed="false">
-              <span class="spicy-flame" aria-hidden="true">🔥</span>
+              <span class="spicy-flame" aria-hidden="true"><svg class="icon"><use href="#i-flame" /></svg></span>
               <span class="spicy-text"><strong>Modo +18</strong><small>Cartas apimentadas em verdade ou desafio, quem é mais provável, isso ou aquilo e perguntinha.</small></span>
               <span class="switch" aria-hidden="true"></span>
             </button>

@@ -366,7 +366,12 @@ class ChatNotificationService : Service() {
         .setContentText("Conectado para receber mensagens")
         .setContentIntent(openAppIntent())
         .setOngoing(true)
-        .setPriority(NotificationCompat.PRIORITY_LOW)
+        // Mínima: sem ícone na barra de status, sem som, recolhida no fim da lista (o Android exige uma notificação
+        // para o serviço que recebe as mensagens com o app fechado).
+        .setPriority(NotificationCompat.PRIORITY_MIN)
+        .setSilent(true)
+        .setShowWhen(false)
+        .setCategory(NotificationCompat.CATEGORY_SERVICE)
         .setBadgeIconType(NotificationCompat.BADGE_ICON_NONE)
         .setNumber(0)
         .build()
@@ -379,7 +384,8 @@ class ChatNotificationService : Service() {
     private fun createChannels() {
         val manager = getSystemService(NotificationManager::class.java)
         manager.deleteNotificationChannel("potato_background")
-        manager.createNotificationChannel(NotificationChannel(BACKGROUND_CHANNEL, "Conexao em segundo plano", NotificationManager.IMPORTANCE_LOW).apply { setShowBadge(false) })
+        manager.deleteNotificationChannel("potato_background_silent")
+        manager.createNotificationChannel(NotificationChannel(BACKGROUND_CHANNEL, "Conexão em segundo plano", NotificationManager.IMPORTANCE_MIN).apply { setShowBadge(false) })
         manager.createNotificationChannel(NotificationChannel(MainActivity.MESSAGE_CHANNEL, "Mensagens", NotificationManager.IMPORTANCE_HIGH).apply { setShowBadge(true) })
         manager.createNotificationChannel(NotificationChannel(MainActivity.CALL_CHANNEL, "Chamadas", NotificationManager.IMPORTANCE_HIGH).apply { setShowBadge(false) })
     }
@@ -405,6 +411,6 @@ class ChatNotificationService : Service() {
         private val MEALS = mapOf("cafe" to "Café da manhã", "almoco" to "Almoço", "lanche" to "Lanche", "jantar" to "Jantar")
         private const val RECENT = 8
         private const val FOREGROUND_ID = 900
-        private const val BACKGROUND_CHANNEL = "potato_background_silent"
+        private const val BACKGROUND_CHANNEL = "potato_background_min"
     }
 }
