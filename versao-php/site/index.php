@@ -917,7 +917,7 @@ function asset(string $file): string
 
           <!-- Joguinhos: escolher um jogo abre a mesinha aqui mesmo; a outra pessoa recebe o convite na conversa. -->
           <section class="us-pane" data-pane="jogos">
-            <p class="muted games-lead"><svg class="icon" aria-hidden="true"><use href="#i-gamepad" /></svg><span>Entretenimento para vocês dois <small>Escolha uma ilustração para abrir o jogo. A partida sincroniza e cada um joga na sua vez.</small></span></p>
+            <p class="muted games-lead"><svg class="icon" aria-hidden="true"><use href="#i-gamepad" /></svg><span>Jogos para vocês dois <small>Escolha uma ilustração para abrir o jogo. A partida sincroniza e cada um joga na sua vez.</small></span></p>
             <!-- O placar dos dois (todas as partidas de tabuleiro que já acabaram) e só as partidas esperando você. -->
             <section id="game-score" class="score-card hidden" aria-label="Placar"></section>
             <section id="game-live-wrap" class="hidden" aria-labelledby="game-live-title">

@@ -7572,7 +7572,7 @@ function usNotice(text, iconName, { push = false, count = true } = {}) {
 }
 
 const unreadLetters = () => us.letters.filter((letter) => letter.owner !== me && !letter.readAt).length;
-const US_TITLES = { hoje: ["sun", "Rotina do dia"], agenda: ["calendar", "Agenda"], sonhos: ["sparkles", "Sonhos e metas"], nos: ["heart", "Nós"], cartinhas: ["mail", "Cartinhas"], jogos: ["gamepad", "Entretenimento"] };
+const US_TITLES = { hoje: ["sun", "Rotina do dia"], agenda: ["calendar", "Agenda"], sonhos: ["sparkles", "Sonhos e metas"], nos: ["heart", "Nós"], cartinhas: ["mail", "Cartinhas"], jogos: ["gamepad", "Jogos"] };
 
 // Os números do menu: cartinhas novas e partidas esperando a sua jogada. No celular, o botão do menu ganha um
 // pontinho quando tem novidade lá dentro (também as da outra pessoa no dia, na agenda e nos sonhos).
