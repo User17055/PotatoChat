@@ -295,7 +295,7 @@ html.has-session #chat-view.hidden { display: grid !important; }
 /* ---------- barra lateral ---------- */
 /* A barra lateral rola sem barra de rolagem à vista (e nunca para o lado: o que não cabe termina em "…"). */
 .sidebar { display: flex; min-width: 0; flex-direction: column; justify-content: space-between; gap: 20px; padding: 28px 18px 18px; overflow-x: hidden; overflow-y: auto; scrollbar-width: none; border-right: 1px solid var(--line); background: color-mix(in srgb, var(--bg-2) 90%, transparent); backdrop-filter: blur(14px); }
-.brand-row { display: flex; align-items: center; gap: 12px; padding: 0 6px; font-size: 19px; font-weight: 700; letter-spacing: -.02em; }
+.brand-row { display: flex; align-items: center; gap: 12px; padding: 0 6px; font-size: 25px; font-weight: 750; letter-spacing: -.035em; }
 .brand-initial { color: #d9a441; }
 .room-label { margin: 38px 8px 12px; color: var(--faint); font-size: 10px; font-weight: 600; letter-spacing: .18em; text-transform: uppercase; }
 .sidebar::-webkit-scrollbar { display: none; }
