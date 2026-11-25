@@ -4897,6 +4897,7 @@ function applyWatch(state, measured = false, join = true) {
   if (started && join) setWatchRoom(true);
   paintWatch();
   syncWatch();
+  sendStreamState();
 }
 
 function setWatchRoom(on) {
@@ -4929,6 +4930,7 @@ function setWatchScreen(screen) {
   if (watchScreen === screen) return paintWatchPicker();
   watchScreen = screen;
   socket?.emit("watch", { op: "browse", service: screen === "home" ? "" : screen });
+  sendStreamState();
   if (screen === "youtube" && !$("#catalog-grid").childElementCount) loadCatalog({ shelf: catalogShelf });
   paintWatchPicker();
   if (!matchMedia("(pointer: fine)").matches) return;
@@ -4936,13 +4938,59 @@ function setWatchScreen(screen) {
   if (screen === "twitch") $("#watch-twitch-query").focus();
 }
 
-// Tocou num serviço: o vídeo do aparelho abre a escolha do arquivo; a Netflix e a HBO Max abrem de verdade (no
-// celular, o app), com a conta de cada um; YouTube e Twitch abrem a tela deles aqui na sala.
+// Tocou num serviço: o vídeo do aparelho abre a escolha do arquivo; a Netflix e a HBO Max abrem de verdade (no app do
+// Android, dentro dele, já sincronizadas; noutro celular, o app delas), com a conta de cada um; YouTube e Twitch abrem a
+// tela deles aqui na sala.
 function openWatchService(source) {
   if (source === "local") return $("#pick-watch").click();
-  if (STREAMING[source]) window.open(STREAMING[source].open, "_blank", "noopener");
   setWatchScreen(source);
+  if (STREAMING[source] && nativeStream()) return openNativeStream(source, watch.now?.source === source ? watch.now.url : "");
+  if (STREAMING[source]) window.open(STREAMING[source].open, "_blank", "noopener");
 }
+
+// ---- Netflix e HBO Max dentro do app do Android (como no Rave) ----
+// O app (1.5.0+) abre o serviço num navegador dele, por cima do chat, com a conta de cada um. O script de lá
+// (android/app/src/main/assets/stream-sync.js) faz o player seguir a sala e conta o que a pessoa faz no player. Este lado
+// só faz a ponte, como a extensão faz no computador: o estado da sala vai para o app, e o que vem de lá vira comando da
+// sala. Assim ninguém precisa da contagem 3, 2, 1.
+const nativeStream = () => inAndroid && Boolean(window.__potatoNativeStream && window.PotatoAndroid);
+const tellStream = (message) => {
+  try { window.PotatoAndroid.postMessage(JSON.stringify(message)); } catch {}
+};
+
+function openNativeStream(service, url) {
+  tellStream({ type: "stream-open", service, url: url || STREAMING[service].open });
+  sendStreamState();
+}
+
+// Só o que o player precisa (nada de nomes ou da conversa vai para a página da Netflix).
+function sendStreamState() {
+  if (!nativeStream()) return;
+  const now = watch.now && streaming(watch.now) ? { source: watch.now.source, url: watch.now.url || "", uid: watch.now.uid } : null;
+  tellStream({ type: "stream-state", room: { now, playing: watch.playing, position: watch.position, updatedAt: watch.updatedAt, offset: musicClock, choosing: watchScreen } });
+}
+
+const streamTitle = (url) => (String(url || "").match(/\/watch\/([^?#]+)/) || [])[1] || "";
+
+window.potatoStream = (raw) => {
+  let message;
+  try {
+    message = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  if (message.type === "hello") return sendStreamState();
+  if (message.type === "action" && ["pause", "resume", "seek"].includes(message.op)) {
+    return watchCommand(message.op, { position: Number(message.position) || 0, duration: Number(message.duration) || 0 });
+  }
+  // Deu o play num título lá: a sala começa com ele (ou troca para ele) quando a pessoa abriu o serviço pelo catálogo
+  // ou quando a sala já está nesse serviço; assistindo sozinha, a sala não se mete.
+  if (message.type === "playing" && STREAMING[message.service]) {
+    const now = watch.now;
+    if (now?.source === message.service ? streamTitle(now.url) === streamTitle(message.url) : watchScreen !== message.service) return;
+    watchCommand("start", { query: String(message.url || ""), service: message.service, title: String(message.title || "").slice(0, 120), position: Number(message.position) || 0 });
+  }
+};
 
 // A outra pessoa escolhendo agora (o aviso vale por 10 minutos).
 function watchChooser() {
@@ -4974,7 +5022,9 @@ function paintWatchLaunch(screen) {
   launch.dataset.service = screen;
   $("#watch-launch-mark").replaceChildren(service ? el("b", `wordmark ${screen}`, service.mark) : brand(screen));
   $("#watch-launch-title").textContent = WATCH_LAUNCH[screen].title;
-  $("#watch-launch-text").textContent = WATCH_LAUNCH[screen].text;
+  $("#watch-launch-text").textContent = service && nativeStream()
+    ? `A ${service.name} abre aqui dentro do app. Entre na sua conta (só na primeira vez), escolha e dê o play: a sala começa sozinha para os dois, sincronizada. “← Chat” volta para a conversa sem parar o vídeo.`
+    : WATCH_LAUNCH[screen].text;
   $("#watch-launch-actions").classList.toggle("hidden", !service);
   $("#watch-twitch").classList.toggle("hidden", Boolean(service));
   if (service) {
@@ -5021,7 +5071,8 @@ function replayWatch(key) {
   if (!entry) return;
   if (entry.source === "youtube") return watchCommand("start", { video: { id: entry.id, title: entry.title, channel: entry.channel, duration: entry.duration } });
   if (entry.source === "twitch") return watchCommand("start", { query: entry.kind === "video" ? `https://www.twitch.tv/videos/${entry.id}` : `https://www.twitch.tv/${entry.id}` });
-  window.open(entry.url, "_blank", "noopener");
+  if (nativeStream()) openNativeStream(entry.source, entry.url);
+  else window.open(entry.url, "_blank", "noopener");
   watchCommand("start", { query: entry.url, service: entry.source, title: entry.title });
 }
 
@@ -5134,7 +5185,9 @@ function paintWatch() {
     const open = $("#watch-stream-open");
     open.href = item.url;
     open.querySelector("span").textContent = `Abrir na ${service.name}`;
-    $("#watch-stream-note").textContent = WATCH_HINT.streaming;
+    $("#watch-stream-note").textContent = nativeStream()
+      ? `Toque em Abrir na ${service.name}: ela abre aqui dentro do app, já no mesmo ponto, e o player segue a sala sozinho (play, pause e o segundo).`
+      : WATCH_HINT.streaming;
   }
   $("#watch-unblock").classList.toggle("hidden", !watchBlocked);
   watchStage.classList.toggle("blocked", watchBlocked);
@@ -5359,6 +5412,14 @@ watchPanel.addEventListener("click", async (event) => {
   const target = event.target;
   if (target.closest("#watch-leave")) return setWatchRoom(false);
   if (target.closest("#watch-countdown")) return watchCommand("countdown");
+  // No app do Android, "Abrir na Netflix" abre dentro dele, já seguindo a sala.
+  const streamLink = target.closest("#watch-launch-open, #watch-stream-open");
+  if (streamLink && nativeStream()) {
+    event.preventDefault();
+    const service = streamLink.id === "watch-stream-open" ? watch.now?.source : watchScreen;
+    if (STREAMING[service]) openNativeStream(service, streamLink.id === "watch-stream-open" ? watch.now.url : "");
+    return;
+  }
   const source = target.closest("[data-watch-source]");
   if (source) return openWatchService(source.dataset.watchSource);
   if (target.closest("[data-watch-back]")) return setWatchScreen("home");

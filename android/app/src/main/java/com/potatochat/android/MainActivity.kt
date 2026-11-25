@@ -50,6 +50,7 @@ import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
     private lateinit var webView: WebView
+    private lateinit var stream: StreamOverlay
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var mediaRequest: PermissionRequest? = null
     // A chamada aberta no site (null = nenhuma): enquanto ela existe, o CallService segura o microfone com o app fora da
@@ -143,6 +144,8 @@ class MainActivity : ComponentActivity() {
             setBackgroundColor(Color.rgb(18, 16, 13))
             addView(webView)
         }
+        // Netflix e HBO Max dentro do app: o que acontece no player de lá vai para o site, que fala com a sala.
+        stream = StreamOverlay(this, root) { raw -> js("window.potatoStream && window.potatoStream(${JSONObject.quote(raw)})") }
         WindowCompat.setDecorFitsSystemWindows(window, false)
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -155,6 +158,7 @@ class MainActivity : ComponentActivity() {
                 params.bottomMargin = bottom
                 webView.layoutParams = params
             }
+            stream.setInsets(top, bottom)
             // As barras já ficam de fora (as margens acima): o WebView não recebe as medidas delas, senão o site
             // (safe-area) deixaria o mesmo espaço de novo, uma faixa escura embaixo.
             WindowInsetsCompat.CONSUMED
@@ -164,6 +168,8 @@ class MainActivity : ComponentActivity() {
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                // Na Netflix ou na HBO Max: sai da tela cheia, ou volta para o chat (o vídeo continua).
+                if (stream.back()) return
                 if (callState != null) {
                     if (!enterCallPip()) moveTaskToBack(true)
                 } else if (musicState != null) moveTaskToBack(true)
@@ -393,6 +399,11 @@ class MainActivity : ComponentActivity() {
                     updatePip()
                 }
             }
+            // Batata Watch Party na Netflix ou na HBO Max, dentro do app (StreamOverlay): abrir, o estado da sala para o
+            // player seguir, e fechar.
+            "stream-open" -> stream.show(message.optString("service"), message.optString("url"))
+            "stream-state" -> message.optJSONObject("room")?.let { stream.state(it.toString()) }
+            "stream-close" -> stream.close()
             // O convite (Adicionar pessoa): a janela de compartilhar do Android (WhatsApp, Instagram…).
             "share" -> runCatching {
                 val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, message.optString("text"))
@@ -495,6 +506,7 @@ class MainActivity : ComponentActivity() {
               window.__potatoNativeReady = true;
               window.__potatoNativeMusic = true;
               window.__potatoScreenCapture = true;
+              window.__potatoNativeStream = true;
               window.__potatoScreenAudio = ${Build.VERSION.SDK_INT >= 29};
               const nativeStyle = document.createElement('style');
               nativeStyle.textContent = '@media (max-width:760px){.tabbar{padding-bottom:6px!important}}';
@@ -608,7 +620,8 @@ class MainActivity : ComponentActivity() {
     // Numa chamada o WebView não pausa: ela continua com o app em segundo plano.
     override fun onPause() {
         startBackgroundNotifications()
-        if (callState == null && musicState == null) webView.onPause()
+        // Assistindo na Netflix/HBO Max dentro do app, o site também continua (é ele que fala com a sala).
+        if (callState == null && musicState == null && !stream.active) webView.onPause()
         super.onPause()
     }
 
@@ -622,6 +635,7 @@ class MainActivity : ComponentActivity() {
         CallService.stop(this)
         fileCallback?.onReceiveValue(null)
         mediaRequest?.deny()
+        stream.close()
         webView.stopLoading()
         webView.webChromeClient = null
         webView.webViewClient = WebViewClient()
