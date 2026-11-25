@@ -7524,13 +7524,26 @@ function paintSideAgenda() {
 // ---- menu: a barra lateral (no celular, uma gaveta que abre pelo botão de menu) ----
 
 function setMenu(open) {
+  if (matchMedia("(min-width: 761px)").matches) {
+    chatView.classList.toggle("sidebar-collapsed", open);
+    document.querySelectorAll("[data-menu]").forEach((button) => {
+      button.setAttribute("aria-expanded", String(!open));
+      button.setAttribute("aria-label", open ? "Mostrar menu" : "Ocultar menu");
+      button.title = open ? "Mostrar menu" : "Ocultar menu";
+    });
+    if (open) sound.play("tap");
+    return;
+  }
   chatView.classList.toggle("menu-open", open);
   document.querySelectorAll("[data-menu]").forEach((button) => button.setAttribute("aria-expanded", String(open)));
   if (open) sound.play("tap");
 }
 
 document.addEventListener("click", (event) => {
-  if (event.target.closest("[data-menu]")) return setMenu(!chatView.classList.contains("menu-open"));
+  if (event.target.closest("[data-menu]")) {
+    const desktop = matchMedia("(min-width: 761px)").matches;
+    return setMenu(!(desktop ? chatView.classList.contains("sidebar-collapsed") : chatView.classList.contains("menu-open")));
+  }
   if (event.target.closest("#menu-backdrop") || event.target.closest(".sidebar [data-tab-target], .sidebar [data-us-open]")) setMenu(false);
 });
 

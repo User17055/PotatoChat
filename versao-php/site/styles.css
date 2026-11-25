@@ -284,6 +284,11 @@ html.has-session #chat-view.hidden { display: grid !important; }
    Estrutura do chat
    ===================================================================== */
 .app-shell { position: relative; z-index: 1; height: 100vh; height: 100dvh; display: grid; grid-template-columns: 280px minmax(0, 1fr); }
+@media (min-width: 761px) {
+  .app-shell.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
+  .sidebar-collapsed > .sidebar { display: none; }
+  .app-shell:not(.in-call) .topbar > .menu-button { display: grid; }
+}
 
 /* ---------- barra lateral ---------- */
 /* A barra lateral rola sem barra de rolagem à vista (e nunca para o lado: o que não cabe termina em "…"). */
@@ -1078,6 +1083,9 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
 /* Sala da Watch Party: cara de cinema, o vídeo grande e a conversa do lado (no celular, embaixo). */
 .app-shell.watching .conversation { background: radial-gradient(120% 80% at 30% 0%, #24183a 0%, #0b0a10 55%, #060609 100%); }
 .app-shell.watching .wallpaper { opacity: 0; }
+/* Na Watch Party, os relógios e o alternador de tela do vídeo não aparecem sobre o player. */
+.app-shell.watching .trip-clock,
+.app-shell.watching :is(#watch-full, #watch-stream-clock, #watch-time, #watch-length) { display: none !important; }
 .watch-button { position: relative; }
 .watch-dot { position: absolute; top: 2px; right: 2px; width: 10px; height: 10px; display: none; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 2px var(--bg); }
 .watch-button.live .watch-dot { display: block; animation: blink 1.2s ease-in-out infinite; }
@@ -1110,8 +1118,7 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
 .watch-form .music-pill { margin: 0; }
 /* Os serviços: cartões na cor de cada um (no celular, a fileira passa para o lado). O espaço em volta é para a
    sombra não ficar cortada pela rolagem; a altura mínima impede a grade de espremer a fileira. */
-.watch-sources { display: flex; justify-content: center; justify-content: safe center; gap: 10px; max-width: 100%; min-height: 118px; margin: -4px 0 -18px; padding: 10px 20px 26px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; }
-.watch-sources::-webkit-scrollbar { display: none; }
+.watch-sources { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; width: min(100%, 620px); max-width: 100%; min-height: 0; margin: -4px auto -18px; padding: 10px 20px 26px; overflow: visible; }
 .watch-source { --brand: #f5c04f; flex: 0 0 auto; width: 104px; height: 82px; display: grid; place-items: center; align-content: center; gap: 6px; padding: 8px; border: 1.5px solid color-mix(in srgb, var(--brand) 35%, #ffffff1a); border-radius: 16px; background: linear-gradient(160deg, color-mix(in srgb, var(--brand) 26%, #15121c), #0c0b10); color: #ffffffcc; font-size: 12px; font-weight: 600; scroll-snap-align: center; transition: transform .2s, border-color .2s, box-shadow .2s, color .2s; }
 .watch-source:hover { border-color: var(--brand); color: #fff; box-shadow: 0 10px 26px -8px color-mix(in srgb, var(--brand) 60%, transparent); transform: translateY(-2px); }
 .watch-source:active { transform: scale(.96); }
@@ -2610,7 +2617,7 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
   .catalog-info strong { font-size: 12.5px; }
   .catalog-info small { font-size: 11px; }
   .watching .watch-panel[data-source="netflix"] .watch-stage, .watching .watch-panel[data-source="max"] .watch-stage { aspect-ratio: auto; min-height: 330px; }
-  .watch-sources { justify-content: flex-start; width: calc(100% + 48px); max-width: none; margin-inline: -24px; padding-inline: 24px; -webkit-mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent); mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent); }
+  .watch-sources { justify-content: center; width: 100%; max-width: 420px; margin-inline: auto; padding-inline: 12px; -webkit-mask-image: none; mask-image: none; }
   /* No celular, a batata já está no selo do topo: o espaço fica para os cartões e o texto. */
   .watch-picker-icon { display: none; }
   /* No celular, o "Assistir" vira só o play, para o nome do filme caber no campo. */

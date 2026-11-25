@@ -34,9 +34,6 @@ const VOICE_PEAKS = 64;
 // Papel de parede: foto reduzida no navegador (lado maior até 1600 px). Cabe numa requisição mesmo em base64.
 const WALLPAPER_MAX = 650000;
 const MUSIC_QUEUE_MAX = 50;
-// Watch Party na Netflix e na HBO Max: em quanto tempo os dois players começam (ou continuam) juntos.
-const STREAM_START_MS = 5000;
-const STREAM_RESUME_MS = 1500;
 // Chamada: quanto tempo ela toca nos aparelhos da outra pessoa (depois, continua aberta esperando). Veja "chamadas".
 const CALL_RING_MS = 60000;
 const CALL_WAIT_MS = 300000;
@@ -1437,9 +1434,8 @@ function watch_act(array $me, array $body): array
             $streamed = in_array($item['source'], ['netflix', 'max'], true);
             if ($streamed && ($state['now']['url'] ?? '') === ($item['url'] ?? '')) return ['ok' => true, 'state' => watch_public($state), 'action' => ['op' => 'same', 'by' => $me['name']]];
             // Da extensão vem também o segundo em que o player de lá já está.
-            // Netflix e HBO Max: os dois players ficam parados no mesmo segundo até STREAM_START_MS e começam juntos
-            // (dá tempo de o título carregar no aparelho da outra pessoa), sem contagem na tela.
-            $state = ['now' => $item, 'playing' => true, 'position' => $streamed ? ($reported ?? 0) : 0, 'updatedAt' => $now + ($streamed ? STREAM_START_MS : 0),
+            // Netflix e HBO Max começam imediatamente no segundo informado pelo player.
+            $state = ['now' => $item, 'playing' => true, 'position' => $streamed ? ($reported ?? 0) : 0, 'updatedAt' => $now,
                 'browsing' => null, 'recent' => watch_recent($state['recent'], $item)];
             $action['item'] = $item;
             // Os dois sons juntos não dá: a música pausa.
@@ -1453,22 +1449,28 @@ function watch_act(array $me, array $body): array
             }
             break;
         case 'pause':
-        case 'ended':
             if (!$state['now']) return ['ok' => false, 'error' => 'Nenhum vídeo agora.'];
-            if ($op === 'ended' && ($state['now']['uid'] ?? '') !== str($body['uid'] ?? '')) return ['ok' => true, 'state' => watch_public($state)];
             if ($state['playing']) {
                 $state['position'] = $reported ?? $at();
                 $state['playing'] = false;
                 $state['updatedAt'] = $now;
             }
             break;
+        case 'ended':
+            if (!$state['now']) return ['ok' => false, 'error' => 'Nenhum vídeo agora.'];
+            if (($state['now']['uid'] ?? '') !== str($body['uid'] ?? '')) return ['ok' => true, 'state' => watch_public($state)];
+            // Finaliza para os dois e volta ao catálogo. O histórico recente continua disponível nas recomendações.
+            $state['now'] = null;
+            $state['playing'] = false;
+            $state['position'] = 0;
+            $state['updatedAt'] = $now;
+            break;
         case 'resume':
             if (!$state['now']) return ['ok' => false, 'error' => 'Nenhum vídeo agora.'];
             if (!$state['playing']) {
                 if ($reported !== null) $state['position'] = $reported;
                 $state['playing'] = true;
-                // Netflix e HBO Max: continuam juntos um instante depois (o aviso chega nos dois antes).
-                $state['updatedAt'] = $now + (in_array($state['now']['source'] ?? '', ['netflix', 'max'], true) ? STREAM_RESUME_MS : 0);
+                $state['updatedAt'] = $now;
             }
             break;
         case 'seek':
