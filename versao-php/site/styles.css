@@ -3032,3 +3032,13 @@ button.w-note { cursor: pointer; }
 
 /* Com a sala aberta, o Entretenimento fica só na barra da sala (sem repetir no topo da conversa). */
 .app-shell.watching .hub-button { display: none; }
+
+/* Tela cheia da Watch Party: o botão da conversa só aparece nela; com a conversa à mostra, a sala encolhe e a conversa
+   (que já fica na coluna da direita na sala) aparece do lado; no celular, a sala fica em cima e a conversa embaixo. */
+#watch-chat { display: none; }
+.watch-panel.expanded #watch-chat { display: grid; }
+.app-shell.chat-over .watch-panel.expanded { right: 380px; }
+@media (max-width: 760px) {
+  .app-shell.chat-over .watch-panel.expanded { right: 0; bottom: 48%; }
+  .app-shell.chat-over.watching .conversation { padding-top: 52dvh; }
+}
