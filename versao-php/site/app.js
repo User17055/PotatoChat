@@ -3778,7 +3778,10 @@ function paintWatchView() {
 
 $("#watch-view").addEventListener("click", () => {
   const index = WATCH_VIEWS.indexOf(paintWatchView());
-  store.set("localStorage", WATCH_VIEW_KEY, WATCH_VIEWS[(index + 1) % WATCH_VIEWS.length][0]);
+  // Em tela cheia, ele só mostra (conversa do lado) ou esconde (cinema) a conversa.
+  const expanded = watchPanel.classList.contains("expanded");
+  const next = expanded ? (WATCH_VIEWS[index][0] === "cinema" ? "lado" : "cinema") : WATCH_VIEWS[(index + 1) % WATCH_VIEWS.length][0];
+  store.set("localStorage", WATCH_VIEW_KEY, next);
   toast(`Tela: ${paintWatchView()[1]}`, "info", "tv");
   sound.play("tap");
 });
@@ -5656,15 +5659,6 @@ $("#pick-watch").addEventListener("change", (event) => {
 });
 
 // Tela cheia: no computador e no Android, de verdade; no iPhone, ocupa a tela do navegador.
-// Em tela cheia: a conversa aparece do lado (no celular, embaixo) e some de novo.
-function setWatchChat(on) {
-  $(".app-shell").classList.toggle("chat-over", on);
-  $("#watch-chat").setAttribute("aria-pressed", String(on));
-  $("#watch-chat-icon").setAttribute("href", on ? "#i-message-off" : "#i-message");
-  $("#watch-chat").title = on ? "Esconder a conversa" : "Mostrar a conversa";
-  if (on) scrollToLatest();
-}
-
 function setWatchExpanded(on) {
   if (watchPanel.classList.contains("expanded") === on) return;
   watchPanel.classList.toggle("expanded", on);
@@ -5675,7 +5669,6 @@ function setWatchExpanded(on) {
   // A página inteira em tela cheia, com a sala por cima de tudo: assim a conversa pode aparecer do lado quando pedir.
   if (on && !document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {});
   if (!on && document.fullscreenElement === document.documentElement) document.exitFullscreen?.().catch(() => {});
-  if (!on) setWatchChat(false);
 }
 
 document.addEventListener("fullscreenchange", () => {
@@ -5693,7 +5686,6 @@ watchPanel.addEventListener("click", async (event) => {
   if (target.closest("#watch-leave")) return setWatchRoom(false);
   // Tela cheia como o F11: só a sala (o vídeo ou a tela de escolher, e a barra dela), sem a conversa do lado.
   if (target.closest("#watch-room-full")) return setWatchExpanded(!watchPanel.classList.contains("expanded"));
-  if (target.closest("#watch-chat")) return setWatchChat(!$(".app-shell").classList.contains("chat-over"));
   // No app do Android, "Abrir na Netflix" abre dentro dele, já seguindo a sala.
   const streamLink = target.closest("#watch-launch-open, #watch-stream-open");
   if (streamLink && nativeStream()) {

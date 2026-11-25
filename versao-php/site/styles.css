@@ -1218,8 +1218,8 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
 .watching .conversation > .messages-wrap { flex: 1 1 auto; overflow: hidden; }
 .watching .messages { scrollbar-width: none; overscroll-behavior: contain; }
 .watching .messages::-webkit-scrollbar { display: none; }
-.watching.watch-cinema:not(.chat-over) .conversation { grid-template-rows: minmax(0, 1fr); }
-.watching.watch-cinema:not(.chat-over) .watch-panel { grid-row: 1; }
+.watching.watch-cinema .conversation { grid-template-rows: minmax(0, 1fr); }
+.watching.watch-cinema .watch-panel { grid-row: 1; }
 .watch-stage.blocked .watch-host iframe { pointer-events: auto; }
 /* Netflix ou HBO Max: cada um assiste na própria conta; aqui fica o relógio da sessão, o atalho e a contagem. */
 .watch-stream { position: absolute; inset: 0; z-index: 1; display: grid; place-content: center; place-content: safe center; justify-items: center; gap: 8px; padding: 22px; overflow-y: auto; background: radial-gradient(circle at 50% 35%, #2b0a0e, #050505 70%); color: #fff; text-align: center; }
@@ -1444,8 +1444,8 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
   .watching .message { max-width: 92%; }
   .watching .quick-emojis { display: none; }
   /* Modo cinema: só o vídeo, a tela toda. */
-  .watching.watch-cinema:not(.chat-over) .conversation { grid-template-columns: minmax(0, 1fr); }
-  .watching.watch-cinema:not(.chat-over) .conversation > :not(.watch-panel) { display: none; }
+  .watching.watch-cinema .conversation { grid-template-columns: minmax(0, 1fr); }
+  .watching.watch-cinema .conversation > :not(.watch-panel) { display: none; }
   .watching.watch-cinema .watch-panel { margin: 14px; }
   .in-call.call-expanded .conversation { grid-template-columns: minmax(0, 1fr); background: none; }
 }
@@ -2652,7 +2652,7 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
   /* Sala no celular: o vídeo em cima, a conversa embaixo. No modo cinema, só o vídeo (a conversa some). */
   .watching .topbar { display: none; }
   .watching .conversation { height: 100dvh; min-height: 0; overflow: hidden; }
-  .watching.watch-cinema:not(.chat-over) .conversation > :is(.messages-wrap, .typing, .reply-bar) { display: none; }
+  .watching.watch-cinema .conversation > :is(.messages-wrap, .typing, .reply-bar) { display: none; }
   .watching.watch-cinema .conversation > .composer { position: fixed; left: 50%; bottom: max(14px, var(--safe-bottom)); z-index: 70; display: flex !important; width: min(760px, calc(100vw - 32px)); margin: 0; transform: translateX(-50%); }
   .watching.watch-cinema .watch-chat-overlay { bottom: 86px; left: 16px; }
   .watching.watch-cinema .watch-panel { flex: 1; display: flex; flex-direction: column; }
@@ -3033,14 +3033,12 @@ button.w-note { cursor: pointer; }
 /* Com a sala aberta, o Entretenimento fica só na barra da sala (sem repetir no topo da conversa). */
 .app-shell.watching .hub-button { display: none; }
 
-/* Tela cheia da Watch Party: o botão da conversa só aparece nela; com a conversa à mostra, a sala encolhe e a conversa
-   (que já fica na coluna da direita na sala) aparece do lado; no celular, a sala fica em cima e a conversa embaixo. */
-#watch-chat { display: none; }
-.watch-panel.expanded #watch-chat { display: grid; }
-.app-shell.chat-over .watch-panel.expanded { right: 380px; }
+/* Tela cheia da Watch Party: fora do cinema (botão Tela), a conversa aparece do lado (no celular, embaixo); no cinema,
+   só a sala. */
+.app-shell.watching:not(.watch-cinema) .watch-panel.expanded { right: 380px; }
 @media (max-width: 760px) {
-  .app-shell.chat-over .watch-panel.expanded { right: 0; bottom: 48%; }
-  .app-shell.chat-over.watching .conversation { padding-top: 52dvh; }
+  .app-shell.watching:not(.watch-cinema) .watch-panel.expanded { right: 0; bottom: 48%; }
+  .app-shell.watching:not(.watch-cinema):has(.watch-panel.expanded) .conversation { padding-top: 52dvh; }
 }
 
 /* O Entretenimento no topo do Nosso cantinho, no canto direito. */
