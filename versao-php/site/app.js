@@ -5646,11 +5646,17 @@ document.addEventListener("fullscreenchange", () => {
   if (document.fullscreenElement !== watchPanel) setWatchExpanded(false);
 });
 
-$("#watch-open").addEventListener("click", () => setWatchRoom(!watchRoom));
+// A TV abre a tela de entretenimento (a sala): os serviços e, embaixo, o "Fazer junto" (vídeo, tela, jogos, desenhos).
+watchButton.addEventListener("click", () => {
+  fx.press(watchButton);
+  setWatchRoom(!watchRoom);
+});
 
 watchPanel.addEventListener("click", async (event) => {
   const target = event.target;
   if (target.closest("#watch-leave")) return setWatchRoom(false);
+  // "Fazer junto" (vídeo, tela, jogos, desenhos): a sala fecha e a opção abre no lugar dela (o clique segue para ela).
+  if (target.closest("[data-leave-room]")) setWatchRoom(false);
   // No app do Android, "Abrir na Netflix" abre dentro dele, já seguindo a sala.
   const streamLink = target.closest("#watch-launch-open, #watch-stream-open");
   if (streamLink && nativeStream()) {
@@ -7256,28 +7262,7 @@ shareSheet.addEventListener("click", (event) => {
 });
 
 // O botão do topo inicia logo uma chamada de voz; vídeo e tela ficam nos controles da chamada.
-const callMenu = $("#call-menu");
-const closeCallMenu = () => {
-  callMenu.classList.add("hidden");
-  $("#watch-button").setAttribute("aria-expanded", "false");
-};
 $("#call-button").addEventListener("click", () => call ? returnToCall() : startCall("audio"));
-// A TV abre o menu de entretenimento (Watch Party, vídeo, tela, jogos e desenhos).
-$("#watch-button").addEventListener("click", () => {
-  fx.press($("#watch-button"));
-  if (!callMenu.classList.contains("hidden")) return closeCallMenu();
-  fx.show(callMenu, { y: -8, scale: 0.97 });
-  $("#watch-button").setAttribute("aria-expanded", "true");
-});
-callMenu.addEventListener("click", (event) => {
-  if (event.target.closest("button")) closeCallMenu();
-});
-document.addEventListener("click", (event) => {
-  if (!event.target.closest(".call-pick")) closeCallMenu();
-});
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !callMenu.classList.contains("hidden")) closeCallMenu();
-});
 $("#audio-call").addEventListener("click", () => startCall("audio"));
 $("#video-call").addEventListener("click", () => startCall("video"));
 $("#share-screen").addEventListener("click", () => (call?.local.screen ? toast("Você já está transmitindo.") : openShare()));

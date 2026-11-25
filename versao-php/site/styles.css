@@ -2956,3 +2956,11 @@ button.w-note { cursor: pointer; }
 }
 
 .trip-change { margin-top: 10px; padding: 8px 16px; border: 1px solid #ffffff33; border-radius: 999px; background: transparent; color: #fff; font-size: 13px; font-weight: 600; }
+
+/* "Fazer junto", na sala (a tela de entretenimento): os mesmos cartões dos serviços. */
+.watch-more-title { margin: 22px 0 2px; color: #ffffff99; font-size: 11px; font-weight: 700; letter-spacing: .14em; text-align: center; text-transform: uppercase; }
+.watch-source[data-leave-room] { --brand: #e50914; }
+.watch-source#share-screen { --brand: #8b5cf6; }
+.watch-source[data-us-open="jogos"] { --brand: #2fbf71; }
+.watch-source[data-us-open="nos"] { --brand: #ff7eb6; }
+.watch-source span { text-align: center; }
