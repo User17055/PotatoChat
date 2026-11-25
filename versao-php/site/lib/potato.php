@@ -2319,6 +2319,69 @@ function letter_decor($item, string $owner, string $itemId, array $old): ?array
     return $sticker ? ['type' => 'sticker', 'url' => $sticker['url'], 'width' => $sticker['width'], 'height' => $sticker['height']] + $place : null;
 }
 
+// ---- nós: os widgets (dias juntos, distância, contagens e desenhos) ----
+// O mesmo estado no site e nos widgets do Android (api.php?action=widget). A localização de cada um fica só aqui no
+// servidor, arredondada (~1 km): para a outra pessoa vai só a distância, nunca onde ela está.
+const NOS_DRAWINGS = 40;
+const NOS_NOTE_MAX = 40;
+
+function km_between(array $a, array $b): float
+{
+    $rad = M_PI / 180;
+    $dlat = ($b['lat'] - $a['lat']) * $rad;
+    $dlon = ($b['lon'] - $a['lon']) * $rad;
+    $h = sin($dlat / 2) ** 2 + cos($a['lat'] * $rad) * cos($b['lat'] * $rad) * sin($dlon / 2) ** 2;
+    return 6371 * 2 * atan2(sqrt($h), sqrt(1 - $h));
+}
+
+function nos_state(): array
+{
+    $room = couple_room();
+    $since = $room ? query('SELECT created_at FROM ' . t('messages') . ' WHERE room = ? ORDER BY n LIMIT 1', [$room['id']])->fetchColumn() : false;
+    $places = [];
+    foreach (query('SELECT * FROM ' . t('items') . " WHERE kind = 'place'")->fetchAll() as $row) $places[$row['owner']] = item_data($row);
+    $people = [];
+    foreach (users() as $name) {
+        $place = $places[$name] ?? [];
+        $people[$name] = ['note' => (string) ($place['note'] ?? ''), 'at' => $place['at'] ?? null, 'located' => isset($place['lat'])];
+    }
+    $names = users();
+    $distance = count($names) === 2 && isset($places[$names[0]]['lat'], $places[$names[1]]['lat']) ? (int) round(km_between($places[$names[0]], $places[$names[1]])) : null;
+    $drawings = array_map('item_public', query('SELECT * FROM ' . t('items') . " WHERE kind = 'drawing' ORDER BY n DESC LIMIT " . NOS_DRAWINGS)->fetchAll());
+    return ['since' => $since ?: null, 'distance' => $distance, 'people' => (object) $people, 'countdown' => countdown_state(), 'drawings' => $drawings];
+}
+
+// A localização (lat, lon, do navegador ou do app) e/ou o recadinho do widget de distância.
+function save_place(array $me, array $body): array
+{
+    $row = own_item('place', $me['name']);
+    $place = $row ? item_data($row) : [];
+    $lat = $body['lat'] ?? null;
+    $lon = $body['lon'] ?? null;
+    if ($lat !== null || $lon !== null) {
+        if (!is_numeric($lat) || !is_numeric($lon) || abs((float) $lat) > 90 || abs((float) $lon) > 180) return ['ok' => false, 'error' => 'Localização inválida.'];
+        $place['lat'] = round((float) $lat, 2);
+        $place['lon'] = round((float) $lon, 2);
+        $place['at'] = iso();
+    }
+    if (array_key_exists('note', $body)) $place['note'] = clean_line($body['note'] ?? '', NOS_NOTE_MAX);
+    save_item($row, $row['id'] ?? uuid(), 'place', $me['name'], null, $place);
+    emit_us(['kind' => 'nos', 'by' => $me['name']]);
+    return ['ok' => true] + nos_state();
+}
+
+// Um desenho pronto (o PNG já subiu por api.php?action=upload): fica na galeria dos dois.
+function save_drawing(array $me, array $body): array
+{
+    $itemId = uuid();
+    $image = item_photo($body['key'] ?? '', $me['name'], $itemId);
+    if (!$image) return ['ok' => false, 'error' => 'O desenho não subiu. Tente de novo.'];
+    save_item(null, $itemId, 'drawing', $me['name'], null, $image + ['title' => clean_line($body['title'] ?? '', 60)]);
+    keep_photos($itemId, $me['name'], [$image['key']]);
+    emit_us(['kind' => 'nos', 'by' => $me['name'], 'action' => 'drawing']);
+    return ['ok' => true] + nos_state();
+}
+
 // ---- lembretes ----
 
 // Lembretes das próximas 48 horas de quem pediu: os da rotina e os dos compromissos dela (ou dos dois). tz = minutos
@@ -2407,6 +2470,25 @@ function us_act(array $me, array $body): array
     switch ($op) {
         case 'load':
             return us_load($me, $body);
+
+        // Nós (os widgets): o estado, a localização e o recadinho, e os desenhos.
+        case 'nos':
+            return ['ok' => true] + nos_state();
+
+        case 'place:save':
+            return save_place($me, $body);
+
+        case 'drawing:save':
+            return save_drawing($me, $body);
+
+        case 'drawing:delete':
+            $row = find_item('drawing', $id);
+            if ($row && $row['owner'] !== $me['name']) return ['ok' => false, 'error' => 'Só quem desenhou apaga.'];
+            if ($row) {
+                delete_item($row);
+                emit_us(['kind' => 'nos', 'by' => $me['name']]);
+            }
+            return ['ok' => true] + nos_state();
 
         case 'day':
             $day = clean_day($body['day'] ?? null);

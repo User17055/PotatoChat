@@ -1198,6 +1198,28 @@ try {
     assert.equal((await us(us1, { op: "letter:save", title: "Vazia", html: "<div><br></div><script>x</script>" })).error, "Escreva alguma coisa na cartinha.");
     assert.equal((await us(us1, { op: "letter:save", title: "Gigante", html: "<b>a</b>".repeat(30000) })).error, "A cartinha ficou grande demais. Tire um pouco da formatação.");
     assert.equal((await us(us1, { op: "letter:delete", id: formatted.item.id })).ok, true);
+    // Nós (os widgets): desde a primeira mensagem, a distância (só ela: a localização de ninguém sai do servidor), o
+    // recadinho de cada um e a galeria de desenhos; o widget do Android recebe o mesmo.
+    const nosStart = await us(us1, { op: "nos" });
+    assert.ok(nosStart.since);
+    assert.deepEqual([nosStart.distance, nosStart.people["Pessoa 2"].located], [null, false]);
+    assert.equal((await us(us1, { op: "place:save", lat: 91, lon: 0 })).error, "Localização inválida.");
+    await us(us1, { op: "place:save", lat: -23.5505, lon: -46.6333, note: "  saudade demais  " });
+    const placed = await us(us2, { op: "place:save", lat: -22.9068, lon: -43.1729 });
+    assert.ok(placed.distance > 340 && placed.distance < 370, `distância ${placed.distance}`);
+    assert.deepEqual([placed.people["Pessoa 1"].note, placed.people["Pessoa 1"].located], ["saudade demais", true]);
+    assert.ok(!JSON.stringify(placed).includes("46.63"), "a localização não vai para ninguém");
+    assert.equal((await us(us2, { op: "place:save", note: "te amo" })).distance, placed.distance, "só o recadinho não mexe na localização");
+    const drawingFile = (await upload(firstLogin.body.token, "desenho.png", makePng(40, 30))).body.file;
+    const drew = await us(us1, { op: "drawing:save", key: drawingFile.key, title: "Nós dois" });
+    assert.deepEqual([drew.drawings.length, drew.drawings[0].title, drew.drawings[0].width, drew.drawings[0].owner], [1, "Nós dois", 40, "Pessoa 1"]);
+    assert.equal((await us(us2, { op: "drawing:save", key: drawingFile.key })).error, "O desenho não subiu. Tente de novo.");
+    assert.equal((await us(us2, { op: "drawing:delete", id: drew.drawings[0].id })).error, "Só quem desenhou apaga.");
+    const widget = await api("widget", { token: secondLogin.body.token });
+    assert.deepEqual([widget.status, widget.body.me, widget.body.distance, widget.body.drawings.length, widget.body.people["Pessoa 2"].note], [200, "Pessoa 2", placed.distance, 1, "te amo"]);
+    assert.ok("Pessoa 1" in widget.body.avatars);
+    assert.equal((await api("widget", { token: "falso" })).status, 401);
+    assert.equal((await us(us1, { op: "drawing:delete", id: drew.drawings[0].id })).drawings.length, 0);
     assert.equal((await us(us1, { op: "nada" })).error, "Ação desconhecida.");
 
     // ---------- Joguinhos ----------

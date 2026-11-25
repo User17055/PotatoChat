@@ -397,6 +397,13 @@ try {
             respond(200, login(input(), (string) ($_SERVER['REMOTE_ADDR'] ?? '?')));
         case 'connect':
             respond(200, connect(input()));
+        // Widgets do Android (tela inicial): o mesmo estado da seção Nós, com as fotos de perfil.
+        case 'widget':
+            $session = authenticate(input());
+            if (!in_array($session['name'], users(), true)) throw new HttpError(403, 'Só do casal.');
+            $avatars = [];
+            foreach (users() as $name) $avatars[$name] = avatar_url(find_account($name)['avatar_key'] ?? null);
+            respond(200, ['ok' => true, 'me' => $session['name'], 'avatars' => $avatars] + nos_state());
         case 'rtc-config':
             $session = authenticate(input());
             respond(200, rtc_config($session['name']));
