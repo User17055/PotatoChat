@@ -5024,7 +5024,7 @@ const watchAt = () => (watch.playing ? watch.position + Math.max(0, Date.now() +
 // Android, o navegador dele).
 const STREAMING = {
   netflix: { name: "Netflix", mark: "NETFLIX", open: "https://www.netflix.com/browse" },
-  max: { name: "HBO Max", mark: "max", open: "https://play.hbomax.com/" }
+  max: { name: "HBO Max", mark: "max", open: "https://play.max.com/" }
 };
 const streaming = (item) => Boolean(item && STREAMING[item.source]);
 const WATCH_HINT = {

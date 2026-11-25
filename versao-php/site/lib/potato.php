@@ -1281,7 +1281,7 @@ function parse_watch_link(string $query): ?array
     if (preg_match('~netflix\.com/(?:[a-z]{2}(?:-[a-z]{2})?/)?(watch|title)/(\d+)~i', $query, $match)) {
         return ['source' => 'netflix', 'title' => 'Netflix', 'url' => 'https://www.netflix.com/' . strtolower($match[1]) . '/' . $match[2]];
     }
-    if (preg_match('~https?://(?:[a-z]+\.)?(?:hbo)?max\.com/[^\s"<>]*~i', $query, $match)) return ['source' => 'max', 'title' => 'HBO Max', 'url' => https_url($match[0]) ?? 'https://play.hbomax.com/'];
+    if (preg_match('~https?://(?:[a-z]+\.)?(?:hbo)?max\.com/[^\s"<>]*~i', $query, $match)) return ['source' => 'max', 'title' => 'HBO Max', 'url' => https_url($match[0]) ?? 'https://play.max.com/'];
     return null;
 }
 
@@ -1392,7 +1392,7 @@ function watch_act(array $me, array $body): array
             if (!$link && in_array($service, ['netflix', 'max'], true)) {
                 $netflix = $service === 'netflix';
                 $link = ['source' => $service, 'title' => $query !== '' ? text_slice($query, 120) : ($netflix ? 'Netflix' : 'HBO Max'),
-                    'url' => $netflix ? 'https://www.netflix.com/' . ($query !== '' ? 'search?q=' . rawurlencode($query) : 'browse') : 'https://play.hbomax.com/'];
+                    'url' => $netflix ? 'https://www.netflix.com/' . ($query !== '' ? 'search?q=' . rawurlencode($query) : 'browse') : 'https://play.max.com/'];
             }
             // Sem link: procura pelo nome no YouTube (o primeiro que dá para passar fora de lá).
             if (!$link && $query !== '' && config()['music_lookup']) {

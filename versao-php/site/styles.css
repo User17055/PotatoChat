@@ -285,8 +285,8 @@ html.has-session #chat-view.hidden { display: grid !important; }
    ===================================================================== */
 .app-shell { position: relative; z-index: 1; height: 100vh; height: 100dvh; display: grid; grid-template-columns: 280px minmax(0, 1fr); }
 @media (min-width: 761px) {
-  .app-shell.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
-  .sidebar-collapsed > .sidebar { display: none; }
+  .app-shell.sidebar-collapsed { grid-template-columns: minmax(0, 0fr) minmax(0, 1fr); }
+  .app-shell.sidebar-collapsed > .sidebar { display: none; }
   .app-shell:not(.in-call) .topbar > .menu-button { display: grid; }
 }
 
@@ -1629,6 +1629,7 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
 .side-link .us-count { flex: none; }
 /* Botão do menu: só no celular (lá a barra lateral vira gaveta). O pontinho avisa que tem novidade lá dentro. */
 .menu-button { position: relative; flex: none; display: none; width: 40px; height: 40px; place-items: center; margin-left: -6px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ink); }
+.watching .menu-button { display: none !important; }
 .menu-button:active { scale: .92; }
 .menu-button .icon { width: 22px; height: 22px; }
 .menu-dot { position: absolute; top: 7px; right: 6px; width: 9px; height: 9px; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 2px var(--bg); }
