@@ -199,6 +199,7 @@ function asset(string $file): string
       <symbol id="i-split" viewBox="0 0 24 24"><path d="M16 3h5v5"/><path d="M8 3H3v5"/><path d="M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3"/><path d="m15 9 6-6"/></symbol>
       <symbol id="i-question" viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
       <symbol id="i-flame" viewBox="0 0 24 24"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></symbol>
+      <symbol id="i-apps" viewBox="0 0 24 24"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></symbol>
       <symbol id="i-layout" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></symbol>
       <symbol id="i-connect" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="1.6"/><circle cx="12" cy="9" r="1.6"/><circle cx="16" cy="9" r="1.6"/><circle cx="8" cy="15" r="1.6"/><circle cx="12" cy="15" r="1.6"/><circle cx="16" cy="15" r="1.6"/></symbol>
       <symbol id="i-gallows" viewBox="0 0 24 24"><path d="M4 21h10M7 21V3h9v3"/><circle cx="16" cy="8.5" r="2.5"/><path d="M16 11v5M16 13l-2.5 2M16 13l2.5 2"/></symbol>
@@ -356,7 +357,8 @@ function asset(string $file): string
                 <svg class="icon"><use href="#i-phone" /></svg>
               </button>
             <button id="watch-button" class="icon-button watch-button" type="button" title="Entretenimento" aria-label="Abrir o entretenimento: Watch Party, vídeo, tela, jogos e desenhos" aria-pressed="false">
-              <svg class="icon"><use href="#i-tv" /></svg>
+              <svg class="icon"><use href="#i-apps" /></svg>
+              <span class="watch-label">Entretenimento</span>
               <span class="watch-dot" aria-hidden="true"></span>
             </button>
             <button id="music-button" class="icon-button music-button hidden" type="button" title="Música tocando" aria-label="Abrir o tocador de música" aria-expanded="false" aria-controls="music-panel">
@@ -479,9 +481,17 @@ function asset(string $file): string
                 <div class="watch-sources watch-more" aria-label="Fazer junto">
                   <button id="video-call" type="button" class="watch-source" data-leave-room title="Chamada de vídeo" data-title="Chamada de vídeo"><svg class="icon"><use href="#i-video" /></svg><span>Chamada de vídeo</span></button>
                   <button id="share-screen" type="button" class="watch-source" data-leave-room title="Transmitir tela" data-title="Transmitir tela"><svg class="icon"><use href="#i-monitor-up" /></svg><span>Transmitir a tela</span></button>
-                  <button type="button" class="watch-source" data-leave-room data-us-open="jogos"><svg class="icon"><use href="#i-dice" /></svg><span>Jogos</span></button>
-                  <button type="button" class="watch-source" data-leave-room data-us-open="nos"><svg class="icon"><use href="#i-pencil" /></svg><span>Desenhos</span></button>
                   <button id="audio-call" type="button" hidden title="Chamada de voz" data-title="Chamada de voz"></button>
+                </div>
+                <!-- Tudo o que fica na barra lateral, aqui também (a tela de entretenimento é o lugar de tudo). -->
+                <p class="watch-more-title">Nosso cantinho</p>
+                <div class="watch-sources watch-more" aria-label="Nosso cantinho">
+                  <button type="button" class="watch-source hub" data-leave-room data-us-open="jogos"><svg class="icon"><use href="#i-gamepad" /></svg><span>Jogos</span></button>
+                  <button type="button" class="watch-source hub" data-leave-room data-us-open="nos"><svg class="icon"><use href="#i-heart" /></svg><span>Nós e desenhos</span></button>
+                  <button type="button" class="watch-source hub" data-leave-room data-us-open="cartinhas"><svg class="icon"><use href="#i-mail" /></svg><span>Cartinhas</span></button>
+                  <button type="button" class="watch-source hub" data-leave-room data-us-open="hoje"><svg class="icon"><use href="#i-sun" /></svg><span>Rotina do dia</span></button>
+                  <button type="button" class="watch-source hub" data-leave-room data-us-open="agenda"><svg class="icon"><use href="#i-calendar" /></svg><span>Agenda</span></button>
+                  <button type="button" class="watch-source hub" data-leave-room data-us-open="sonhos"><svg class="icon"><use href="#i-sparkles" /></svg><span>Sonhos e metas</span></button>
                 </div>
                 <section id="watch-recent" class="watch-recent hidden" aria-label="Vistos por vocês">
                   <h3>Vistos por vocês</h3>

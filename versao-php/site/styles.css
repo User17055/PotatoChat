@@ -2973,3 +2973,25 @@ button.w-note { cursor: pointer; }
 
 /* Figurinhas e GIFs do painel: tocar manda; segurar não arrasta nem abre o menu de imagem do celular. */
 :is(.sticker-item, .gif-item) img { -webkit-user-drag: none; -webkit-touch-callout: none; user-select: none; }
+
+/* O botão de entretenimento no topo: no computador, com o nome do lado (é o lugar de tudo); no celular, só o ícone. */
+.watch-label { display: none; }
+@media (min-width: 761px) {
+  .icon-button.watch-button { display: inline-flex; align-items: center; width: auto; gap: 8px; padding: 0 16px 0 12px; border-radius: 999px; }
+  .watch-label { display: inline; font-size: 13px; font-weight: 700; }
+}
+.watch-source.hub[data-us-open="jogos"] { --brand: #2fbf71; }
+.watch-source.hub[data-us-open="nos"] { --brand: #ff7eb6; }
+.watch-source.hub[data-us-open="cartinhas"] { --brand: #ff8c1a; }
+.watch-source.hub[data-us-open="hoje"] { --brand: #ffd23f; }
+.watch-source.hub[data-us-open="agenda"] { --brand: #3fa9ff; }
+.watch-source.hub[data-us-open="sonhos"] { --brand: #8b5cf6; }
+
+/* No celular, a tela de entretenimento mostra todas as opções em grade (3 por linha), sem esconder nada para o lado, e
+   fica mais alta, com rolagem, enquanto nada está passando. */
+@media (max-width: 760px) {
+  .watch-sources.watch-more { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; margin-inline: 0; padding-inline: 14px; overflow: visible; -webkit-mask-image: none; mask-image: none; }
+  .watch-more .watch-source { width: auto; }
+  .watching .watch-panel:not(.has-video) .watch-stage { min-height: min(76dvh, 680px); }
+  .watching .watch-panel:not(.has-video) .watch-picker { overflow-y: auto; overscroll-behavior: contain; }
+}
