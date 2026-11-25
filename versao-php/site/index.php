@@ -130,6 +130,7 @@ function asset(string $file): string
       <symbol id="i-rotate-ccw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
       <symbol id="i-external" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
       <symbol id="i-tv" viewBox="0 0 24 24"><rect width="20" height="15" x="2" y="7" rx="2" ry="2"/><path d="m17 2-5 5-5-5"/></symbol>
+      <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H5l-2 2v-5.5a8.5 8.5 0 1 1 18-5Z"/><path d="M8 11h.01M12 11h.01M16 11h.01"/></symbol>
       <!-- Logo da Twitch (Simple Icons, CC0) -->
       <symbol id="b-twitch" viewBox="0 0 24 24"><path fill="#9146ff" d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0 1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/></symbol>
       <symbol id="i-volume-1" viewBox="0 0 24 24"><path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/></symbol>
@@ -302,6 +303,7 @@ function asset(string $file): string
       <aside id="sidebar" class="sidebar" aria-label="Menu">
         <div>
           <div class="brand-row"><svg class="potato-mini" viewBox="0 0 142 100" aria-hidden="true"><use href="#potato" /></svg><strong>Potato</strong></div>
+          <button class="side-link side-chat-link" type="button" data-tab-target="chat"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-chat" /></svg></span><span class="side-text"><strong>Chat</strong><small>Voltar à conversa</small></span></button>
           <div class="room-label">Conversas</div>
           <div id="people" class="people"></div>
           <div class="room-label couple-only">Nosso cantinho</div>
@@ -311,7 +313,7 @@ function asset(string $file): string
             <button class="side-link" type="button" data-us-open="sonhos"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-sparkles" /></svg></span><span class="side-text"><strong>Sonhos e metas</strong><small>O que vamos realizar juntos</small></span></button>
             <button class="side-link" type="button" data-us-open="nos"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-heart" /></svg></span><span class="side-text"><strong>Nós</strong><small>Dias juntos, distância e desenhos</small></span></button>
             <button class="side-link" type="button" data-us-open="cartinhas"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-mail" /></svg></span><span class="side-text"><strong>Cartinhas</strong><small>O nosso blog de cartas</small></span><b class="us-count letters-new hidden"></b></button>
-            <button class="side-link" type="button" data-us-open="jogos"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-dice" /></svg></span><span class="side-text"><strong>Jogos</strong><small>Velha, dama, memória, stop…</small></span><b class="us-count games-turn hidden"></b></button>
+            <button class="side-link" type="button" data-us-open="jogos"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-gamepad" /></svg></span><span class="side-text"><strong>Entretenimento</strong><small>Jogos ilustrados para jogar juntos</small></span><b class="us-count games-turn hidden"></b></button>
           </nav>
         </div>
         <!-- Seu perfil: foto, tema, notificações, sons e sair ficam todos na aba Perfil. -->
@@ -923,7 +925,7 @@ function asset(string $file): string
 
           <!-- Joguinhos: escolher um jogo abre a mesinha aqui mesmo; a outra pessoa recebe o convite na conversa. -->
           <section class="us-pane" data-pane="jogos">
-            <p class="muted games-lead">Escolha um jogo e a mesinha abre aqui. A outra pessoa recebe o convite na conversa, e cada um joga do seu lado, na sua vez.</p>
+            <p class="muted games-lead"><svg class="icon" aria-hidden="true"><use href="#i-gamepad" /></svg><span>Entretenimento para vocês dois <small>Escolha uma ilustração para abrir o jogo. A partida sincroniza e cada um joga na sua vez.</small></span></p>
             <!-- O placar dos dois (todas as partidas de tabuleiro que já acabaram) e só as partidas esperando você. -->
             <section id="game-score" class="score-card hidden" aria-label="Placar"></section>
             <section id="game-live-wrap" class="hidden" aria-labelledby="game-live-title">

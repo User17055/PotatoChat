@@ -7514,7 +7514,7 @@ function usNotice(text, iconName, { push = false, count = true } = {}) {
 }
 
 const unreadLetters = () => us.letters.filter((letter) => letter.owner !== me && !letter.readAt).length;
-const US_TITLES = { hoje: ["sun", "Rotina do dia"], agenda: ["calendar", "Agenda"], sonhos: ["sparkles", "Sonhos e metas"], nos: ["heart", "Nós"], cartinhas: ["mail", "Cartinhas"], jogos: ["dice", "Jogos"] };
+const US_TITLES = { hoje: ["sun", "Rotina do dia"], agenda: ["calendar", "Agenda"], sonhos: ["sparkles", "Sonhos e metas"], nos: ["heart", "Nós"], cartinhas: ["mail", "Cartinhas"], jogos: ["gamepad", "Entretenimento"] };
 
 // Os números do menu: cartinhas novas e partidas esperando a sua jogada. No celular, o botão do menu ganha um
 // pontinho quando tem novidade lá dentro (também as da outra pessoa no dia, na agenda e nos sonhos).
@@ -7564,23 +7564,11 @@ function setSidebarVisible(visible) {
       button.setAttribute("aria-label", visible ? "Ocultar menu" : "Abrir menu");
       button.title = visible ? "Ocultar menu" : "Abrir menu";
     });
+    chatView.classList.toggle("sidebar-collapsed", !visible);
     if (gsap && !reduced) {
-      gsap.killTweensOf([chatView, sidebar]);
-      if (visible) {
-        chatView.classList.remove("sidebar-collapsed");
-        gsap.set(chatView, { gridTemplateColumns: "0px minmax(0, 1fr)" });
-        gsap.set(sidebar, { x: -18, opacity: 0, display: "flex" });
-        gsap.to(chatView, { gridTemplateColumns: "280px minmax(0, 1fr)", duration: 0.38, ease: "power2.out", clearProps: "gridTemplateColumns" });
-        gsap.to(sidebar, { x: 0, opacity: 1, duration: 0.34, ease: "power2.out", clearProps: "transform,opacity" });
-      } else {
-        gsap.to(chatView, { gridTemplateColumns: "0px minmax(0, 1fr)", duration: 0.34, ease: "power2.inOut", onComplete: () => {
-          chatView.classList.add("sidebar-collapsed");
-          gsap.set(chatView, { clearProps: "gridTemplateColumns" });
-        } });
-        gsap.to(sidebar, { x: -18, opacity: 0, duration: 0.26, ease: "power2.in", onComplete: () => gsap.set(sidebar, { clearProps: "transform,opacity" }) });
-      }
-    } else {
-      chatView.classList.toggle("sidebar-collapsed", !visible);
+      gsap.killTweensOf(sidebar);
+      if (visible) gsap.fromTo(sidebar, { x: -18, opacity: 0 }, { x: 0, opacity: 1, duration: 0.28, ease: "power2.out", clearProps: "transform,opacity" });
+      else gsap.to(sidebar, { x: -18, opacity: 0, duration: 0.22, ease: "power2.in" });
     }
     desktopSidebarOpen = visible;
     sound.play("tap");
@@ -11677,14 +11665,14 @@ function paintLinha4(message) {
 
 // Forca: o boneco ganha uma parte a cada erro (traçada na hora), a dica, a palavra com as letras já achadas e o teclado
 // (verde = tem, vermelho = não tem). No computador, dá para digitar a letra.
-const FORCA_PARTS = ["M80 26a10 10 0 1 1-.1 0", "M80 46v32", "M80 56l-14 12", "M80 56l14 12", "M80 78l-12 20", "M80 78l12 20"];
+const FORCA_PARTS = ["M112 36a14 14 0 1 1-.1 0", "M112 64v40", "M112 74 94 90", "M112 74l18 16", "M112 104 96 132", "M112 104l16 28"];
 
 function paintForca(message) {
   const game = message.game;
   const canPlay = !game.winner && game.turn === me && !table.busy;
   const wrap = el("div", "forca");
-  const art = svgNode("svg", { viewBox: "0 0 120 140", class: "forca-art", "aria-hidden": "true" });
-  for (const d of ["M12 132h64", "M30 132V10", "M30 10h50", "M80 10v16", "M30 30l20-20"]) art.append(svgNode("path", { d, class: "frame" }));
+  const art = svgNode("svg", { viewBox: "0 0 160 176", class: "forca-art", "aria-hidden": "true" });
+  for (const d of ["M18 160h124", "M48 160V18", "M48 18h64", "M112 18v18", "M48 42l28-24"]) art.append(svgNode("path", { d, class: "frame" }));
   FORCA_PARTS.slice(0, game.wrong).forEach((d, index) => {
     art.append(svgNode("path", { d, class: `part${table.wrong !== -1 && index >= table.wrong ? " fresh" : ""}` }));
   });

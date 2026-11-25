@@ -285,15 +285,19 @@ html.has-session #chat-view.hidden { display: grid !important; }
    ===================================================================== */
 .app-shell { position: relative; z-index: 1; height: 100vh; height: 100dvh; display: grid; grid-template-columns: 280px minmax(0, 1fr); }
 @media (min-width: 761px) {
-  .app-shell.sidebar-collapsed { grid-template-columns: minmax(0, 1fr); }
-  .app-shell.sidebar-collapsed > .sidebar { display: none; }
+  /* Não animar a largura da grade: isso recalcula o layout inteiro em cada frame e congela o chat.
+     A sidebar continua animando por transform/opacity via GSAP. */
+  .app-shell.sidebar-collapsed { grid-template-columns: 0px minmax(0, 1fr); }
+  .app-shell.sidebar-collapsed > .sidebar { padding-left: 0; padding-right: 0; border-right-width: 0; transform: translateX(-18px); opacity: 0; visibility: hidden; pointer-events: none; transition: transform .28s cubic-bezier(.32, .72, 0, 1), opacity .2s ease, padding .36s cubic-bezier(.32, .72, 0, 1), border-width .36s, visibility 0s .36s; }
   .app-shell:not(.in-call) :is(.topbar, .profile-top) > .menu-button { display: grid; }
 }
 
 /* ---------- barra lateral ---------- */
 /* A barra lateral rola sem barra de rolagem à vista (e nunca para o lado: o que não cabe termina em "…"). */
-.sidebar { display: flex; flex-direction: column; justify-content: space-between; gap: 20px; padding: 28px 18px 18px; overflow-x: hidden; overflow-y: auto; scrollbar-width: none; border-right: 1px solid var(--line); background: color-mix(in srgb, var(--bg-2) 90%, transparent); backdrop-filter: blur(14px); }
+.sidebar { display: flex; min-width: 0; flex-direction: column; justify-content: space-between; gap: 20px; padding: 28px 18px 18px; overflow-x: hidden; overflow-y: auto; scrollbar-width: none; border-right: 1px solid var(--line); background: color-mix(in srgb, var(--bg-2) 90%, transparent); backdrop-filter: blur(14px); }
 .brand-row { display: flex; align-items: center; gap: 12px; padding: 0 6px; font-size: 19px; font-weight: 700; letter-spacing: -.02em; }
+.side-chat-link { margin-top: 22px; }
+.side-chat-link .side-icon { --tone: #7cc4ff; }
 .potato-mini { width: 44px; height: 31px; cursor: pointer; }
 .room-label { margin: 38px 8px 12px; color: var(--faint); font-size: 10px; font-weight: 600; letter-spacing: .18em; text-transform: uppercase; }
 .sidebar::-webkit-scrollbar { display: none; }
@@ -1214,6 +1218,8 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
 .watching .conversation { height: 100dvh; min-height: 0; overflow: hidden; }
 .watching .watch-panel, .watching .watch-stage, .watching .messages-wrap { min-height: 0; }
 .watching .conversation > .messages-wrap { flex: 1 1 auto; overflow: hidden; }
+.watching .messages { scrollbar-width: none; overscroll-behavior: contain; }
+.watching .messages::-webkit-scrollbar { display: none; }
 .watching.watch-cinema .conversation { grid-template-rows: minmax(0, 1fr); }
 .watching.watch-cinema .watch-panel { grid-row: 1; }
 .watch-stage.blocked .watch-host iframe { pointer-events: auto; }
@@ -2037,7 +2043,10 @@ button.day-note:hover { background: var(--surface-3); }
 .letter-tools .text-button { color: var(--paper-ink); }
 
 /* ---------- jogos (a seção) ---------- */
-.games-lead { margin: 0 0 4px; }
+.games-lead { display: flex; align-items: center; gap: 12px; margin: 0 0 18px; padding: 18px 20px; border: 1px solid color-mix(in srgb, #5ee0a0 26%, var(--line)); border-radius: 22px; background: radial-gradient(100% 150% at 0% 0%, color-mix(in srgb, #5ee0a0 18%, transparent), transparent 72%), color-mix(in srgb, var(--surface) 84%, transparent); color: var(--ink); }
+.games-lead > .icon { flex: none; width: 32px; height: 32px; color: #5ee0a0; }
+.games-lead > span { display: grid; gap: 3px; font-size: 15px; font-weight: 750; }
+.games-lead small { color: var(--muted); font-size: 12.5px; font-weight: 500; line-height: 1.45; }
 /* Placar: você e a outra pessoa, as vitórias grandes no meio; quem está na frente ganha a coroa. */
 .score-card { margin-top: 16px; display: grid; gap: 14px; padding: 16px 16px 14px; border: 1px solid var(--line); border-radius: 24px; background: radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 70%), color-mix(in srgb, var(--surface) 88%, transparent); box-shadow: 0 14px 34px #0004; }
 .score-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -2085,6 +2094,7 @@ button.day-note:hover { background: var(--surface-3); }
 .game-tile.pergunta { --tile: #5cc8ff; --art: url("img/jogos/pergunta.svg"); }
 .game-tile.linha4 { --tile: #5b8cff; --art: url("img/jogos/linha4.svg"); }
 .game-tile.forca { --tile: #2fb48a; --art: url("img/jogos/forca.svg"); }
+.us-view[data-section="jogos"] .us-scroll { max-width: 1180px; margin-inline: auto; padding-inline: clamp(16px, 3vw, 38px); }
 :is(.game, .table-card)[data-type="linha4"] { --art: url("img/jogos/linha4.svg"); }
 :is(.game, .table-card)[data-type="forca"] { --art: url("img/jogos/forca.svg"); }
 .game-linha4 { --tone: #5b8cff; }
@@ -2460,32 +2470,35 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
 .linha4-hole.win .disc { animation: win-pop .6s cubic-bezier(.34, 1.56, .64, 1) .3s both; }
 
 /* ---------- forca ---------- */
-.forca { display: grid; grid-template-columns: minmax(110px, 160px) minmax(0, 1fr); align-items: center; gap: 10px 18px; width: min(100%, 520px); }
-.forca-art { width: 100%; height: auto; }
+.modal-card.table-card[data-type="forca"] { width: min(100%, 780px); max-height: min(900px, calc(100dvh - 32px)); padding: 22px 24px 20px; background: radial-gradient(110% 120% at 8% 0%, color-mix(in srgb, #2fb48a 14%, var(--surface)), var(--surface) 65%); }
+.table-card[data-type="forca"]::before { height: 180px; opacity: .14; }
+.table-card[data-type="forca"] .table-board { padding: 14px 18px 18px; border: 1px solid color-mix(in srgb, #2fb48a 22%, var(--line)); border-radius: 24px; background: color-mix(in srgb, var(--surface) 80%, transparent); }
+.forca { display: grid; grid-template-columns: 190px minmax(0, 1fr); grid-template-areas: "art side" "keys keys"; align-items: center; gap: 14px 24px; width: 100%; max-width: none; }
+.forca-art { grid-area: art; display: block; width: 100%; height: auto; overflow: visible; }
 .forca-art path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
-.forca-art .frame { stroke: var(--muted); stroke-width: 5; }
-.forca-art .part { stroke: var(--danger); stroke-width: 5; }
+.forca-art .frame { stroke: color-mix(in srgb, var(--accent) 62%, var(--muted)); stroke-width: 7; }
+.forca-art .part { stroke: var(--danger); stroke-width: 7; filter: drop-shadow(0 2px 3px color-mix(in srgb, var(--danger) 32%, transparent)); }
 .forca-art .part.fresh { stroke-dasharray: 120; animation: forca-draw .5s ease-out both; }
 @keyframes forca-draw { from { stroke-dashoffset: 120; } to { stroke-dashoffset: 0; } }
-.forca-side { display: grid; gap: 10px; min-width: 0; }
+.forca-side { grid-area: side; display: grid; gap: 16px; min-width: 0; padding: 18px; border-radius: 20px; background: color-mix(in srgb, var(--accent) 8%, var(--surface-2)); }
 .forca-hint { display: grid; margin: 0; }
 .forca-hint small { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .forca-hint strong { font-size: 14.5px; }
-.forca-word { display: flex; flex-wrap: wrap; gap: 6px; }
-.forca-letter { width: 26px; height: 34px; display: grid; place-items: end center; padding-bottom: 3px; border-bottom: 3px solid var(--line); font: 700 21px/1 Georgia, serif; text-transform: uppercase; }
+.forca-word { display: flex; flex-wrap: wrap; gap: 8px; }
+.forca-letter { width: 38px; height: 48px; display: grid; place-items: center; padding: 0 0 2px; border: 0; border-bottom: 4px solid color-mix(in srgb, var(--accent) 65%, var(--line)); border-radius: 10px 10px 4px 4px; background: color-mix(in srgb, var(--surface) 76%, transparent); font: 800 25px/1 Georgia, serif; text-transform: uppercase; }
 .forca-letter.shown { border-color: var(--accent); animation: win-pop .35s cubic-bezier(.34, 1.56, .64, 1) both; }
 .forca-letter.missed { border-color: var(--danger); color: var(--danger-text); }
 .forca-space { width: 14px; }
 .forca-lives { margin: 0; color: var(--muted); font-size: 12.5px; font-weight: 600; }
 .forca-lives.low { color: var(--danger-text); }
-.forca-keys { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)); gap: 5px; }
-.forca-key { height: 38px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); color: var(--ink); font-weight: 700; transition: transform .12s, background .15s; }
+.forca-keys { grid-area: keys; display: grid; grid-template-columns: repeat(13, minmax(0, 1fr)); gap: 7px; }
+.forca-key { height: 46px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); color: var(--ink); font-size: 15px; font-weight: 750; transition: transform .12s, background .15s, border-color .15s; }
 .forca-key:not(:disabled):hover { transform: translateY(-2px); background: var(--surface-3); }
 .forca-key:disabled { cursor: default; opacity: .55; }
 .forca-key.hit { border-color: transparent; background: color-mix(in srgb, var(--ok, #3ba55d) 30%, var(--surface-2)); opacity: 1; }
 .forca-key.miss { border-color: transparent; background: color-mix(in srgb, var(--danger) 22%, var(--surface-2)); text-decoration: line-through; }
 .forca-mini { margin: 0; font: 700 17px/1.4 Georgia, serif; letter-spacing: .12em; text-transform: uppercase; }
-@media (max-width: 520px) { .forca { grid-template-columns: 96px minmax(0, 1fr); } .forca-letter { width: 22px; font-size: 18px; } }
+@media (max-width: 600px) { .modal-card.table-card[data-type="forca"] { width: 100%; padding: 16px 12px 14px; } .table-card[data-type="forca"] .table-board { padding: 10px; } .forca { grid-template-columns: 92px minmax(0, 1fr); gap: 10px; } .forca-side { gap: 10px; padding: 12px; } .forca-letter { width: 28px; height: 40px; font-size: 20px; } .forca-keys { grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 5px; } .forca-key { height: 40px; border-radius: 10px; font-size: 13px; } }
 
 /* ---------- fim da partida: a faixa em cima do tabuleiro ---------- */
 #table-board { position: relative; }
