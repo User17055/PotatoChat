@@ -5,4 +5,5 @@
     <string name="server_hint">https://chat.seudominio.com</string>
     <string name="open_chat">Abrir o chat</string>
     <string name="invalid_server">Digite um endereço http:// ou https:// válido.</string>
+    <string name="widget_description">Dias juntos, a distância entre vocês, a contagem e o último desenho.</string>
 </resources>

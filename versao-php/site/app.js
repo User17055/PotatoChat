@@ -3739,7 +3739,7 @@ $("#watch-view").addEventListener("click", () => {
 paintWatchView();
 
 // Tema Natal: neve caindo (canvas), pisca-pisca pendurado embaixo do topo, uma árvore desenhada no canto da conversa e a
-// neve que vai se acumulando no pé dela. Tudo em SVG/canvas feito aqui, animado com o GSAP; com "reduzir movimento"
+// neve no chão do fundo da conversa. Tudo em SVG/canvas feito aqui, animado com o GSAP; com "reduzir movimento"
 // ligado, fica parado. Sai inteiro ao trocar de tema.
 let snowfall = null;
 const xmasNode = (tag, attributes = {}) => {
@@ -3753,6 +3753,7 @@ function snow(on) {
     if (snowfall) {
       cancelAnimationFrame(snowfall.frame);
       removeEventListener("resize", snowfall.resize);
+      snowfall.observer.disconnect();
       window.gsap?.killTweensOf(snowfall.tweened());
       snowfall.canvas.remove();
       snowfall.decor.forEach((node) => node.remove());
@@ -3765,19 +3766,27 @@ function snow(on) {
   const gsap = still ? null : window.gsap;
   const canvas = el("canvas", "snow");
   canvas.setAttribute("aria-hidden", "true");
-  document.body.append(canvas);
+  const scene = el("div", "xmas-scene");
+  scene.setAttribute("aria-hidden", "true");
+  const conversation = $(".conversation");
+  if (!conversation) return;
+  conversation.append(scene);
+  scene.append(canvas);
   const context = canvas.getContext("2d");
   let flakes = [];
+  let width = 0, height = 0;
   const lights = xmasLights();
-  const tree = xmasTree();
-  const drift = xmasDrift();
+  const tree = xmasTree(scene);
+  xmasDrift(scene);
   const resize = () => {
     const ratio = Math.min(2, devicePixelRatio || 1);
-    canvas.width = innerWidth * ratio;
-    canvas.height = innerHeight * ratio;
+    width = scene.clientWidth;
+    height = scene.clientHeight;
+    canvas.width = width * ratio;
+    canvas.height = height * ratio;
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
-    flakes = Array.from({ length: Math.round(Math.min(90, innerWidth / 14)) }, () => ({
-      x: Math.random() * innerWidth, y: Math.random() * innerHeight, r: 1.6 + Math.random() * 3.4,
+    flakes = Array.from({ length: Math.round(Math.min(32, width / 36)) }, () => ({
+      x: Math.random() * width, y: Math.random() * height, r: 1.6 + Math.random() * 3.4,
       speed: 0.35 + Math.random() * 0.7, sway: Math.random() * Math.PI * 2
     }));
     paintLights(lights);
@@ -3798,13 +3807,13 @@ function snow(on) {
     context.fill();
   };
   const draw = () => {
-    context.clearRect(0, 0, innerWidth, innerHeight);
+    context.clearRect(0, 0, width, height);
     for (const flake of flakes) {
       if (!still && !document.hidden) {
         flake.y += flake.speed;
         flake.sway += 0.012;
         flake.x += Math.sin(flake.sway) * 0.5;
-        if (flake.y > innerHeight + 10) Object.assign(flake, { y: -10, x: Math.random() * innerWidth });
+        if (flake.y > height + 10) Object.assign(flake, { y: -10, x: Math.random() * width });
       }
       context.globalAlpha = 0.75 + flake.r / 20;
       puff(flake.x, flake.y, flake.r);
@@ -3812,19 +3821,24 @@ function snow(on) {
     context.globalAlpha = 1;
     if (!still) snowfall.frame = requestAnimationFrame(draw);
   };
-  snowfall = {
-    canvas, resize, frame: 0, decor: [lights, tree, drift],
-    tweened: () => [...lights.querySelectorAll(".bulb"), ...tree.querySelectorAll(".tree-star, .ornament"), tree, ...drift.querySelectorAll(".drift-fill")]
+  const refresh = () => {
+    resize();
+    if (still) draw();
   };
-  addEventListener("resize", resize);
+  const observer = new ResizeObserver(refresh);
+  snowfall = {
+    canvas, resize: refresh, observer, frame: 0, decor: [lights, scene],
+    tweened: () => [...lights.querySelectorAll(".bulb"), ...tree.querySelectorAll(".tree-star, .ornament"), tree]
+  };
+  addEventListener("resize", refresh);
+  observer.observe(scene);
   resize();
   draw();
   if (!gsap) return;
-  // A estrela da árvore pulsa, os enfeites brilham, e a neve sobe devagar no pé da conversa.
+  // Só os enfeites se movem: árvore e chão mantêm sempre o mesmo alinhamento.
   gsap.to(tree.querySelector(".tree-star"), { scale: 1.15, transformOrigin: "50% 50%", duration: 1.4, ease: "sine.inOut", yoyo: true, repeat: -1 });
   gsap.fromTo(tree.querySelectorAll(".ornament"), { opacity: 0.55 }, { opacity: 1, duration: 0.9, ease: "sine.inOut", yoyo: true, repeat: -1, stagger: { each: 0.25, from: "random" } });
-  gsap.fromTo(drift.querySelector(".drift-fill"), { scaleY: 0.5, transformOrigin: "50% 100%" }, { scaleY: 1, duration: 90, ease: "power1.out" });
-  gsap.from(tree, { y: 30, opacity: 0, duration: 1.2, ease: "back.out(1.6)" });
+  gsap.from(tree, { opacity: 0, duration: 0.8, ease: "sine.out" });
 }
 
 // O fio do pisca-pisca, embaixo do topo: barrigas entre os ganchos (a cada ~110 px) e as lâmpadas penduradas ao longo
@@ -3869,7 +3883,7 @@ function paintLights(svg) {
 }
 
 // A árvore no canto da conversa: três camadas de galhos, o tronco, o festão, os enfeites e a estrela (sem imagem).
-function xmasTree() {
+function xmasTree(scene) {
   const svg = xmasNode("svg", { class: "xmas-tree", viewBox: "0 0 120 150", "aria-hidden": "true" });
   const defs = xmasNode("defs");
   const leaf = xmasNode("linearGradient", { id: "xmas-leaf", x1: 0, y1: 0, x2: 0, y2: 1 });
@@ -3885,36 +3899,22 @@ function xmasTree() {
     svg.append(xmasNode("circle", { cx, cy, r: 4, fill: color, class: "ornament" }));
   }
   svg.append(xmasNode("path", { class: "tree-star", d: "M60 2l3.8 7.7 8.5 1.2-6.2 6 1.5 8.4L60 21.3l-7.6 4 1.5-8.4-6.2-6 8.5-1.2z", fill: "#ffd23f" }));
-  ($(".messages-wrap") || document.body).append(svg);
+  scene.append(svg);
   return svg;
 }
 
-// A neve acumulada no pé do site, de desenho animado: bolotas gordinhas lado a lado (refeitas na largura da tela), a
-// sombra azulada embaixo e o brilho em cima. Sobe devagar (GSAP).
-function xmasDrift() {
-  const svg = xmasNode("svg", { class: "xmas-drift", viewBox: "0 0 1000 70", preserveAspectRatio: "none", "aria-hidden": "true" });
-  const fill = xmasNode("g", { class: "drift-fill" });
-  let bumps = "M0 70V40";
-  let shine = "";
-  let x = 0;
-  let seed = 3;
-  const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  while (x < 1000) {
-    const width = 70 + random() * 90;
-    const top = 8 + random() * 18;
-    bumps += ` C${x + width * 0.15} ${top} ${x + width * 0.85} ${top} ${x + width} 40`;
-    shine += `M${x + width * 0.3} ${top + 10}Q${x + width * 0.5} ${top + 4} ${x + width * 0.68} ${top + 9}`;
-    x += width;
-  }
-  bumps += " V70z";
-  fill.append(
-    xmasNode("path", { d: bumps, fill: "#c9d9ff", transform: "translate(0 6)" }),
-    xmasNode("path", { d: bumps, fill: "#ffffff" }),
-    xmasNode("path", { d: shine, fill: "none", stroke: "#ffffff", "stroke-width": 4, "stroke-linecap": "round", opacity: 0.9 }),
-    xmasNode("path", { d: "M0 62H1000V70H0z", fill: "#dde7ff" })
+// Bancos largos de neve, com curvas contínuas e uma sombra suave entre as camadas.
+function xmasDrift(scene) {
+  const svg = xmasNode("svg", { class: "xmas-drift", viewBox: "0 0 1000 80", preserveAspectRatio: "none", "aria-hidden": "true" });
+  const defs = xmasNode("defs");
+  const gradient = xmasNode("linearGradient", { id: "xmas-snow", x1: "0%", y1: "0%", x2: "0%", y2: "100%" });
+  gradient.append(xmasNode("stop", { offset: "0%", "stop-color": "#ffffff" }), xmasNode("stop", { offset: "100%", "stop-color": "#dce7f2" }));
+  defs.append(gradient);
+  svg.append(defs,
+    xmasNode("path", { d: "M0 44C110 15 190 48 310 34S490 20 610 38S800 40 880 22S960 20 1000 30V80H0Z", fill: "#d1dfed" }),
+    xmasNode("path", { d: "M0 55C120 30 210 58 340 46S500 35 640 48S800 52 890 35S965 32 1000 40V80H0Z", fill: "url(#xmas-snow)" })
   );
-  svg.append(fill);
-  document.body.append(svg);
+  scene.append(svg);
   return svg;
 }
 

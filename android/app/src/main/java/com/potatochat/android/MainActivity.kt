@@ -27,6 +27,7 @@ import android.view.WindowManager
 import android.webkit.CookieManager
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.DownloadListener
+import android.webkit.GeolocationPermissions
 import android.webkit.PermissionRequest
 import android.webkit.URLUtil
 import android.webkit.ValueCallback
@@ -99,6 +100,14 @@ class MainActivity : ComponentActivity() {
         if (resources.isEmpty()) request.deny() else request.grant(resources.toTypedArray())
         // A chamada começou antes da permissão do microfone: agora o serviço dela pode começar.
         callState?.let(::startCallService)
+    }
+
+    // A localização pedida pelo site (widget de distância): primeiro a permissão do Android, depois a resposta ao site.
+    private var locationRequest: Pair<String, GeolocationPermissions.Callback>? = null
+    private val locationPermission = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+        val (origin, callback) = locationRequest ?: return@registerForActivityResult
+        locationRequest = null
+        callback.invoke(origin, result.values.any { it }, false)
     }
 
     private val filePicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -235,7 +244,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun section(intent: Intent?): String? =
-        intent?.getStringExtra(CantinhoNotifications.EXTRA_OPEN)?.takeIf { it in setOf("hoje", "agenda", "sonhos", "cartinhas", "jogos") }
+        intent?.getStringExtra(CantinhoNotifications.EXTRA_OPEN)?.takeIf { it in setOf("hoje", "agenda", "sonhos", "nos", "cartinhas", "jogos") }
 
     @Suppress("SetJavaScriptEnabled")
     private fun configureWebView() {
@@ -246,6 +255,7 @@ class MainActivity : ComponentActivity() {
                 javaScriptEnabled = true
                 domStorageEnabled = true
                 databaseEnabled = true
+                setGeolocationEnabled(true)
                 allowFileAccess = true
                 allowContentAccess = true
                 mediaPlaybackRequiresUserGesture = false
@@ -282,6 +292,15 @@ class MainActivity : ComponentActivity() {
             webChromeClient = object : WebChromeClient() {
                 override fun onPermissionRequest(request: PermissionRequest) {
                     runOnUiThread { handleMediaPermission(request) }
+                }
+
+                // Só o site do Potato pede a localização (a distância entre os dois, nos widgets).
+                override fun onGeolocationPermissionsShowPrompt(origin: String, callback: GeolocationPermissions.Callback) {
+                    if (Uri.parse(origin).host != SITE_HOST) return callback.invoke(origin, false, false)
+                    val granted = checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                    if (granted) return callback.invoke(origin, true, false)
+                    locationRequest = origin to callback
+                    locationPermission.launch(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION))
                 }
 
                 override fun onShowFileChooser(view: WebView?, callback: ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {
@@ -606,6 +625,8 @@ class MainActivity : ComponentActivity() {
     // Saindo da tela no meio de uma chamada: o Android não deixa a câmera continuar (o microfone continua).
     override fun onStop() {
         if (callState != null) js("window.potatoCall && window.potatoCall('background')")
+        // O widget da tela inicial pega o que mudou (desenho novo, distância, contagem).
+        CoupleWidget.refresh(this)
         super.onStop()
     }
 
