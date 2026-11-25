@@ -55,7 +55,7 @@ export function createWatchPlayer(host, events) {
           videoId: item.id,
           width: "100%",
           height: "100%",
-          playerVars: { autoplay: playing() ? 1 : 0, start: Math.floor(position()), controls: 0, disablekb: 1, playsinline: 1, rel: 0, iv_load_policy: 3, fs: 0, cc_load_policy: 0 },
+          playerVars: { autoplay: playing() ? 1 : 0, start: Math.floor(position()), controls: 0, disablekb: 1, playsinline: 1, rel: 0, iv_load_policy: 3, fs: 0, cc_load_policy: 0, modestbranding: 1 },
           events: {
             onReady: (event) => {
               if (event.target !== youtube) return;
@@ -150,6 +150,12 @@ export function createWatchPlayer(host, events) {
       if (youtube) youtube.seekTo(seconds, true);
       else if (twitch) twitch.seek(seconds);
       else if (video) video.currentTime = seconds;
+    },
+    volume(value) {
+      const volume = Math.max(0, Math.min(100, Number(value)));
+      if (youtube) youtube.setVolume(volume);
+      else if (twitch) twitch.setVolume(volume / 100);
+      else if (video) video.volume = volume / 100;
     }
   };
 }

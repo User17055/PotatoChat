@@ -350,7 +350,7 @@ function asset(string $file): string
             </button>
             <!-- Um botão só para ligar: o menu escolhe voz, vídeo ou transmitir a tela. -->
             <div class="call-pick">
-              <button id="call-button" class="icon-button" type="button" title="Ligar" aria-label="Ligar" aria-haspopup="menu" aria-expanded="false" aria-controls="call-menu">
+              <button id="call-button" class="icon-button" type="button" title="Ligar por voz" aria-label="Ligar por voz">
                 <svg class="icon"><use href="#i-phone" /></svg>
               </button>
               <div id="call-menu" class="attach-menu call-menu hidden" role="menu" aria-label="Ligar">
@@ -552,6 +552,7 @@ function asset(string $file): string
               </div>
               <span id="watch-live" class="watch-live hidden"><i></i>AO VIVO</span>
             </div>
+            <label class="watch-volume" title="Volume deste aparelho"><svg class="icon" aria-hidden="true"><use href="#i-volume" /></svg><input id="watch-volume" type="range" min="0" max="100" value="80" aria-label="Volume do vídeo neste aparelho" /></label>
             <button id="watch-view" class="watch-btn" type="button" title="Tela: conversa ao lado" aria-label="Trocar a tela da Watch Party"><svg class="icon"><use href="#i-layout" /></svg></button>
             <button id="watch-full" class="watch-btn" type="button" title="Tela cheia" aria-label="Tela cheia"><svg class="icon"><use id="watch-full-icon" href="#i-maximize" /></svg></button>
             <button id="watch-close" class="watch-btn danger" type="button" title="Parar para os dois" aria-label="Parar o vídeo para os dois"><svg class="icon"><use href="#i-x" /></svg></button>

@@ -3720,6 +3720,8 @@ function flyToTrip() {
 // A Watch Party tem dois modos: conversa ao lado ou vídeo em tela cheia com mensagens temporárias sobre o vídeo.
 const WATCH_VIEWS = [["lado", "conversa ao lado"], ["cinema", "player em tela cheia"]];
 const WATCH_VIEW_KEY = "potato.watchView";
+const WATCH_VOLUME_KEY = "potato.watchVolume";
+const watchVolume = () => Math.max(0, Math.min(100, Number(store.get("localStorage", WATCH_VOLUME_KEY) ?? 80)));
 
 function paintWatchView() {
   const current = WATCH_VIEWS.find(([id]) => id === store.get("localStorage", WATCH_VIEW_KEY)) || WATCH_VIEWS[0];
@@ -3737,6 +3739,11 @@ $("#watch-view").addEventListener("click", () => {
   sound.play("tap");
 });
 paintWatchView();
+$("#watch-volume").value = String(watchVolume());
+$("#watch-volume").addEventListener("input", (event) => {
+  store.set("localStorage", WATCH_VOLUME_KEY, Number(event.target.value));
+  watchPlayer.volume(event.target.value);
+});
 
 function showWatchMessage(message) {
   if (!watchView || !$(".app-shell").classList.contains("watch-cinema") || message.deleted || message.call) return;
@@ -5060,6 +5067,7 @@ const catalogCache = new Map();
 const catalogVideos = new Map();
 const watchPlayer = createWatchPlayer($("#watch-host"), {
   onReady: () => {
+    watchPlayer.volume(watchVolume());
     syncWatch();
     checkWatchBlocked();
   },
@@ -5091,7 +5099,8 @@ function checkWatchBlocked() {
 // Acompanha o servidor: troca de vídeo, play/pause e acerta o tempo se ficou mais de 2 s fora.
 function syncWatch() {
   const item = watch.now;
-  if (!watchView || !item || streaming(item)) return watchPlayer.destroy();
+  if (!item || streaming(item)) return watchPlayer.destroy();
+  if (!watchView) return;
   if (watchPlayer.uid !== item.uid) return watchPlayer.open(item, watchAt, () => watch.playing);
   if (!watchPlayer.ready) return;
   if (watch.playing) {
@@ -7225,18 +7234,13 @@ shareSheet.addEventListener("click", (event) => {
   }
 });
 
-// O botão de ligar abre o menu (voz, vídeo ou tela); escolher, tocar fora ou Esc fecha.
+// O botão do topo inicia logo uma chamada de voz; vídeo e tela ficam nos controles da chamada.
 const callMenu = $("#call-menu");
 const closeCallMenu = () => {
   callMenu.classList.add("hidden");
   $("#call-button").setAttribute("aria-expanded", "false");
 };
-$("#call-button").addEventListener("click", () => {
-  const open = callMenu.classList.contains("hidden");
-  if (!open) return closeCallMenu();
-  fx.show(callMenu, { y: -8, scale: 0.97 });
-  $("#call-button").setAttribute("aria-expanded", "true");
-});
+$("#call-button").addEventListener("click", () => call ? returnToCall() : startCall("audio"));
 callMenu.addEventListener("click", (event) => {
   if (event.target.closest("button")) closeCallMenu();
 });

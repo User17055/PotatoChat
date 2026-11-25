@@ -285,7 +285,7 @@ html.has-session #chat-view.hidden { display: grid !important; }
    ===================================================================== */
 .app-shell { position: relative; z-index: 1; height: 100vh; height: 100dvh; display: grid; grid-template-columns: 280px minmax(0, 1fr); }
 @media (min-width: 761px) {
-  .app-shell.sidebar-collapsed { grid-template-columns: minmax(0, 0fr) minmax(0, 1fr); }
+  .app-shell.sidebar-collapsed { grid-template-columns: minmax(0, 1fr); }
   .app-shell.sidebar-collapsed > .sidebar { display: none; }
   .app-shell:not(.in-call) .topbar > .menu-button { display: grid; }
 }
@@ -355,7 +355,7 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
 .peer-status.ticking .ticker-line { display: inline-block; padding-right: 36px; animation: ticker var(--ticker-time, 10s) linear infinite; }
 @keyframes ticker { to { translate: -100% 0; } }
 .peer-status.live { color: var(--ok); }
-.actions { display: flex; flex: none; gap: 8px; }
+.actions { position: relative; z-index: 12; display: flex; flex: none; gap: 8px; }
 .icon-button { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: var(--surface-2); color: var(--ink); transition: border-color .2s, color .2s, background .2s, opacity .2s; }
 .icon-button:hover { border-color: var(--accent); color: var(--accent); }
 .icon-button .icon { width: 18px; height: 18px; }
@@ -1085,7 +1085,7 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
 .app-shell.watching .wallpaper { opacity: 0; }
 /* Na Watch Party, os relógios e o alternador de tela do vídeo não aparecem sobre o player. */
 .app-shell.watching .trip-clock,
-.app-shell.watching :is(#watch-full, #watch-stream-clock, #watch-time, #watch-length) { display: none !important; }
+.app-shell.watching :is(#watch-full, #watch-stream-clock) { display: none !important; }
 .watch-button { position: relative; }
 .watch-dot { position: absolute; top: 2px; right: 2px; width: 10px; height: 10px; display: none; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 2px var(--bg); }
 .watch-button.live .watch-dot { display: block; animation: blink 1.2s ease-in-out infinite; }
@@ -1233,6 +1233,9 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
 .watch-upload strong { display: block; margin-bottom: 4px; color: #fff; font-size: 15px; overflow-wrap: anywhere; }
 .watch-upload progress { width: min(320px, 80%); accent-color: var(--accent); }
 .watch-bar { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--surface); color: var(--ink); }
+.watch-volume { flex: none; display: flex; align-items: center; gap: 5px; width: 112px; color: var(--muted); }
+.watch-volume .icon { width: 17px; height: 17px; }
+.watch-volume input { width: 80px; accent-color: var(--accent); }
 .watch-btn { flex: none; width: 38px; height: 38px; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--surface-2); color: var(--ink); transition: background .2s, color .2s, transform .15s; }
 .watch-btn:hover { background: var(--surface-3); }
 .watch-btn:active { transform: scale(.92); }
