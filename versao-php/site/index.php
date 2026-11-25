@@ -830,6 +830,8 @@ function asset(string $file): string
         <header class="profile-top us-top">
           <button class="menu-button" type="button" data-menu title="Menu" aria-label="Abrir o menu" aria-controls="sidebar" aria-expanded="false"><svg class="icon"><use href="#i-menu" /></svg><i class="menu-dot hidden" aria-hidden="true"></i></button>
           <h2 id="us-title"><span class="us-title-icon" aria-hidden="true"><svg class="icon"><use id="us-title-icon" href="#i-sun" /></svg></span><span id="us-title-text">Rotina do dia</span></h2>
+          <!-- O Entretenimento também aqui: dá para trocar de opção sem voltar para a conversa. -->
+          <button class="icon-button us-hub" type="button" data-open-hub title="Entretenimento" aria-label="Abrir o entretenimento"><svg class="icon"><use href="#i-apps" /></svg></button>
         </header>
         <div id="us-scroll" class="us-scroll">
           <!-- Hoje: o dia de cada um, lado a lado (no celular, um embaixo do outro). Dá para voltar aos dias anteriores. -->

@@ -7312,6 +7312,10 @@ function onHubKey(event) {
   event.stopPropagation();
   closeHub();
 }
+// O mesmo Entretenimento no topo do Nosso cantinho (para trocar de opção sem voltar para a conversa).
+document.addEventListener("click", (event) => {
+  if (event.target.closest("[data-open-hub]")) $("#hub-button").click();
+});
 $("#hub-button").addEventListener("click", () => {
   fx.press($("#hub-button"));
   fx.show(hubView, { scale: 0.97 });

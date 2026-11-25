@@ -3042,3 +3042,6 @@ button.w-note { cursor: pointer; }
   .app-shell.chat-over .watch-panel.expanded { right: 0; bottom: 48%; }
   .app-shell.chat-over.watching .conversation { padding-top: 52dvh; }
 }
+
+/* O Entretenimento no topo do Nosso cantinho, no canto direito. */
+.us-top .us-hub { flex: none; margin-left: auto; }
