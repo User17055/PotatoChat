@@ -2975,17 +2975,17 @@ button.w-note { cursor: pointer; }
 :is(.sticker-item, .gif-item) img { -webkit-user-drag: none; -webkit-touch-callout: none; user-select: none; }
 
 /* O botão de entretenimento no topo: no computador, com o nome do lado (é o lugar de tudo); no celular, só o ícone. */
-.watch-label { display: none; }
+.hub-label { display: none; }
 @media (min-width: 761px) {
-  .icon-button.watch-button { display: inline-flex; align-items: center; width: auto; gap: 8px; padding: 0 16px 0 12px; border-radius: 999px; }
-  .watch-label { display: inline; font-size: 13px; font-weight: 700; }
+  .icon-button.hub-button { display: inline-flex; align-items: center; width: auto; gap: 8px; padding: 0 16px 0 12px; border-radius: 999px; }
+  .hub-label { display: inline; font-size: 13px; font-weight: 700; }
 }
-.watch-source.hub[data-us-open="jogos"] { --brand: #2fbf71; }
-.watch-source.hub[data-us-open="nos"] { --brand: #ff7eb6; }
-.watch-source.hub[data-us-open="cartinhas"] { --brand: #ff8c1a; }
-.watch-source.hub[data-us-open="hoje"] { --brand: #ffd23f; }
-.watch-source.hub[data-us-open="agenda"] { --brand: #3fa9ff; }
-.watch-source.hub[data-us-open="sonhos"] { --brand: #8b5cf6; }
+.hub-card .watch-source[data-us-open="jogos"] { --brand: #2fbf71; }
+.hub-card .watch-source[data-us-open="nos"] { --brand: #ff7eb6; }
+.hub-card .watch-source[data-us-open="cartinhas"] { --brand: #ff8c1a; }
+.hub-card .watch-source[data-us-open="hoje"] { --brand: #ffd23f; }
+.hub-card .watch-source[data-us-open="agenda"] { --brand: #3fa9ff; }
+.hub-card .watch-source[data-us-open="sonhos"] { --brand: #8b5cf6; }
 
 /* No celular, a tela de entretenimento mostra todas as opções em grade (3 por linha), sem esconder nada para o lado, e
    fica mais alta, com rolagem, enquanto nada está passando. */
@@ -2994,4 +2994,29 @@ button.w-note { cursor: pointer; }
   .watch-more .watch-source { width: auto; }
   .watching .watch-panel:not(.has-video) .watch-stage { min-height: min(76dvh, 680px); }
   .watching .watch-panel:not(.has-video) .watch-picker { overflow-y: auto; overscroll-behavior: contain; }
+}
+
+/* Tela de entretenimento (a sala sem vídeo): uma coluna centralizada de largura limitada, que rola quando não cabe na
+   altura (telas baixas); as fileiras novas sem as margens negativas da fileira de serviços (que sobrepunham os títulos),
+   e os "Vistos por vocês" sem esticar a coluna (eles rolam para o lado dentro dela). */
+.watch-home { grid-template-columns: minmax(0, min(100%, 720px)); place-content: start center; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding-block: 28px 32px; }
+.watch-home > * { min-width: 0; max-width: 100%; }
+.watch-sources.watch-more { margin: 4px auto 0; padding: 6px 12px 10px; }
+.watch-more-title { margin: 18px 0 0; }
+.watch-recent { width: 100%; margin-top: 18px; }
+.watch-recent .watch-row { max-width: 100%; overflow-x: auto; }
+
+/* A tela do Entretenimento: um cartão escuro com as fileiras de opções (no celular, a tela toda). */
+.hub-view { z-index: 55; }
+.hub-card { width: min(100%, 760px); max-height: calc(100dvh - 40px); overflow-y: auto; padding: 22px 22px 26px; border: 1px solid #ffffff14; border-radius: 28px; background: radial-gradient(circle at 50% 0%, #2a1f45, #0c0b10 70%); color: #fff; box-shadow: 0 30px 80px #000c; text-align: center; }
+.hub-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.hub-head h2 { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -.02em; }
+.hub-head .peer-close { position: static; }
+.hub-card .watch-more-title { margin: 20px 0 6px; }
+.hub-card .watch-sources.watch-more { margin: 0 auto; padding: 4px 0 0; }
+.hub-card .watch-source { --brand: #e50914; }
+.hub-card #share-screen { --brand: #8b5cf6; }
+@media (max-width: 760px) {
+  .hub-view { padding: 0; }
+  .hub-card { width: 100%; height: 100dvh; max-height: none; border-radius: 0; padding-top: max(18px, var(--safe-top, 0px)); }
 }

@@ -5452,7 +5452,7 @@ function paintWatch() {
   watchPanel.classList.toggle("hidden", !watchView);
   watchPanel.classList.toggle("has-video", Boolean(item));
   watchButton.classList.toggle("live", Boolean(item) && !watchRoom);
-  watchButton.title = item && !watchRoom ? `Entretenimento · Watch Party rolando: ${item.title}` : "Entretenimento";
+  watchButton.title = item && !watchRoom ? `Batata Watch Party rolando: ${item.title}` : "Batata Watch Party";
   $("#watch-picker").classList.toggle("hidden", Boolean(item));
   $("#watch-who").textContent = peerName ? `com ${peerName}` : "";
   watchPanel.dataset.source = item?.source || "";
@@ -5664,7 +5664,7 @@ document.addEventListener("fullscreenchange", () => {
   if (document.fullscreenElement !== watchPanel) setWatchExpanded(false);
 });
 
-// A TV abre a tela de entretenimento (a sala): os serviços e, embaixo, o "Fazer junto" (vídeo, tela, jogos, desenhos).
+// A TV abre a Watch Party.
 watchButton.addEventListener("click", () => {
   fx.press(watchButton);
   setWatchRoom(!watchRoom);
@@ -5673,8 +5673,6 @@ watchButton.addEventListener("click", () => {
 watchPanel.addEventListener("click", async (event) => {
   const target = event.target;
   if (target.closest("#watch-leave")) return setWatchRoom(false);
-  // "Fazer junto" (vídeo, tela, jogos, desenhos): a sala fecha e a opção abre no lugar dela (o clique segue para ela).
-  if (target.closest("[data-leave-room]")) setWatchRoom(false);
   // No app do Android, "Abrir na Netflix" abre dentro dele, já seguindo a sala.
   const streamLink = target.closest("#watch-launch-open, #watch-stream-open");
   if (streamLink && nativeStream()) {
@@ -7281,6 +7279,30 @@ shareSheet.addEventListener("click", (event) => {
 
 // O botão do topo inicia logo uma chamada de voz; vídeo e tela ficam nos controles da chamada.
 $("#call-button").addEventListener("click", () => call ? returnToCall() : startCall("audio"));
+// Entretenimento: a tela com todas as opções (jogos, desenhos, cartinhas, rotina, agenda, sonhos, vídeo e tela). Escolher
+// fecha a tela (e a Watch Party, se estiver aberta) e a opção abre no lugar dela (o clique segue para ela).
+const hubView = $("#hub-view");
+function closeHub() {
+  hubView.classList.add("hidden");
+  document.removeEventListener("keydown", onHubKey, true);
+}
+function onHubKey(event) {
+  if (event.key !== "Escape") return;
+  event.stopPropagation();
+  closeHub();
+}
+$("#hub-button").addEventListener("click", () => {
+  fx.press($("#hub-button"));
+  fx.show(hubView, { scale: 0.97 });
+  document.addEventListener("keydown", onHubKey, true);
+  sound.play("tap");
+});
+hubView.addEventListener("click", (event) => {
+  if (event.target === hubView || event.target.closest("#hub-close")) return closeHub();
+  if (!event.target.closest("[data-hub-go]")) return;
+  closeHub();
+  if (watchRoom) setWatchRoom(false);
+});
 $("#audio-call").addEventListener("click", () => startCall("audio"));
 $("#video-call").addEventListener("click", () => startCall("video"));
 $("#share-screen").addEventListener("click", () => (call?.local.screen ? toast("Você já está transmitindo.") : openShare()));

@@ -351,15 +351,17 @@ function asset(string $file): string
             <button id="search-button" class="icon-button" type="button" title="Pesquisar na conversa" aria-label="Pesquisar na conversa" aria-expanded="false" aria-controls="search-panel">
               <svg class="icon"><use href="#i-search" /></svg>
             </button>
-            <!-- O telefone liga direto por voz; a TV abre tudo o que é para fazer junto (como no app, num lugar só): Watch
-                 Party, vídeo, transmitir a tela, jogos e desenhos. -->
+            <!-- O telefone liga direto por voz, a TV abre a Watch Party e o Entretenimento abre a tela com todas as opções. -->
               <button id="call-button" class="icon-button" type="button" title="Ligar por voz" aria-label="Ligar por voz">
                 <svg class="icon"><use href="#i-phone" /></svg>
               </button>
-            <button id="watch-button" class="icon-button watch-button" type="button" title="Entretenimento" aria-label="Abrir o entretenimento: Watch Party, vídeo, tela, jogos e desenhos" aria-pressed="false">
-              <svg class="icon"><use href="#i-apps" /></svg>
-              <span class="watch-label">Entretenimento</span>
+            <button id="watch-button" class="icon-button watch-button" type="button" title="Batata Watch Party" aria-label="Abrir a Batata Watch Party" aria-pressed="false">
+              <svg class="icon"><use href="#i-tv" /></svg>
               <span class="watch-dot" aria-hidden="true"></span>
+            </button>
+            <button id="hub-button" class="icon-button hub-button" type="button" title="Entretenimento" aria-label="Abrir o entretenimento: jogos, desenhos, cartinhas e mais" aria-haspopup="dialog" aria-controls="hub-view">
+              <svg class="icon"><use href="#i-apps" /></svg>
+              <span class="hub-label">Entretenimento</span>
             </button>
             <button id="music-button" class="icon-button music-button hidden" type="button" title="Música tocando" aria-label="Abrir o tocador de música" aria-expanded="false" aria-controls="music-panel">
               <span id="music-mini-art" class="mini-art" aria-hidden="true"></span>
@@ -475,23 +477,6 @@ function asset(string $file): string
                 <!-- No celular, a fileira passa para o lado. -->
                 <div class="watch-sources" aria-label="Onde escolher">
                   <button type="button" class="watch-source" data-watch-source="youtube"><svg class="brand" aria-hidden="true"><use href="#b-youtube" /></svg><span>YouTube</span></button>
-                </div>
-                <!-- Tudo o que é para fazer junto, num lugar só: escolher fecha a sala e abre a opção. -->
-                <p class="watch-more-title">Fazer junto</p>
-                <div class="watch-sources watch-more" aria-label="Fazer junto">
-                  <button id="video-call" type="button" class="watch-source" data-leave-room title="Chamada de vídeo" data-title="Chamada de vídeo"><svg class="icon"><use href="#i-video" /></svg><span>Chamada de vídeo</span></button>
-                  <button id="share-screen" type="button" class="watch-source" data-leave-room title="Transmitir tela" data-title="Transmitir tela"><svg class="icon"><use href="#i-monitor-up" /></svg><span>Transmitir a tela</span></button>
-                  <button id="audio-call" type="button" hidden title="Chamada de voz" data-title="Chamada de voz"></button>
-                </div>
-                <!-- Tudo o que fica na barra lateral, aqui também (a tela de entretenimento é o lugar de tudo). -->
-                <p class="watch-more-title">Nosso cantinho</p>
-                <div class="watch-sources watch-more" aria-label="Nosso cantinho">
-                  <button type="button" class="watch-source hub" data-leave-room data-us-open="jogos"><svg class="icon"><use href="#i-gamepad" /></svg><span>Jogos</span></button>
-                  <button type="button" class="watch-source hub" data-leave-room data-us-open="nos"><svg class="icon"><use href="#i-heart" /></svg><span>Nós e desenhos</span></button>
-                  <button type="button" class="watch-source hub" data-leave-room data-us-open="cartinhas"><svg class="icon"><use href="#i-mail" /></svg><span>Cartinhas</span></button>
-                  <button type="button" class="watch-source hub" data-leave-room data-us-open="hoje"><svg class="icon"><use href="#i-sun" /></svg><span>Rotina do dia</span></button>
-                  <button type="button" class="watch-source hub" data-leave-room data-us-open="agenda"><svg class="icon"><use href="#i-calendar" /></svg><span>Agenda</span></button>
-                  <button type="button" class="watch-source hub" data-leave-room data-us-open="sonhos"><svg class="icon"><use href="#i-sparkles" /></svg><span>Sonhos e metas</span></button>
                 </div>
                 <section id="watch-recent" class="watch-recent hidden" aria-label="Vistos por vocês">
                   <h3>Vistos por vocês</h3>
@@ -1235,6 +1220,31 @@ function asset(string $file): string
           <button id="letter-delete" class="text-button" type="button">Apagar</button>
         </div>
       </article>
+    </div>
+
+    <!-- Entretenimento: uma tela própria com tudo o que é para fazer junto (fora a Watch Party, que é a TV). -->
+    <div id="hub-view" class="modal hub-view hidden" role="dialog" aria-modal="true" aria-labelledby="hub-title">
+      <div class="hub-card">
+        <header class="hub-head">
+          <h2 id="hub-title">Entretenimento</h2>
+          <button id="hub-close" class="peer-close" type="button" title="Fechar" aria-label="Fechar"><svg class="icon"><use href="#i-x" /></svg></button>
+        </header>
+                                <p class="watch-more-title">Fazer junto</p>
+                <div class="watch-sources watch-more" aria-label="Fazer junto">
+                  <button id="video-call" type="button" class="watch-source" data-hub-go title="Chamada de vídeo" data-title="Chamada de vídeo"><svg class="icon"><use href="#i-video" /></svg><span>Chamada de vídeo</span></button>
+                  <button id="share-screen" type="button" class="watch-source" data-hub-go title="Transmitir tela" data-title="Transmitir tela"><svg class="icon"><use href="#i-monitor-up" /></svg><span>Transmitir a tela</span></button>
+                  <button id="audio-call" type="button" hidden title="Chamada de voz" data-title="Chamada de voz"></button>
+                </div>
+                                <p class="watch-more-title">Nosso cantinho</p>
+                <div class="watch-sources watch-more" aria-label="Nosso cantinho">
+                  <button type="button" class="watch-source hub" data-hub-go data-us-open="jogos"><svg class="icon"><use href="#i-gamepad" /></svg><span>Jogos</span></button>
+                  <button type="button" class="watch-source hub" data-hub-go data-us-open="nos"><svg class="icon"><use href="#i-heart" /></svg><span>Nós e desenhos</span></button>
+                  <button type="button" class="watch-source hub" data-hub-go data-us-open="cartinhas"><svg class="icon"><use href="#i-mail" /></svg><span>Cartinhas</span></button>
+                  <button type="button" class="watch-source hub" data-hub-go data-us-open="hoje"><svg class="icon"><use href="#i-sun" /></svg><span>Rotina do dia</span></button>
+                  <button type="button" class="watch-source hub" data-hub-go data-us-open="agenda"><svg class="icon"><use href="#i-calendar" /></svg><span>Agenda</span></button>
+                  <button type="button" class="watch-source hub" data-hub-go data-us-open="sonhos"><svg class="icon"><use href="#i-sparkles" /></svg><span>Sonhos e metas</span></button>
+                </div>
+      </div>
     </div>
 
     <!-- Editor de desenho: ferramentas à esquerda, a tela no meio e, ao lado, o pincel, as cores, a imagem de referência
