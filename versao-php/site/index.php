@@ -350,21 +350,25 @@ function asset(string $file): string
             <button id="search-button" class="icon-button" type="button" title="Pesquisar na conversa" aria-label="Pesquisar na conversa" aria-expanded="false" aria-controls="search-panel">
               <svg class="icon"><use href="#i-search" /></svg>
             </button>
-            <!-- Um botão só para ligar: o menu escolhe voz, vídeo ou transmitir a tela. -->
-            <div class="call-pick">
+            <!-- O telefone liga direto por voz; a TV abre tudo o que é para fazer junto (como no app, num lugar só): Watch
+                 Party, vídeo, transmitir a tela, jogos e desenhos. -->
               <button id="call-button" class="icon-button" type="button" title="Ligar por voz" aria-label="Ligar por voz">
                 <svg class="icon"><use href="#i-phone" /></svg>
               </button>
-              <div id="call-menu" class="attach-menu call-menu hidden" role="menu" aria-label="Ligar">
-                <button id="audio-call" type="button" role="menuitem" title="Chamada de voz" data-title="Chamada de voz"><span class="attach-icon voice"><svg class="icon"><use href="#i-phone" /></svg></span>Chamada de voz</button>
+            <div class="call-pick">
+              <button id="watch-button" class="icon-button watch-button" type="button" title="Entretenimento" aria-label="Entretenimento: Watch Party, vídeo, tela, jogos e desenhos" aria-haspopup="menu" aria-expanded="false" aria-controls="call-menu" aria-pressed="false">
+                <svg class="icon"><use href="#i-tv" /></svg>
+                <span class="watch-dot" aria-hidden="true"></span>
+              </button>
+              <div id="call-menu" class="attach-menu call-menu hidden" role="menu" aria-label="Entretenimento">
+                <button id="watch-open" type="button" role="menuitem"><span class="attach-icon watch"><svg class="icon"><use href="#i-tv" /></svg></span>Batata Watch Party</button>
                 <button id="video-call" type="button" role="menuitem" title="Chamada de vídeo" data-title="Chamada de vídeo"><span class="attach-icon cam"><svg class="icon"><use href="#i-video" /></svg></span>Chamada de vídeo</button>
                 <button id="share-screen" type="button" role="menuitem" title="Transmitir tela" data-title="Transmitir tela"><span class="attach-icon screen"><svg class="icon"><use href="#i-monitor-up" /></svg></span>Transmitir a tela</button>
+                <button type="button" role="menuitem" data-us-open="jogos"><span class="attach-icon games"><svg class="icon"><use href="#i-dice" /></svg></span>Jogos</button>
+                <button type="button" role="menuitem" data-us-open="nos"><span class="attach-icon media"><svg class="icon"><use href="#i-pencil" /></svg></span>Desenhos e widgets</button>
+                <button id="audio-call" type="button" hidden title="Chamada de voz" data-title="Chamada de voz">Chamada de voz</button>
               </div>
             </div>
-            <button id="watch-button" class="icon-button watch-button" type="button" title="Batata Watch Party" aria-label="Abrir a Batata Watch Party" aria-pressed="false">
-              <svg class="icon"><use href="#i-tv" /></svg>
-              <span class="watch-dot" aria-hidden="true"></span>
-            </button>
             <button id="music-button" class="icon-button music-button hidden" type="button" title="Música tocando" aria-label="Abrir o tocador de música" aria-expanded="false" aria-controls="music-panel">
               <span id="music-mini-art" class="mini-art" aria-hidden="true"></span>
               <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
@@ -623,7 +627,7 @@ function asset(string $file): string
           <div id="attach-menu" class="attach-menu hidden" role="menu" aria-label="Anexar">
             <button type="button" role="menuitem" data-pick="#pick-media"><span class="attach-icon media"><svg class="icon"><use href="#i-image" /></svg></span>Foto ou vídeo</button>
             <button type="button" role="menuitem" data-pick="#pick-file"><span class="attach-icon doc"><svg class="icon"><use href="#i-file" /></svg></span>Arquivo</button>
-            <button type="button" role="menuitem" data-pick="#watch-button"><span class="attach-icon watch"><svg class="icon"><use href="#i-tv" /></svg></span>Batata Watch Party</button>
+            <button type="button" role="menuitem" data-pick="#watch-open"><span class="attach-icon watch"><svg class="icon"><use href="#i-tv" /></svg></span>Batata Watch Party</button>
             <button type="button" role="menuitem" data-us-open="jogos"><span class="attach-icon games"><svg class="icon"><use href="#i-dice" /></svg></span>Joguinhos</button>
           </div>
           <input id="pick-media" type="file" accept="image/*,video/*" multiple hidden />

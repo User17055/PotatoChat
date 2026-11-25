@@ -1695,7 +1695,18 @@ messageInput.addEventListener("paste", (event) => {
 
 // Arrastar arquivos para cima da conversa.
 let dragDepth = 0;
-const dragsFiles = (event) => [...(event.dataTransfer?.types || [])].includes("Files");
+// Arrastar uma figurinha (do painel ou da conversa) ou um GIF do painel: vai como figurinha ou GIF, não como foto (o
+// navegador manda a imagem arrastada também como arquivo).
+const STICKER_DRAG = "application/x-potato-sticker";
+document.addEventListener("dragstart", (event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target) return;
+  const fromGrid = stickers.find((item) => item.id === target.closest("[data-sticker]")?.dataset.sticker);
+  const gif = fromGrid ? { url: fromGrid.url, width: fromGrid.width, height: fromGrid.height, title: "", sticker: true }
+    : target.closest(".gif-item")?.gif || target.closest(".bubble.gif")?.closest(".message")?.msg?.gif;
+  if (gif) event.dataTransfer.setData(STICKER_DRAG, JSON.stringify(gif));
+});
+const dragsFiles = (event) => [...(event.dataTransfer?.types || [])].some((type) => type === "Files" || type === STICKER_DRAG);
 
 conversationEl.addEventListener("dragenter", (event) => {
   if (!dragsFiles(event)) return;
@@ -1717,6 +1728,15 @@ conversationEl.addEventListener("drop", (event) => {
   event.preventDefault();
   dragDepth = 0;
   dropZone.classList.add("hidden");
+  const dragged = event.dataTransfer.getData(STICKER_DRAG);
+  if (dragged) {
+    const gif = JSON.parse(dragged);
+    // Figurinha de imagem da outra pessoa: só dá para mandar depois de salvar (pelo menu da mensagem).
+    if (gif.sticker && gif.url.startsWith("api.php") && !stickers.some((item) => item.url === gif.url)) return toast("Salve essa figurinha primeiro (menu da mensagem) para mandar.");
+    send("", gif);
+    closeGifs();
+    return;
+  }
   sendFiles([...event.dataTransfer.files]);
 });
 
@@ -5414,7 +5434,7 @@ function paintWatch() {
   watchPanel.classList.toggle("hidden", !watchView);
   watchPanel.classList.toggle("has-video", Boolean(item));
   watchButton.classList.toggle("live", Boolean(item) && !watchRoom);
-  watchButton.title = item && !watchRoom ? `Batata Watch Party rolando: ${item.title}` : "Batata Watch Party";
+  watchButton.title = item && !watchRoom ? `Entretenimento · Watch Party rolando: ${item.title}` : "Entretenimento";
   $("#watch-picker").classList.toggle("hidden", Boolean(item));
   $("#watch-who").textContent = peerName ? `com ${peerName}` : "";
   watchPanel.dataset.source = item?.source || "";
@@ -5626,10 +5646,7 @@ document.addEventListener("fullscreenchange", () => {
   if (document.fullscreenElement !== watchPanel) setWatchExpanded(false);
 });
 
-watchButton.addEventListener("click", () => {
-  fx.press(watchButton);
-  setWatchRoom(!watchRoom);
-});
+$("#watch-open").addEventListener("click", () => setWatchRoom(!watchRoom));
 
 watchPanel.addEventListener("click", async (event) => {
   const target = event.target;
@@ -7242,9 +7259,16 @@ shareSheet.addEventListener("click", (event) => {
 const callMenu = $("#call-menu");
 const closeCallMenu = () => {
   callMenu.classList.add("hidden");
-  $("#call-button").setAttribute("aria-expanded", "false");
+  $("#watch-button").setAttribute("aria-expanded", "false");
 };
 $("#call-button").addEventListener("click", () => call ? returnToCall() : startCall("audio"));
+// A TV abre o menu de entretenimento (Watch Party, vídeo, tela, jogos e desenhos).
+$("#watch-button").addEventListener("click", () => {
+  fx.press($("#watch-button"));
+  if (!callMenu.classList.contains("hidden")) return closeCallMenu();
+  fx.show(callMenu, { y: -8, scale: 0.97 });
+  $("#watch-button").setAttribute("aria-expanded", "true");
+});
 callMenu.addEventListener("click", (event) => {
   if (event.target.closest("button")) closeCallMenu();
 });
