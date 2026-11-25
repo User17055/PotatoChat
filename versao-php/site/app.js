@@ -5661,6 +5661,9 @@ function setWatchExpanded(on) {
 }
 
 document.addEventListener("fullscreenchange", () => {
+  const room = document.fullscreenElement === document.documentElement;
+  $("#watch-room-full-icon").setAttribute("href", room ? "#i-minimize" : "#i-maximize");
+  $("#watch-room-full").title = room ? "Sair da tela cheia" : "Tela cheia";
   if (document.fullscreenElement !== watchPanel) setWatchExpanded(false);
 });
 
@@ -5673,6 +5676,12 @@ watchButton.addEventListener("click", () => {
 watchPanel.addEventListener("click", async (event) => {
   const target = event.target;
   if (target.closest("#watch-leave")) return setWatchRoom(false);
+  if (target.closest("#watch-hub")) return $("#hub-button").click();
+  // Tela cheia da sala inteira (o vídeo, a conversa do lado e a barra), com ou sem vídeo passando.
+  if (target.closest("#watch-room-full")) {
+    if (document.fullscreenElement) return document.exitFullscreen?.().catch(() => {});
+    return document.documentElement.requestFullscreen?.().catch(() => toast("Este navegador não deixa entrar em tela cheia."));
+  }
   // No app do Android, "Abrir na Netflix" abre dentro dele, já seguindo a sala.
   const streamLink = target.closest("#watch-launch-open, #watch-stream-open");
   if (streamLink && nativeStream()) {

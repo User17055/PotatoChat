@@ -296,8 +296,6 @@ html.has-session #chat-view.hidden { display: grid !important; }
 /* A barra lateral rola sem barra de rolagem à vista (e nunca para o lado: o que não cabe termina em "…"). */
 .sidebar { display: flex; min-width: 0; flex-direction: column; justify-content: space-between; gap: 20px; padding: 28px 18px 18px; overflow-x: hidden; overflow-y: auto; scrollbar-width: none; border-right: 1px solid var(--line); background: color-mix(in srgb, var(--bg-2) 90%, transparent); backdrop-filter: blur(14px); }
 .brand-row { display: flex; align-items: center; gap: 12px; padding: 0 6px; font-size: 19px; font-weight: 700; letter-spacing: -.02em; }
-.side-chat-link { margin-top: 22px; }
-.side-chat-link .side-icon { --tone: #7cc4ff; }
 .potato-mini { width: 44px; height: 31px; cursor: pointer; }
 .room-label { margin: 38px 8px 12px; color: var(--faint); font-size: 10px; font-weight: 600; letter-spacing: .18em; text-transform: uppercase; }
 .sidebar::-webkit-scrollbar { display: none; }
@@ -1087,9 +1085,9 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
 /* Sala da Watch Party: cara de cinema, o vídeo grande e a conversa do lado (no celular, embaixo). */
 .app-shell.watching .conversation { background: radial-gradient(120% 80% at 30% 0%, #24183a 0%, #0b0a10 55%, #060609 100%); }
 .app-shell.watching .wallpaper { opacity: 0; }
-/* Na Watch Party, os relógios e o alternador de tela do vídeo não aparecem sobre o player. */
+/* Na Watch Party, os relógios não aparecem sobre o player (a tela cheia do vídeo continua na barra dele). */
 .app-shell.watching .trip-clock,
-.app-shell.watching :is(#watch-full, #watch-stream-clock) { display: none !important; }
+.app-shell.watching #watch-stream-clock { display: none !important; }
 .watch-button { position: relative; }
 .watch-dot { position: absolute; top: 2px; right: 2px; width: 10px; height: 10px; display: none; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 2px var(--bg); }
 .watch-button.live .watch-dot { display: block; animation: blink 1.2s ease-in-out infinite; }
