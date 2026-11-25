@@ -2301,6 +2301,7 @@ function letter_text(string $html): string
 // papel, rot em graus, z (quem fica por cima) e a moldura. Foto: uma imagem enviada (como as fotos da cartinha).
 // Figurinha: da coleção de quem escreve, ou que já estava na cartinha ($old: endereço → [largura, altura]).
 const LETTER_DECOR = 16;
+const LETTER_PAGES = 10;
 const DECOR_FRAMES = ['none', 'polaroid', 'round', 'tape', 'shadow'];
 
 function letter_decor($item, string $owner, string $itemId, array $old): ?array
@@ -2483,6 +2484,19 @@ function us_act(array $me, array $body): array
         case 'drawing:save':
             return save_drawing($me, $body);
 
+        // Desenhar por cima de um desenho (de qualquer um dos dois): a imagem nova substitui a dele, sem fazer cópia.
+        case 'drawing:update':
+            $row = find_item('drawing', $id);
+            if (!$row) return ['ok' => false, 'error' => 'Esse desenho foi apagado.'];
+            $image = item_photo($body['key'] ?? '', $me['name'], $row['id']);
+            if (!$image) return ['ok' => false, 'error' => 'O desenho não subiu. Tente de novo.'];
+            $old = item_data($row);
+            save_item($row, $row['id'], 'drawing', $row['owner'], null, $image + ['title' => clean_line($body['title'] ?? '', 60) ?: ($old['title'] ?? ''), 'editedBy' => $me['name']]);
+            // Prende a imagem nova ao desenho e apaga a antiga.
+            keep_photos($row['id'], $me['name'], [$image['key']]);
+            emit_us(['kind' => 'nos', 'by' => $me['name'], 'action' => 'drawing']);
+            return ['ok' => true] + nos_state();
+
         case 'drawing:delete':
             $row = find_item('drawing', $id);
             if ($row && $row['owner'] !== $me['name']) return ['ok' => false, 'error' => 'Só quem desenhou apaga.'];
@@ -2604,6 +2618,8 @@ function us_act(array $me, array $body): array
                 'photos' => $photos,
                 'audios' => $audios,
                 'decor' => $decor,
+                // Quantas páginas a folha tem (o editor acrescenta mais embaixo); a cartinha abre com o mesmo tamanho.
+                'pages' => max(1, min(LETTER_PAGES, (int) ($body['pages'] ?? 1))),
                 'to' => $old['to'] ?? peer_of($me['name']),
                 'readAt' => $old['readAt'] ?? null,
                 'edited' => (bool) $row,

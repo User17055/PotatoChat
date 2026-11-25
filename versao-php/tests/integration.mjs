@@ -1214,6 +1214,12 @@ try {
     const drew = await us(us1, { op: "drawing:save", key: drawingFile.key, title: "Nós dois" });
     assert.deepEqual([drew.drawings.length, drew.drawings[0].title, drew.drawings[0].width, drew.drawings[0].owner], [1, "Nós dois", 40, "Pessoa 1"]);
     assert.equal((await us(us2, { op: "drawing:save", key: drawingFile.key })).error, "O desenho não subiu. Tente de novo.");
+    // Desenhar por cima do desenho do outro: a imagem nova substitui a dele (sem cópia) e a antiga sai do banco.
+    const overFile = (await upload(secondLogin.body.token, "por-cima.png", makePng(40, 30))).body.file;
+    const over = await us(us2, { op: "drawing:update", id: drew.drawings[0].id, key: overFile.key });
+    assert.deepEqual([over.drawings.length, over.drawings[0].key, over.drawings[0].title, over.drawings[0].owner, over.drawings[0].editedBy], [1, overFile.key, "Nós dois", "Pessoa 1", "Pessoa 2"]);
+    assert.equal(sql(`SELECT COUNT(*) AS n FROM {p}files WHERE file_key = '${drawingFile.key}'`)[0].n, 0);
+    assert.equal((await us(us2, { op: "drawing:update", id: drew.drawings[0].id, key: drawingFile.key })).error, "O desenho não subiu. Tente de novo.");
     assert.equal((await us(us2, { op: "drawing:delete", id: drew.drawings[0].id })).error, "Só quem desenhou apaga.");
     const widget = await api("widget", { token: secondLogin.body.token });
     assert.deepEqual([widget.status, widget.body.me, widget.body.distance, widget.body.drawings.length, widget.body.people["Pessoa 2"].note], [200, "Pessoa 2", placed.distance, 1, "te amo"]);

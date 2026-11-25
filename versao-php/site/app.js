@@ -8875,7 +8875,7 @@ function paintNos() {
     image.src = drawing.url;
     image.alt = drawing.title || "Desenho";
     image.loading = "lazy";
-    card.append(image, el("span", "", `${drawing.title || "Sem nome"} · ${who(drawing.owner)}`));
+    card.append(image, el("span", "", `${drawing.title || "Sem nome"} · ${who(drawing.owner)}${drawing.editedBy && drawing.editedBy !== drawing.owner ? ` e ${who(drawing.editedBy)}` : ""}`));
     return card;
   }) : [emptyNote("Nenhum desenho ainda. Que tal o primeiro?")]));
 }
@@ -9058,7 +9058,9 @@ async function openDraw(base = null) {
   }
   draw = {
     layers, active: 1, tool: "brush", brush: "caneta", size: 12, opacity: 1, color: "#e50914",
-    reference: null, referenceOpacity: 0.5, referenceSave: false, undo: [], redo: [], stroke: null, title: base?.title ? `${base.title} (cópia)` : ""
+    reference: null, referenceOpacity: 0.5, referenceSave: false, undo: [], redo: [], stroke: null, title: base?.title || "",
+    // Desenhando por cima de um desenho (de qualquer um dos dois): salvar atualiza esse mesmo desenho, sem cópia.
+    editing: base?.id || null
   };
   $("#draw-view").classList.remove("hidden");
   $("#draw-title").value = draw.title;
@@ -9477,10 +9479,10 @@ async function saveDraw() {
     const blob = await new Promise((resolve) => flat.toBlob(resolve, "image/png"));
     if (!blob) throw new Error("Não deu para gerar a imagem.");
     const uploaded = await uploadBlob(new File([blob], "desenho.png", { type: "image/png" }), "desenho.png", "O desenho não subiu. Tente de novo.");
-    const result = await usCall({ op: "drawing:save", key: uploaded.key, title: draw.title.trim() });
+    const result = await usCall(draw.editing ? { op: "drawing:update", id: draw.editing, key: uploaded.key, title: draw.title.trim() } : { op: "drawing:save", key: uploaded.key, title: draw.title.trim() });
     if (!result) return;
     applyNos(result);
-    toast("Desenho salvo para os dois", "ok", "pencil");
+    toast(draw.editing ? "Desenho atualizado para os dois" : "Desenho salvo para os dois", "ok", "pencil");
     sound.play("sparkle");
     closeDraw();
   } catch (error) {

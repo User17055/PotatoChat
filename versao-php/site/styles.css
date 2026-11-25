@@ -238,7 +238,7 @@ svg { flex: none; }
 
 .login-panel { width: min(100%, 440px); margin: auto; padding: clamp(16px, 2.8vh, 30px) clamp(20px, 4vw, 32px); text-align: center; border-radius: 28px; background: linear-gradient(180deg, var(--hover), transparent 45%), var(--glass); backdrop-filter: blur(26px) saturate(1.3); -webkit-backdrop-filter: blur(26px) saturate(1.3); box-shadow: 0 30px 80px #0007; }
 .hero-potato { display: block; width: clamp(96px, 19vh, 170px); margin: 0 auto; padding: 0; border: 0; background: none; }
-.hero-potato svg { display: block; width: 100%; height: auto; aspect-ratio: 142 / 100; overflow: visible; filter: drop-shadow(0 18px 30px color-mix(in srgb, var(--accent) 13%, transparent)); }
+.hero-potato img { display: block; width: 100%; height: auto; aspect-ratio: 1; object-fit: contain; overflow: visible; filter: drop-shadow(0 18px 30px color-mix(in srgb, var(--accent) 13%, transparent)); }
 .eyebrow { margin: clamp(6px, 1.6vh, 16px) 0 8px; color: var(--accent); font-size: 11px; font-weight: 600; letter-spacing: .2em; text-transform: uppercase; }
 h1 { margin: 0; font-size: clamp(28px, min(7.5vw, 6vh), 48px); font-weight: 700; line-height: 1.08; letter-spacing: -.035em; }
 h1 .line { display: block; }
@@ -296,7 +296,7 @@ html.has-session #chat-view.hidden { display: grid !important; }
 /* A barra lateral rola sem barra de rolagem à vista (e nunca para o lado: o que não cabe termina em "…"). */
 .sidebar { display: flex; min-width: 0; flex-direction: column; justify-content: space-between; gap: 20px; padding: 28px 18px 18px; overflow-x: hidden; overflow-y: auto; scrollbar-width: none; border-right: 1px solid var(--line); background: color-mix(in srgb, var(--bg-2) 90%, transparent); backdrop-filter: blur(14px); }
 .brand-row { display: flex; align-items: center; gap: 12px; padding: 0 6px; font-size: 19px; font-weight: 700; letter-spacing: -.02em; }
-.potato-mini { width: 44px; height: 31px; cursor: pointer; }
+.potato-mini { width: 38px; height: 38px; object-fit: contain; cursor: pointer; }
 .room-label { margin: 38px 8px 12px; color: var(--faint); font-size: 10px; font-weight: 600; letter-spacing: .18em; text-transform: uppercase; }
 .sidebar::-webkit-scrollbar { display: none; }
 .sidebar > div, .people, button.person { min-width: 0; }
@@ -1094,7 +1094,7 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
 .app-shell.watching .watch-button { border-color: #a78bfa; color: #a78bfa; }
 .watch-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #0e0d14; color: #fff; }
 .watch-badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: linear-gradient(120deg, #7c3aed, #ef4444); font-size: 12.5px; font-weight: 700; letter-spacing: .03em; }
-.watch-badge .potato-mark { width: 24px; height: 17px; }
+.watch-badge .potato-mark { width: 22px; height: 22px; object-fit: contain; }
 .watch-who { flex: 1; min-width: 0; overflow: hidden; color: #ffffffa6; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
 .watch-head .watch-btn { background: #ffffff14; color: #fff; }
 .watch-head .watch-btn:hover { background: #ffffff26; }
@@ -1107,7 +1107,7 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
 /* "safe center": se não couber (celular deitado), começa do topo e rola, em vez de cortar em cima. */
 .watch-home, .watch-launch { flex: 1; min-height: 0; display: grid; place-content: center; place-content: safe center; justify-items: center; gap: 10px; padding: 24px; overflow: hidden; }
 .watch-picker-icon { width: 72px; height: 72px; display: grid; place-items: center; border-radius: 22px; background: linear-gradient(140deg, #7c3aed, #ef4444); box-shadow: 0 14px 40px #7c3aed55; }
-.watch-picker-icon svg { width: 52px; filter: drop-shadow(0 4px 8px #0006); }
+.watch-picker-icon img { width: 58px; height: 58px; object-fit: contain; filter: drop-shadow(0 4px 8px #0006); }
 .watch-home > strong, .watch-launch > strong { font-size: 20px; }
 /* A outra pessoa escolhendo agora ("Ana está escolhendo na Netflix…"). */
 .watch-browsing { display: inline-flex; align-items: center; gap: 8px; margin: 0; padding: 6px 12px; border-radius: 999px; background: #ffffff14; color: #ffffffd9; font-size: 12.5px; font-weight: 600; }

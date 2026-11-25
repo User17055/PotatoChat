@@ -244,7 +244,7 @@ function asset(string $file): string
     <!-- ===================== LOGIN ===================== -->
     <main id="login-view" class="login-shell">
       <section class="login-panel">
-        <button class="hero-potato" type="button" aria-label="Batata (clique!)"><svg viewBox="0 0 142 100"><use href="#potato" /></svg></button>
+        <button class="hero-potato" type="button" aria-label="Batata (clique!)"><img src="img/potato-logo.png" alt="" /></button>
         <p class="eyebrow">Só a gente</p>
         <h1><span class="line">Bem-vindo ao</span> <span class="line"><em>nosso chat.</em></span></h1>
         <p class="lead">Mensagens, voz, vídeo e tela compartilhada — tudo num cantinho só nosso.</p>
@@ -303,7 +303,7 @@ function asset(string $file): string
            perfil. No celular, vira uma gaveta (botão de menu). -->
       <aside id="sidebar" class="sidebar" aria-label="Menu">
         <div class="sidebar-top">
-          <div class="brand-row"><svg class="potato-mini" viewBox="0 0 142 100" aria-hidden="true"><use href="#potato" /></svg><strong>Potato</strong></div>
+          <div class="brand-row"><img class="potato-mini" src="img/potato-logo.png" alt="" /><strong>Potato</strong></div>
           <div class="room-label">Conversas</div>
           <div id="people" class="people"></div>
         </div>
@@ -452,7 +452,7 @@ function asset(string $file): string
         <!-- Assistir junto: um vídeo do YouTube para os dois, com o mesmo play/pause. -->
         <div id="watch-panel" class="watch-panel hidden" aria-label="Watch Party">
           <header class="watch-head">
-            <span class="watch-badge"><svg class="potato-mark" viewBox="0 0 142 100" aria-hidden="true"><use href="#potato" /></svg>Batata Watch Party</span>
+            <span class="watch-badge"><img class="potato-mark" src="img/potato-logo.png" alt="" />Batata Watch Party</span>
             <span id="watch-who" class="watch-who"></span>
             <!-- Dentro da sala: a tela cheia (só a sala, como o F11); nela, o botão Tela da barra do vídeo mostra ou esconde a conversa. -->
             <button id="watch-room-full" class="watch-btn" type="button" title="Tela cheia" aria-label="Tela cheia"><svg class="icon"><use id="watch-room-full-icon" href="#i-maximize" /></svg></button>
@@ -464,7 +464,7 @@ function asset(string $file): string
             <!-- Nada passando: o catálogo, como no Rave. Primeiro os serviços; cada um abre a tela dele. -->
             <div id="watch-picker" class="watch-picker hidden">
               <div id="watch-home" class="watch-home">
-                <span class="watch-picker-icon"><svg viewBox="0 0 142 100" aria-hidden="true"><use href="#potato" /></svg></span>
+                <span class="watch-picker-icon"><img src="img/potato-logo.png" alt="" /></span>
                 <strong>O que vamos assistir?</strong>
                 <p id="watch-browsing" class="watch-browsing hidden"></p>
                 <!-- No celular, a fileira passa para o lado. -->
