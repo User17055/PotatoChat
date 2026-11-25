@@ -585,6 +585,7 @@ function applyHistory(payload) {
   applyWallpaper(payload.wallpaper);
   applyMusic(payload.music, true);
   applyWatch(payload.watch, true, false);
+  if (!watchRoom && store.get("sessionStorage", WATCH_ROOM_KEY) === true) setWatchRoom(true);
   renderAll();
   if (latest) fx.show(jump, { scale: 0.6 });
   else scrollToLatest();
@@ -3762,6 +3763,7 @@ function flyToTrip() {
 // A Watch Party tem dois modos: conversa ao lado ou vídeo em tela cheia com mensagens temporárias sobre o vídeo.
 const WATCH_VIEWS = [["lado", "conversa ao lado"], ["cinema", "player em tela cheia"]];
 const WATCH_VIEW_KEY = "potato.watchView";
+const WATCH_ROOM_KEY = "potato.watchRoom";
 const WATCH_VOLUME_KEY = "potato.watchVolume";
 const watchVolume = () => Math.max(0, Math.min(100, Number(store.get("localStorage", WATCH_VOLUME_KEY) ?? 80)));
 
@@ -5192,6 +5194,9 @@ function applyWatch(state, measured = false, join = true) {
 function setWatchRoom(on) {
   if (watchRoom === on) return;
   watchRoom = on;
+  // Atualizou a página com a sala aberta: ela volta aberta (só nesta aba; abrir o site de novo começa na conversa).
+  if (on) store.set("sessionStorage", WATCH_ROOM_KEY, true);
+  else store.remove("sessionStorage", WATCH_ROOM_KEY);
   watchButton.setAttribute("aria-pressed", String(on));
   if (on) closeMusic();
   else setWatchExpanded(false);
@@ -5675,11 +5680,6 @@ watchButton.addEventListener("click", () => {
 watchPanel.addEventListener("click", async (event) => {
   const target = event.target;
   if (target.closest("#watch-leave")) return setWatchRoom(false);
-  if (target.closest("#watch-hub")) {
-    // Em tela cheia só a sala aparece: sai dela antes, para a janela do Entretenimento ficar à vista.
-    setWatchExpanded(false);
-    return $("#hub-button").click();
-  }
   // Tela cheia como o F11: só a sala (o vídeo ou a tela de escolher, e a barra dela), sem a conversa do lado.
   if (target.closest("#watch-room-full")) return setWatchExpanded(!watchPanel.classList.contains("expanded"));
   // No app do Android, "Abrir na Netflix" abre dentro dele, já seguindo a sala.

@@ -454,8 +454,7 @@ function asset(string $file): string
           <header class="watch-head">
             <span class="watch-badge"><svg class="potato-mark" viewBox="0 0 142 100" aria-hidden="true"><use href="#potato" /></svg>Batata Watch Party</span>
             <span id="watch-who" class="watch-who"></span>
-            <!-- Dentro da sala: o Entretenimento (sem sair dela) e a tela cheia da sala inteira. -->
-            <button id="watch-hub" class="watch-btn" type="button" title="Entretenimento" aria-label="Abrir o entretenimento" aria-controls="hub-view"><svg class="icon"><use href="#i-apps" /></svg></button>
+            <!-- Dentro da sala: a tela cheia (só a sala, como o F11). -->
             <button id="watch-room-full" class="watch-btn" type="button" title="Tela cheia" aria-label="Tela cheia"><svg class="icon"><use id="watch-room-full-icon" href="#i-maximize" /></svg></button>
             <button id="watch-leave" class="watch-btn" type="button" title="Sair da sala (o vídeo continua para a outra pessoa)" aria-label="Sair da sala"><svg class="icon"><use href="#i-logout" /></svg></button>
           </header>
