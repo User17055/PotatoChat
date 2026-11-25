@@ -1199,6 +1199,12 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
 .watch-panel { position: relative; z-index: 3; margin: 12px max(14px, calc((100% - 850px) / 2)) 0; overflow: hidden; border: 1px solid var(--line); border-radius: 20px; background: #000; box-shadow: 0 16px 40px #0007; }
 .watch-stage { position: relative; width: 100%; aspect-ratio: 16 / 9; max-height: 52vh; max-height: 52dvh; background: #000; }
 .watch-host, .watch-host > * { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.watch-chat-overlay { position: absolute; inset: auto auto 20px 20px; z-index: 5; display: grid; gap: 8px; width: min(440px, calc(100% - 40px)); pointer-events: none; }
+.watch-chat-message { display: grid; gap: 2px; width: fit-content; max-width: 100%; padding: 9px 13px; border: 1px solid #ffffff20; border-radius: 14px; background: #111d; color: #fff; box-shadow: 0 4px 18px #0008; animation: watch-chat-in .25s ease-out both; }
+.watch-chat-message strong { color: #d6c5ff; font-size: 11px; }
+.watch-chat-message span { overflow-wrap: anywhere; font-size: 14px; line-height: 1.4; }
+.watch-chat-message.leaving { opacity: 0; transform: translateY(8px); transition: opacity .35s, transform .35s; }
+@keyframes watch-chat-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 .watch-host video { object-fit: contain; background: #000; }
 /* Os controles são os nossos (iguais para os dois); o player só recebe toque quando o navegador exige. */
 .watch-host iframe { pointer-events: none; }
@@ -1426,13 +1432,6 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
   .watching.watch-cinema .conversation { grid-template-columns: minmax(0, 1fr); }
   .watching.watch-cinema .conversation > :not(.watch-panel) { display: none; }
   .watching.watch-cinema .watch-panel { margin: 14px; }
-  /* Conversa flutuante: a coluna da conversa passa para cima do vídeo, transparente, no canto direito. */
-  .watching.watch-flutuante .conversation { grid-template-columns: minmax(0, 1fr); }
-  .watching.watch-flutuante .conversation > :is(.topbar, .messages-wrap, .typing, .reply-bar, .composer, .call-panel) { grid-column: 1; justify-self: end; z-index: 5; width: 360px; margin-right: 28px; }
-  .watching.watch-flutuante .topbar { margin-top: 24px; border: 0; border-radius: 16px 16px 0 0; background: #000a; }
-  .watching.watch-flutuante .messages-wrap { background: linear-gradient(#0009, #0006); backdrop-filter: blur(6px); }
-  .watching.watch-flutuante .composer { margin-bottom: 30px; }
-  .watching.watch-flutuante .watch-bar { padding-right: 410px; }
   .in-call.call-expanded .conversation { grid-template-columns: minmax(0, 1fr); background: none; }
 }
 
@@ -2606,7 +2605,9 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
   .music-empty { margin-top: 14vh; }
   /* Sala no celular: o vídeo em cima, a conversa embaixo. No modo cinema, só o vídeo (a conversa some). */
   .watching .topbar { display: none; }
-  .watching.watch-cinema .conversation > :is(.messages-wrap, .typing, .reply-bar, .composer) { display: none; }
+  .watching.watch-cinema .conversation > :is(.messages-wrap, .typing, .reply-bar) { display: none; }
+  .watching.watch-cinema .conversation > .composer { position: fixed; left: 50%; bottom: max(14px, var(--safe-bottom)); z-index: 70; display: flex !important; width: min(760px, calc(100vw - 32px)); margin: 0; transform: translateX(-50%); }
+  .watching.watch-cinema .watch-chat-overlay { bottom: 86px; left: 16px; }
   .watching.watch-cinema .watch-panel { flex: 1; display: flex; flex-direction: column; }
   .watching.watch-cinema .watch-stage { flex: 1; max-height: none; aspect-ratio: auto; }
   .watching .watch-panel { margin: 0; border: 0; border-radius: 0; }

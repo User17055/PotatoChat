@@ -645,6 +645,7 @@ function receive(message, live) {
     messagesEl.querySelector(".empty")?.remove();
     appendNode(message, live);
   }
+  if (live) showWatchMessage(message);
   if (!latest) refreshStatuses();
   noteInRooms(message, false);
   if (message.game) paintUsBadge();
@@ -3716,9 +3717,8 @@ function flyToTrip() {
     .to(heart, { scale: 1.12, svgOrigin: "710 230", duration: 0.6, ease: "sine.inOut", yoyo: true, repeat: -1 });
 }
 
-// Tela da Watch Party (só neste aparelho): a conversa ao lado (o de sempre), o modo cinema (só o vídeo) ou a conversa
-// flutuando por cima do vídeo. Classe watch-<modo> no .app-shell.
-const WATCH_VIEWS = [["lado", "conversa ao lado"], ["cinema", "modo cinema (só o vídeo)"], ["flutuante", "conversa flutuante"]];
+// A Watch Party tem dois modos: conversa ao lado ou vídeo em tela cheia com mensagens temporárias sobre o vídeo.
+const WATCH_VIEWS = [["lado", "conversa ao lado"], ["cinema", "player em tela cheia"]];
 const WATCH_VIEW_KEY = "potato.watchView";
 
 function paintWatchView() {
@@ -3737,6 +3737,21 @@ $("#watch-view").addEventListener("click", () => {
   sound.play("tap");
 });
 paintWatchView();
+
+function showWatchMessage(message) {
+  if (!watchView || !$(".app-shell").classList.contains("watch-cinema") || message.deleted || message.call) return;
+  const text = previewText(message);
+  if (!text) return;
+  const layer = $("#watch-chat-overlay");
+  const item = el("div", "watch-chat-message");
+  item.append(el("strong", "", message.sender), el("span", "", text.slice(0, 220)));
+  layer.append(item);
+  while (layer.children.length > 4) layer.firstElementChild.remove();
+  setTimeout(() => {
+    item.classList.add("leaving");
+    setTimeout(() => item.remove(), 350);
+  }, 5000);
+}
 
 // Tema Natal: neve caindo (canvas), pisca-pisca pendurado embaixo do topo, uma árvore desenhada no canto da conversa e a
 // neve no chão do fundo da conversa. Tudo em SVG/canvas feito aqui, animado com o GSAP; com "reduzir movimento"

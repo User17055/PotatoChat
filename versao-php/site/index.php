@@ -467,6 +467,7 @@ function asset(string $file): string
           </header>
           <div id="watch-stage" class="watch-stage">
             <div id="watch-host" class="watch-host"></div>
+            <div id="watch-chat-overlay" class="watch-chat-overlay" aria-live="polite" aria-label="Mensagens recentes"></div>
             <!-- Nada passando: o catálogo, como no Rave. Primeiro os serviços; cada um abre a tela dele. -->
             <div id="watch-picker" class="watch-picker hidden">
               <div id="watch-home" class="watch-home">
