@@ -3545,24 +3545,54 @@ function countdownTarget() {
   return new Date(year, month - 1, day, hour, minute);
 }
 
-function paintCountdown() {
-  clearTimeout(tripTimer);
-  const box = $("#countdown");
+// O que falta, em dias, horas, minutos e segundos (null = já é o dia).
+function tripLeft() {
   const target = countdownTarget();
   const left = target ? target - Date.now() : 0;
+  if (left <= 0) return null;
+  const seconds = Math.floor(left / 1000);
+  return { d: Math.floor(seconds / 86400), h: Math.floor(seconds / 3600) % 24, m: Math.floor(seconds / 60) % 60, s: seconds % 60 };
+}
+
+const tripLeftText = () => {
+  const left = tripLeft();
+  if (!left) return "É hoje!";
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${left.d ? `${left.d} ${left.d === 1 ? "dia" : "dias"} · ` : ""}${pad(left.h)}h ${pad(left.m)}m ${pad(left.s)}s`;
+};
+
+// Cada quadradinho: o número novo entra por baixo e o velho sai por cima (GSAP); sem GSAP, só troca.
+function rollDigit(box, value) {
+  const current = box.querySelector("b:last-child");
+  if (current?.textContent === value) return;
+  const gsap = matchMedia("(prefers-reduced-motion: reduce)").matches ? null : window.gsap;
+  if (!current || !gsap) {
+    box.replaceChildren(el("b", "", value));
+    return;
+  }
+  const next = el("b", "", value);
+  box.append(next);
+  gsap.fromTo(next, { yPercent: 100, opacity: 0 }, { yPercent: 0, opacity: 1, duration: 0.45, ease: "power3.out" });
+  gsap.to(current, { yPercent: -100, opacity: 0, duration: 0.45, ease: "power3.out", onComplete: () => current.remove() });
+}
+
+function paintCountdown() {
+  clearTimeout(tripTimer);
+  const clock = $("#trip-clock");
+  const target = countdownTarget();
   const endOfDay = target ? new Date(target.getFullYear(), target.getMonth(), target.getDate() + 1) - Date.now() : 0;
-  box.classList.toggle("hidden", !target || endOfDay <= 0);
+  clock.classList.toggle("hidden", !target || endOfDay <= 0);
   if (!target || endOfDay <= 0) return;
   const when = new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "short" }).format(target);
-  $("#countdown-label").textContent = `${countdown.label} · ${when}${countdown.time ? ` às ${countdown.time}` : ""}`;
-  box.classList.toggle("today", left <= 0);
-  if (left <= 0) {
-    $("#countdown-time").textContent = "É hoje!";
-  } else {
-    const seconds = Math.floor(left / 1000);
-    const days = Math.floor(seconds / 86400);
-    const pad = (value) => String(value).padStart(2, "0");
-    $("#countdown-time").textContent = `${days ? `${days} ${days === 1 ? "dia" : "dias"} · ` : ""}${pad(Math.floor(seconds / 3600) % 24)}h ${pad(Math.floor(seconds / 60) % 60)}m ${pad(seconds % 60)}s`;
+  const left = tripLeft();
+  clock.classList.toggle("today", !left);
+  clock.title = `${countdown.label} · ${when}${countdown.time ? ` às ${countdown.time}` : ""} (toque para ver a viagem)`;
+  clock.setAttribute("aria-label", `${countdown.label}: ${tripLeftText()}`);
+  if (left) {
+    for (const [key, value] of Object.entries(left)) {
+      const box = clock.querySelector(`[data-clock="${key}"]`)?.parentElement;
+      if (box) rollDigit(box, key === "d" ? String(value) : String(value).padStart(2, "0"));
+    }
   }
   tripTimer = setTimeout(paintCountdown, 1000 - (Date.now() % 1000));
 }
@@ -3572,8 +3602,8 @@ function setCountdown(next) {
   paintCountdown();
 }
 
-$("#countdown-fly").addEventListener("click", () => flyToTrip());
-$("#countdown-edit").addEventListener("click", () => {
+$("#trip-clock").addEventListener("click", () => flyToTrip());
+function editCountdown() {
   openSheet({
     title: "Contagem regressiva",
     icon: "plane",
@@ -3596,7 +3626,7 @@ $("#countdown-edit").addEventListener("click", () => {
       return true;
     }
   });
-});
+}
 
 function countdownCall(data) {
   return new Promise((resolve) => {
@@ -3642,7 +3672,9 @@ function flyToTrip() {
   svg.append(dots, trail, pin(90, 280, "trip-from"), heart, plane);
   const text = el("div", "trip-text");
   const when = new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "long" }).format(target);
-  text.append(el("small", "", countdown.label), el("strong", "", $("#countdown-time").textContent), el("span", "", left <= 0 ? "Chegou o dia" : `Chegada em ${when}${countdown.time ? ` às ${countdown.time}` : ""}`));
+  const change = el("button", "trip-change", "Mudar a data");
+  change.type = "button";
+  text.append(el("small", "", countdown.label), el("strong", "", tripLeftText()), el("span", "", left <= 0 ? "Chegou o dia" : `Chegada em ${when}${countdown.time ? ` às ${countdown.time}` : ""}`), change);
   layer.append(svg, text);
   document.body.append(layer);
   const close = () => {
@@ -3655,7 +3687,10 @@ function flyToTrip() {
     event.stopPropagation();
     close();
   };
-  layer.addEventListener("click", close);
+  layer.addEventListener("click", (event) => {
+    close();
+    if (event.target.closest(".trip-change")) editCountdown();
+  });
   document.addEventListener("keydown", onKey, true);
   sound.play("whoosh");
 
@@ -3741,32 +3776,26 @@ function snow(on) {
     canvas.width = innerWidth * ratio;
     canvas.height = innerHeight * ratio;
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
-    flakes = Array.from({ length: Math.round(Math.min(120, innerWidth / 10)) }, () => ({
-      x: Math.random() * innerWidth, y: Math.random() * innerHeight, r: 0.8 + Math.random() * 2.4,
-      speed: 0.3 + Math.random() * 0.8, sway: Math.random() * Math.PI * 2, spin: Math.random() * Math.PI, crystal: Math.random() < 0.18
+    flakes = Array.from({ length: Math.round(Math.min(90, innerWidth / 14)) }, () => ({
+      x: Math.random() * innerWidth, y: Math.random() * innerHeight, r: 1.6 + Math.random() * 3.4,
+      speed: 0.35 + Math.random() * 0.7, sway: Math.random() * Math.PI * 2
     }));
     paintLights(lights);
   };
-  // Floco de verdade (seis braços com raminhos) nos maiores; os outros, pontinhos macios.
-  const crystal = (x, y, size, angle) => {
-    context.save();
-    context.translate(x, y);
-    context.rotate(angle);
-    context.strokeStyle = "#ffffff";
-    context.lineWidth = 1.1;
-    context.lineCap = "round";
+  // Floco fofinho, de desenho animado: uma bolinha macia, branca no meio, com a sombra azulada embaixo e um brilho.
+  const puff = (x, y, radius) => {
     context.beginPath();
-    for (let arm = 0; arm < 6; arm += 1) {
-      context.rotate(Math.PI / 3);
-      context.moveTo(0, 0);
-      context.lineTo(0, -size);
-      context.moveTo(0, -size * 0.55);
-      context.lineTo(size * 0.28, -size * 0.8);
-      context.moveTo(0, -size * 0.55);
-      context.lineTo(-size * 0.28, -size * 0.8);
-    }
-    context.stroke();
-    context.restore();
+    context.arc(x + radius * 0.18, y + radius * 0.22, radius, 0, Math.PI * 2);
+    context.fillStyle = "rgba(170, 196, 255, 0.55)";
+    context.fill();
+    const glow = context.createRadialGradient(x - radius * 0.3, y - radius * 0.3, radius * 0.1, x, y, radius);
+    glow.addColorStop(0, "#ffffff");
+    glow.addColorStop(0.7, "#ffffff");
+    glow.addColorStop(1, "rgba(255, 255, 255, 0.85)");
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    context.fillStyle = glow;
+    context.fill();
   };
   const draw = () => {
     context.clearRect(0, 0, innerWidth, innerHeight);
@@ -3774,19 +3803,13 @@ function snow(on) {
       if (!still && !document.hidden) {
         flake.y += flake.speed;
         flake.sway += 0.012;
-        flake.spin += 0.004;
-        flake.x += Math.sin(flake.sway) * 0.4;
+        flake.x += Math.sin(flake.sway) * 0.5;
         if (flake.y > innerHeight + 10) Object.assign(flake, { y: -10, x: Math.random() * innerWidth });
       }
-      context.globalAlpha = 0.35 + flake.r / 5;
-      if (flake.crystal) crystal(flake.x, flake.y, 3 + flake.r * 2.2, flake.spin);
-      else {
-        context.beginPath();
-        context.arc(flake.x, flake.y, flake.r, 0, Math.PI * 2);
-        context.fillStyle = "#ffffff";
-        context.fill();
-      }
+      context.globalAlpha = 0.75 + flake.r / 20;
+      puff(flake.x, flake.y, flake.r);
     }
+    context.globalAlpha = 1;
     if (!still) snowfall.frame = requestAnimationFrame(draw);
   };
   snowfall = {
@@ -3816,28 +3839,32 @@ function paintLights(svg) {
   window.gsap?.killTweensOf(svg.querySelectorAll(".bulb"));
   const width = Math.max(320, Math.round(svg.getBoundingClientRect().width || innerWidth));
   svg.setAttribute("viewBox", `0 0 ${width} 40`);
-  const spans = Math.max(3, Math.round(width / 110));
-  const step = width / spans;
+  // Pendurado à mão: cada barriga com largura e caimento diferentes (sempre os mesmos, para não mudar a cada tela).
+  let seed = 11;
+  const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
   let d = "M0 3";
-  for (let index = 0; index < spans; index += 1) d += ` Q${step * index + step / 2} 24 ${step * (index + 1)} 3`;
+  let x = 0;
+  while (x < width) {
+    const span = Math.min(width - x, 70 + random() * 110);
+    const sag = 8 + random() * 22;
+    const hook = 2 + random() * 4;
+    d += ` Q${x + span * (0.4 + random() * 0.2)} ${hook + sag * 2} ${x + span} ${hook}`;
+    x += span;
+  }
   const wire = xmasNode("path", { d, class: "wire" });
   svg.replaceChildren(wire);
-  const colors = ["#e50914", "#ffd23f", "#2fbf71", "#ff8c1a", "#3fa9ff"];
+  const colors = ["#ff3b45", "#ffd36b", "#ffffff", "#ffb347", "#ff8fa3"];
   const length = wire.getTotalLength();
-  const count = Math.round(length / 34);
+  const count = Math.round(length / 26);
   const gsap = matchMedia("(prefers-reduced-motion: reduce)").matches ? null : window.gsap;
   for (let index = 1; index < count; index += 1) {
     const point = wire.getPointAtLength((length * index) / count);
     const color = colors[index % colors.length];
-    const bulb = xmasNode("g", { class: "bulb", transform: `translate(${point.x.toFixed(1)} ${point.y.toFixed(1)})` });
+    // Só uma bolinha de luz, com o brilho em volta.
+    const bulb = xmasNode("circle", { class: "bulb", cx: point.x.toFixed(1), cy: (point.y + 1.5).toFixed(1), r: 2.6, fill: color });
     bulb.style.setProperty("--glow", color);
-    bulb.append(
-      xmasNode("rect", { x: -2.2, y: -1, width: 4.4, height: 4, rx: 1, fill: "#3b3b3b" }),
-      xmasNode("path", { d: "M0 3c-3.6 0-4.6 4.4-4.2 7 .4 2.8 2.2 4.6 4.2 4.6s3.8-1.8 4.2-4.6c.4-2.6-.6-7-4.2-7z", fill: color }),
-      xmasNode("ellipse", { cx: -1.4, cy: 7.2, rx: 1, ry: 2, fill: "#ffffff", opacity: 0.55 })
-    );
     svg.append(bulb);
-    if (gsap) gsap.fromTo(bulb, { opacity: 0.35 }, { opacity: 1, duration: 0.5 + Math.random() * 0.8, ease: "sine.inOut", yoyo: true, repeat: -1, delay: Math.random() * 1.5 });
+    if (gsap) gsap.fromTo(bulb, { opacity: 0.3 }, { opacity: 1, duration: 0.8 + random() * 1.2, ease: "sine.inOut", yoyo: true, repeat: -1, delay: random() * 2 });
   }
 }
 
@@ -3862,16 +3889,32 @@ function xmasTree() {
   return svg;
 }
 
-// A neve acumulada no pé da conversa: um monte ondulado que sobe devagar (GSAP).
+// A neve acumulada no pé do site, de desenho animado: bolotas gordinhas lado a lado (refeitas na largura da tela), a
+// sombra azulada embaixo e o brilho em cima. Sobe devagar (GSAP).
 function xmasDrift() {
-  const svg = xmasNode("svg", { class: "xmas-drift", viewBox: "0 0 1000 60", preserveAspectRatio: "none", "aria-hidden": "true" });
+  const svg = xmasNode("svg", { class: "xmas-drift", viewBox: "0 0 1000 70", preserveAspectRatio: "none", "aria-hidden": "true" });
   const fill = xmasNode("g", { class: "drift-fill" });
+  let bumps = "M0 70V40";
+  let shine = "";
+  let x = 0;
+  let seed = 3;
+  const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  while (x < 1000) {
+    const width = 70 + random() * 90;
+    const top = 8 + random() * 18;
+    bumps += ` C${x + width * 0.15} ${top} ${x + width * 0.85} ${top} ${x + width} 40`;
+    shine += `M${x + width * 0.3} ${top + 10}Q${x + width * 0.5} ${top + 4} ${x + width * 0.68} ${top + 9}`;
+    x += width;
+  }
+  bumps += " V70z";
   fill.append(
-    xmasNode("path", { d: "M0 60V34C60 22 110 30 170 26s120-16 190-8 110 18 180 12 120-22 200-16 120 20 260 10V60z", fill: "#ffffff", opacity: 0.5 }),
-    xmasNode("path", { d: "M0 60V42c80-10 150 0 230-6s140-14 230-4 160 12 250 2 180-8 290 4V60z", fill: "#ffffff", opacity: 0.92 })
+    xmasNode("path", { d: bumps, fill: "#c9d9ff", transform: "translate(0 6)" }),
+    xmasNode("path", { d: bumps, fill: "#ffffff" }),
+    xmasNode("path", { d: shine, fill: "none", stroke: "#ffffff", "stroke-width": 4, "stroke-linecap": "round", opacity: 0.9 }),
+    xmasNode("path", { d: "M0 62H1000V70H0z", fill: "#dde7ff" })
   );
   svg.append(fill);
-  ($(".messages-wrap") || document.body).append(svg);
+  document.body.append(svg);
   return svg;
 }
 
@@ -7236,7 +7279,7 @@ window.addEventListener("online", () => call?.recovery?.request());
 
 const usView = $("#us-view");
 const usScroll = $("#us-scroll");
-const US_SECTIONS = ["hoje", "agenda", "sonhos", "cartinhas", "jogos"];
+const US_SECTIONS = ["hoje", "agenda", "sonhos", "nos", "cartinhas", "jogos"];
 const US_SECTION_KEY = "potato.usSection";
 const MEALS = [["cafe", "coffee", "Café da manhã", "Pão, café, fruta…"], ["almoco", "utensils", "Almoço", "Arroz, feijão, bife…"], ["lanche", "cookie", "Lanche", "Bolo, biscoito, açaí…"], ["jantar", "soup", "Jantar", "Sopa, pizza, lanche…"]];
 const MEAL_INFO = Object.fromEntries(MEALS.map(([key, iconName, label, hint]) => [key, { icon: iconName, label, hint }]));
@@ -7407,6 +7450,10 @@ function applyUs(change) {
         fx.confetti();
       }
       break;
+    case "nos":
+      loadNos();
+      if (theirs && change.action === "drawing") usNotice(`${change.by} fez um desenho para vocês`, "pencil", { push: true });
+      return;
     case "letter":
       if (change.deleted) us.letters = us.letters.filter((letter) => letter.id !== change.id);
       else upsert(us.letters, change.item);
@@ -7444,7 +7491,7 @@ function usNotice(text, iconName, { push = false, count = true } = {}) {
 }
 
 const unreadLetters = () => us.letters.filter((letter) => letter.owner !== me && !letter.readAt).length;
-const US_TITLES = { hoje: ["sun", "Rotina do dia"], agenda: ["calendar", "Agenda"], sonhos: ["sparkles", "Sonhos e metas"], cartinhas: ["mail", "Cartinhas"], jogos: ["dice", "Jogos"] };
+const US_TITLES = { hoje: ["sun", "Rotina do dia"], agenda: ["calendar", "Agenda"], sonhos: ["sparkles", "Sonhos e metas"], nos: ["heart", "Nós"], cartinhas: ["mail", "Cartinhas"], jogos: ["dice", "Jogos"] };
 
 // Os números do menu: cartinhas novas e partidas esperando a sua jogada. No celular, o botão do menu ganha um
 // pontinho quando tem novidade lá dentro (também as da outra pessoa no dia, na agenda e nos sonhos).
@@ -7525,7 +7572,7 @@ function paintUs() {
   $("#us-title-text").textContent = title;
   usView.querySelectorAll("[data-pane]").forEach((pane) => pane.classList.toggle("hidden", pane.dataset.pane !== us.section));
   paintTabs();
-  ({ hoje: paintToday, agenda: paintAgenda, sonhos: paintGoals, cartinhas: paintLetters, jogos: paintGames })[us.section]();
+  ({ hoje: paintToday, agenda: paintAgenda, sonhos: paintGoals, nos: paintNos, cartinhas: paintLetters, jogos: paintGames })[us.section]();
   if (us.section === "jogos") loadScore();
 }
 
@@ -8634,6 +8681,684 @@ usView.querySelector('[data-pane="sonhos"]').addEventListener("click", (event) =
   else if (action === "deposit") depositGoal(goal);
   else if (action === "done" || action === "undo") finishGoal(goal, action === "done");
 });
+
+// ---- nós: os widgets do casal (como os da tela inicial do celular) e os desenhos ----
+// Dias juntos (desde a primeira mensagem) com o último desenho; a distância entre os dois (da localização de cada
+// celular: o servidor guarda arredondada e só devolve os km) com o recadinho de cada um; as contagens (a viagem e os
+// próximos compromissos). Os mesmos dados vão para os widgets do Android (api.php?action=widget).
+
+const nos = { loaded: false, since: null, distance: null, people: {}, drawings: [], located: false };
+const LOCATION_KEY = "potato.locatedAt";
+
+async function loadNos() {
+  const result = await usCall({ op: "nos" }, { quiet: true });
+  if (result) applyNos(result);
+  // Uma vez por hora (com a permissão já dada), a localização daqui é atualizada sem perguntar nada.
+  const last = Number(store.get("localStorage", LOCATION_KEY) || 0);
+  if (Date.now() - last > 3600000 && navigator.permissions) {
+    navigator.permissions.query({ name: "geolocation" }).then((state) => { if (state.state === "granted") locateMe(true); }).catch(() => {});
+  }
+}
+
+function applyNos(state) {
+  Object.assign(nos, { loaded: true, since: state.since, distance: state.distance, people: state.people || {}, drawings: state.drawings || [] });
+  if (tab === "us" && us.section === "nos") paintNos();
+}
+
+function locateMe(quiet = false) {
+  if (!navigator.geolocation) return quiet || toast("Este aparelho não dá a localização.", "error");
+  navigator.geolocation.getCurrentPosition(async ({ coords }) => {
+    store.set("localStorage", LOCATION_KEY, Date.now());
+    const result = await usCall({ op: "place:save", lat: coords.latitude, lon: coords.longitude }, { quiet });
+    if (result) applyNos(result);
+    if (result && !quiet) toast("Localização atualizada", "ok", "map-pin");
+  }, () => quiet || toast("Sem permissão para a localização. Libere nas configurações do navegador ou do app.", "error"), { enableHighAccuracy: false, timeout: 15000, maximumAge: 600000 });
+}
+
+const daysTogether = () => (nos.since ? Math.max(1, daysSince(nos.since)) : 0);
+const spanLabel = (ms) => {
+  const hours = Math.max(0, Math.floor(ms / 3600000));
+  const days = Math.floor(hours / 24);
+  if (days >= 30) return `${Math.floor(days / 30)} ${days >= 60 ? "meses" : "mês"}, ${days % 30} d`;
+  return days ? `${days} ${days === 1 ? "dia" : "dias"}, ${hours % 24} h` : `${hours} h`;
+};
+
+function faces() {
+  const box = el("div", "w-faces");
+  for (const name of [me, peerName].filter(Boolean)) {
+    const face = el("span", "avatar w-face");
+    paintAvatar(face, name);
+    box.append(face);
+  }
+  return box;
+}
+
+function paintNos() {
+  if (!nos.loaded) loadNos();
+  const wrap = $("#nos-widgets");
+  wrap.replaceChildren(togetherWidget(), distanceWidget(), upcomingWidget());
+  $("#drawing-list").replaceChildren(...(nos.drawings.length ? nos.drawings.map((drawing) => {
+    const card = el("button", "drawing-card");
+    card.type = "button";
+    card.dataset.drawing = drawing.id;
+    const image = el("img");
+    image.src = drawing.url;
+    image.alt = drawing.title || "Desenho";
+    image.loading = "lazy";
+    card.append(image, el("span", "", `${drawing.title || "Sem nome"} · ${who(drawing.owner)}`));
+    return card;
+  }) : [emptyNote("Nenhum desenho ainda. Que tal o primeiro?")]));
+}
+
+function togetherWidget() {
+  const card = el("article", "widget w-together");
+  const left = el("div", "w-together-left");
+  const days = daysTogether();
+  left.append(faces(), el("strong", "w-big", nos.since ? `${days.toLocaleString("pt-BR")} ${days === 1 ? "dia" : "dias"}` : "—"), el("small", "w-sub", "juntos"));
+  const latest = nos.drawings[0];
+  const art = el("button", `w-art${latest ? "" : " empty"}`);
+  art.type = "button";
+  art.dataset.nosDraw = latest ? latest.id : "new";
+  art.title = latest ? "Ver o desenho" : "Fazer um desenho";
+  if (latest) {
+    const image = el("img");
+    image.src = latest.url;
+    image.alt = latest.title || "Desenho";
+    art.append(image, el("span", "w-caption", latest.title || `de ${who(latest.owner)}`));
+  } else {
+    art.append(icon("pencil"), el("span", "w-caption", "Desenhar"));
+  }
+  card.append(left, art);
+  return card;
+}
+
+// O mapa: ruas desenhadas aqui (sempre as mesmas para o casal), as duas fotos nas pontas do arco e os km no meio.
+function distanceWidget() {
+  const card = el("article", "widget w-distance");
+  const svg = xmasNode("svg", { class: "w-map", viewBox: "0 0 340 150", preserveAspectRatio: "xMidYMid slice", "aria-hidden": "true" });
+  let seed = 7;
+  const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let index = 0; index < 26; index += 1) {
+    const x = random() * 340;
+    const y = random() * 150;
+    const horizontal = random() > 0.5;
+    const d = horizontal ? `M${x - 160} ${y}Q${x} ${y + (random() - 0.5) * 40} ${x + 160} ${y + (random() - 0.5) * 30}` : `M${x} ${y - 90}Q${x + (random() - 0.5) * 40} ${y} ${x + (random() - 0.5) * 30} ${y + 90}`;
+    svg.append(xmasNode("path", { d, class: index % 5 === 0 ? "road big" : "road" }));
+  }
+  svg.append(xmasNode("path", { d: "M46 112C110 46 230 40 296 96", class: "w-route" }));
+  card.append(svg);
+  const pill = el("span", "w-km", nos.distance === null ? "?" : `${nos.distance.toLocaleString("pt-BR")} km`);
+  card.append(pill);
+  const person = (name, side) => {
+    const spot = el("div", `w-person ${side}`);
+    const face = el("span", "avatar w-face big");
+    paintAvatar(face, name);
+    const info = nos.people[name] || {};
+    const note = el(name === me ? "button" : "span", `w-note${info.note ? "" : " empty"}`, info.note || (name === me ? "Escrever um recadinho" : "…"));
+    if (name === me) {
+      note.type = "button";
+      note.dataset.nosNote = "";
+    }
+    spot.append(note, face);
+    return spot;
+  };
+  if (peerName) card.append(person(me, "left"), person(peerName, "right"));
+  const mine = nos.people[me];
+  if (!mine?.located || !nos.people[peerName]?.located) {
+    const ask = el("button", "w-locate", mine?.located ? `Esperando a localização de ${peerName || "a outra pessoa"}` : "Ativar a minha localização");
+    ask.type = "button";
+    ask.dataset.nosLocate = "";
+    ask.disabled = Boolean(mine?.located);
+    card.append(ask);
+  }
+  return card;
+}
+
+function upcomingWidget() {
+  const card = el("article", "widget w-upcoming");
+  card.append(el("small", "w-label", "Próximos"));
+  const rows = [];
+  const target = countdownTarget();
+  if (target && target > Date.now()) rows.push(["plane", countdown.label, spanLabel(target - Date.now())]);
+  const today = todayKey();
+  for (let offset = 0; offset < 180 && rows.length < 4; offset += 1) {
+    const day = shiftDay(today, offset);
+    for (const event of shownOn(day)) {
+      if (rows.length >= 4 || isPast(event, day)) continue;
+      const [year, month, date] = day.split("-").map(Number);
+      const [hour, minute] = (event.time || "00:00").split(":").map(Number);
+      rows.push([event.icon || "calendar", event.title, spanLabel(new Date(year, month - 1, date, hour, minute) - Date.now())]);
+    }
+  }
+  if (!rows.length) rows.push(["calendar", "Nada marcado ainda", ""]);
+  for (const [iconName, title, left] of rows) {
+    const row = el("div", "w-row");
+    row.append(icon(iconName), el("span", "w-row-title", title), el("span", "w-row-left", left));
+    card.append(row);
+  }
+  return card;
+}
+
+usView.addEventListener("click", (event) => {
+  if (us.section !== "nos") return;
+  if (event.target.closest("[data-nos-locate]")) return locateMe();
+  if (event.target.closest("[data-nos-note]")) {
+    return openSheet({
+      title: "Recadinho do widget",
+      icon: "heart",
+      fields: [{ name: "note", type: "text", label: "Aparece em cima da sua foto no mapa", value: nos.people[me]?.note || "", placeholder: "saudade demais", max: 40, focus: true }],
+      onSubmit: async ({ note }) => {
+        const result = await usCall({ op: "place:save", note });
+        if (result) applyNos(result);
+        return Boolean(result);
+      }
+    });
+  }
+  if (event.target.closest("#drawing-new")) return openDraw();
+  const pick = event.target.closest("[data-nos-draw], [data-drawing]");
+  if (!pick) return;
+  const id = pick.dataset.nosDraw || pick.dataset.drawing;
+  if (id === "new") return openDraw();
+  const drawing = nos.drawings.find((item) => item.id === id);
+  if (drawing) showDrawing(drawing);
+});
+
+// O desenho grande: ver, desenhar por cima (abre uma cópia no editor), baixar ou apagar (quem desenhou).
+function showDrawing(drawing) {
+  openSheet({
+    title: drawing.title || "Desenho",
+    icon: "pencil",
+    wide: true,
+    submit: "Desenhar por cima",
+    cancel: "Fechar",
+    fields: [{ name: "view", type: "info", text: "" }],
+    onDelete: drawing.owner === me ? async () => {
+      const result = await usCall({ op: "drawing:delete", id: drawing.id });
+      if (result) applyNos(result);
+      return Boolean(result);
+    } : null,
+    onSubmit: async () => {
+      setTimeout(() => openDraw(drawing), 0);
+      return true;
+    }
+  });
+  const image = el("img", "drawing-big");
+  image.src = drawing.url;
+  image.alt = drawing.title || "Desenho";
+  sheetForm.querySelector('[data-field="view"]').replaceChildren(image, el("small", "drawing-by", `de ${who(drawing.owner)} · ${longDate(drawing.createdAt)}`));
+}
+
+// ---- editor de desenho (como num programa de pintura) ----
+// Camadas (cada uma um canvas, com nome, visível ou não, opacidade e modo de mistura), uma imagem de referência por
+// baixo para contornar (com a transparência dela e sem ir para o desenho salvo, se quiser), pincéis (caneta, lápis,
+// marcador, aerógrafo e caligrafia) com tamanho, opacidade e cor, borracha, balde de tinta e conta-gotas, desfazer e
+// refazer. O traço é feito numa camada de rascunho e entra na camada escolhida ao soltar, com a opacidade do pincel.
+
+const DRAW_SIZE = 1080;
+const DRAW_BRUSHES = [["caneta", "Caneta"], ["lapis", "Lápis"], ["marcador", "Marcador"], ["aerografo", "Aerógrafo"], ["caligrafia", "Caligrafia"]];
+const DRAW_BLENDS = [["source-over", "Normal"], ["multiply", "Multiplicar"], ["overlay", "Sobrepor"], ["screen", "Clarear"], ["darken", "Escurecer"]];
+const DRAW_SWATCHES = ["#141414", "#ffffff", "#e50914", "#ff8c1a", "#ffd23f", "#2fbf71", "#3fa9ff", "#8b5cf6", "#ff7eb6", "#8a5a2b"];
+let draw = null;
+
+function drawLayer(name, fill = "") {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = DRAW_SIZE;
+  if (fill) {
+    const context = canvas.getContext("2d");
+    context.fillStyle = fill;
+    context.fillRect(0, 0, DRAW_SIZE, DRAW_SIZE);
+  }
+  return { id: uid(), name, canvas, visible: true, opacity: 1, blend: "source-over" };
+}
+
+async function openDraw(base = null) {
+  const layers = [drawLayer("Fundo", "#ffffff"), drawLayer("Camada 1")];
+  if (base) {
+    try {
+      const image = await new Promise((resolve, reject) => {
+        const node = new Image();
+        node.onload = () => resolve(node);
+        node.onerror = reject;
+        node.src = base.url;
+      });
+      layers[0].canvas.getContext("2d").drawImage(image, 0, 0, DRAW_SIZE, DRAW_SIZE);
+    } catch {
+      toast("Não deu para abrir esse desenho.", "error");
+    }
+  }
+  draw = {
+    layers, active: 1, tool: "brush", brush: "caneta", size: 12, opacity: 1, color: "#e50914",
+    reference: null, referenceOpacity: 0.5, referenceSave: false, undo: [], redo: [], stroke: null, title: base?.title ? `${base.title} (cópia)` : ""
+  };
+  $("#draw-view").classList.remove("hidden");
+  $("#draw-title").value = draw.title;
+  document.addEventListener("keydown", onDrawKey, true);
+  paintDrawTools();
+  paintDrawLayers();
+  composeDraw();
+  fx.incoming($("#draw-view .draw-shell"));
+}
+
+function closeDraw() {
+  draw = null;
+  $("#draw-view").classList.add("hidden");
+  document.removeEventListener("keydown", onDrawKey, true);
+}
+
+function onDrawKey(event) {
+  if (!draw || event.target.matches("input, textarea")) return;
+  const key = event.key.toLowerCase();
+  if (key === "escape") {
+    event.stopPropagation();
+    return closeDraw();
+  }
+  if ((event.ctrlKey || event.metaKey) && key === "z") {
+    event.preventDefault();
+    return event.shiftKey ? redoDraw() : undoDraw();
+  }
+  if ((event.ctrlKey || event.metaKey) && key === "y") {
+    event.preventDefault();
+    return redoDraw();
+  }
+  const tools = { b: "brush", e: "eraser", g: "fill", i: "picker" };
+  if (tools[key] && !event.ctrlKey && !event.metaKey) setDrawTool(tools[key]);
+  if (key === "[") setDrawSize(draw.size - 2);
+  if (key === "]") setDrawSize(draw.size + 2);
+}
+
+// O que aparece na tela: a referência por baixo e as camadas visíveis, cada uma com a opacidade e a mistura dela, mais o
+// traço em andamento por cima da camada escolhida.
+function composeDraw(target = $("#draw-canvas"), { forSave = false } = {}) {
+  const context = target.getContext("2d");
+  context.clearRect(0, 0, DRAW_SIZE, DRAW_SIZE);
+  if (draw.reference && (!forSave || draw.referenceSave)) {
+    context.globalAlpha = draw.referenceOpacity;
+    context.drawImage(draw.reference, 0, 0, DRAW_SIZE, DRAW_SIZE);
+  }
+  draw.layers.forEach((layer, index) => {
+    if (!layer.visible) return;
+    context.globalAlpha = layer.opacity;
+    context.globalCompositeOperation = layer.blend;
+    if (index === draw.active && draw.stroke && !forSave) {
+      // A camada com o traço por cima (borracha: o traço apaga).
+      const mix = draw.mix || (draw.mix = drawLayer("mix").canvas);
+      const mixContext = mix.getContext("2d");
+      mixContext.globalCompositeOperation = "source-over";
+      mixContext.globalAlpha = 1;
+      mixContext.clearRect(0, 0, DRAW_SIZE, DRAW_SIZE);
+      mixContext.drawImage(layer.canvas, 0, 0);
+      mixContext.globalAlpha = draw.opacity;
+      mixContext.globalCompositeOperation = draw.tool === "eraser" ? "destination-out" : "source-over";
+      mixContext.drawImage(draw.stroke.canvas, 0, 0);
+      context.drawImage(mix, 0, 0);
+    } else {
+      context.drawImage(layer.canvas, 0, 0);
+    }
+    context.globalCompositeOperation = "source-over";
+  });
+  context.globalAlpha = 1;
+}
+
+function pointOf(event) {
+  const rect = $("#draw-canvas").getBoundingClientRect();
+  return { x: ((event.clientX - rect.left) / rect.width) * DRAW_SIZE, y: ((event.clientY - rect.top) / rect.height) * DRAW_SIZE, pressure: event.pressure > 0 && event.pointerType === "pen" ? event.pressure : 0.6 };
+}
+
+function snapshot(index = draw.active) {
+  draw.undo.push({ index, data: draw.layers[index].canvas.getContext("2d").getImageData(0, 0, DRAW_SIZE, DRAW_SIZE) });
+  if (draw.undo.length > 30) draw.undo.shift();
+  draw.redo = [];
+}
+
+function undoDraw() {
+  const step = draw?.undo.pop();
+  if (!step || !draw.layers[step.index]) return;
+  const context = draw.layers[step.index].canvas.getContext("2d");
+  draw.redo.push({ index: step.index, data: context.getImageData(0, 0, DRAW_SIZE, DRAW_SIZE) });
+  context.putImageData(step.data, 0, 0);
+  composeDraw();
+  paintDrawLayers();
+}
+
+function redoDraw() {
+  const step = draw?.redo.pop();
+  if (!step || !draw.layers[step.index]) return;
+  const context = draw.layers[step.index].canvas.getContext("2d");
+  draw.undo.push({ index: step.index, data: context.getImageData(0, 0, DRAW_SIZE, DRAW_SIZE) });
+  context.putImageData(step.data, 0, 0);
+  composeDraw();
+  paintDrawLayers();
+}
+
+// Um pedaço do traço, do ponto anterior até este, no estilo do pincel (sempre opaco: a opacidade entra ao soltar).
+function paintSegment(context, from, to) {
+  const size = Math.max(1, draw.size * (0.4 + to.pressure));
+  context.strokeStyle = context.fillStyle = draw.tool === "eraser" ? "#000" : draw.color;
+  context.lineCap = context.lineJoin = "round";
+  const distance = Math.hypot(to.x - from.x, to.y - from.y);
+  switch (draw.tool === "eraser" ? "caneta" : draw.brush) {
+    case "lapis":
+      for (let step = 0; step <= distance; step += 1.5) {
+        const share = distance ? step / distance : 0;
+        const x = from.x + (to.x - from.x) * share;
+        const y = from.y + (to.y - from.y) * share;
+        for (let dot = 0; dot < 3; dot += 1) context.fillRect(x + (Math.random() - 0.5) * size * 0.5, y + (Math.random() - 0.5) * size * 0.5, 1.2, 1.2);
+      }
+      break;
+    case "marcador":
+      context.lineCap = "square";
+      context.lineWidth = size * 1.4;
+      context.beginPath();
+      context.moveTo(from.x, from.y);
+      context.lineTo(to.x, to.y);
+      context.stroke();
+      break;
+    case "aerografo":
+      for (let dot = 0; dot < size * 1.5; dot += 1) {
+        const angle = Math.random() * Math.PI * 2;
+        const radius = Math.random() * size * 1.4;
+        context.fillRect(to.x + Math.cos(angle) * radius, to.y + Math.sin(angle) * radius, 1.3, 1.3);
+      }
+      break;
+    case "caligrafia": {
+      // Pena chata a 45°: grossa num sentido, fina no outro.
+      const nib = size * 0.9;
+      const dx = Math.cos(Math.PI / 4) * nib;
+      const dy = Math.sin(Math.PI / 4) * nib;
+      context.beginPath();
+      context.moveTo(from.x - dx, from.y - dy);
+      context.lineTo(from.x + dx, from.y + dy);
+      context.lineTo(to.x + dx, to.y + dy);
+      context.lineTo(to.x - dx, to.y - dy);
+      context.closePath();
+      context.fill();
+      break;
+    }
+    default:
+      context.lineWidth = size;
+      context.beginPath();
+      context.moveTo(from.x, from.y);
+      context.lineTo(to.x, to.y);
+      context.stroke();
+  }
+}
+
+// Balde: pinta a área de cor parecida (tolerância 40) em volta do ponto, na camada escolhida.
+function floodFill(layer, point) {
+  const context = layer.canvas.getContext("2d");
+  const image = context.getImageData(0, 0, DRAW_SIZE, DRAW_SIZE);
+  const data = image.data;
+  const startX = Math.floor(point.x);
+  const startY = Math.floor(point.y);
+  if (startX < 0 || startY < 0 || startX >= DRAW_SIZE || startY >= DRAW_SIZE) return;
+  const at = (x, y) => (y * DRAW_SIZE + x) * 4;
+  const start = at(startX, startY);
+  const base = [data[start], data[start + 1], data[start + 2], data[start + 3]];
+  const color = [parseInt(draw.color.slice(1, 3), 16), parseInt(draw.color.slice(3, 5), 16), parseInt(draw.color.slice(5, 7), 16), Math.round(draw.opacity * 255)];
+  if (base.every((value, index) => Math.abs(value - color[index]) < 2)) return;
+  const near = (index) => Math.abs(data[index] - base[0]) + Math.abs(data[index + 1] - base[1]) + Math.abs(data[index + 2] - base[2]) + Math.abs(data[index + 3] - base[3]) <= 40 * 4;
+  const seen = new Uint8Array(DRAW_SIZE * DRAW_SIZE);
+  const stack = [[startX, startY]];
+  while (stack.length) {
+    const [x, y] = stack.pop();
+    let left = x;
+    while (left >= 0 && !seen[y * DRAW_SIZE + left] && near(at(left, y))) left -= 1;
+    left += 1;
+    let up = false;
+    let down = false;
+    for (let column = left; column < DRAW_SIZE && !seen[y * DRAW_SIZE + column] && near(at(column, y)); column += 1) {
+      seen[y * DRAW_SIZE + column] = 1;
+      data.set(color, at(column, y));
+      if (y > 0) {
+        const fits = !seen[(y - 1) * DRAW_SIZE + column] && near(at(column, y - 1));
+        if (fits && !up) stack.push([column, y - 1]);
+        up = fits;
+      }
+      if (y < DRAW_SIZE - 1) {
+        const fits = !seen[(y + 1) * DRAW_SIZE + column] && near(at(column, y + 1));
+        if (fits && !down) stack.push([column, y + 1]);
+        down = fits;
+      }
+    }
+  }
+  context.putImageData(image, 0, 0);
+}
+
+function pickColor(point) {
+  const probe = drawLayer("probe").canvas;
+  composeDraw(probe, { forSave: true });
+  const [r, g, b] = probe.getContext("2d").getImageData(Math.floor(point.x), Math.floor(point.y), 1, 1).data;
+  setDrawColor(`#${[r, g, b].map((value) => value.toString(16).padStart(2, "0")).join("")}`);
+  setDrawTool("brush");
+}
+
+const drawCanvas = $("#draw-canvas");
+drawCanvas.width = drawCanvas.height = DRAW_SIZE;
+drawCanvas.addEventListener("pointerdown", (event) => {
+  if (!draw || event.button > 0) return;
+  const layer = draw.layers[draw.active];
+  if (!layer?.visible) return toast("Essa camada está escondida.");
+  event.preventDefault();
+  drawCanvas.setPointerCapture(event.pointerId);
+  const point = pointOf(event);
+  if (draw.tool === "picker") return pickColor(point);
+  snapshot();
+  if (draw.tool === "fill") {
+    floodFill(layer, point);
+    composeDraw();
+    return paintDrawLayers();
+  }
+  const stroke = drawLayer("stroke");
+  draw.stroke = { canvas: stroke.canvas, last: point };
+  paintSegment(stroke.canvas.getContext("2d"), point, point);
+  composeDraw();
+});
+drawCanvas.addEventListener("pointermove", (event) => {
+  if (!draw?.stroke) return;
+  const events = event.getCoalescedEvents?.() || [event];
+  const context = draw.stroke.canvas.getContext("2d");
+  for (const item of events) {
+    const point = pointOf(item);
+    paintSegment(context, draw.stroke.last, point);
+    draw.stroke.last = point;
+  }
+  composeDraw();
+});
+const endStroke = () => {
+  if (!draw?.stroke) return;
+  const context = draw.layers[draw.active].canvas.getContext("2d");
+  context.globalAlpha = draw.opacity;
+  context.globalCompositeOperation = draw.tool === "eraser" ? "destination-out" : "source-over";
+  context.drawImage(draw.stroke.canvas, 0, 0);
+  context.globalAlpha = 1;
+  context.globalCompositeOperation = "source-over";
+  draw.stroke = null;
+  composeDraw();
+  paintDrawLayers();
+};
+drawCanvas.addEventListener("pointerup", endStroke);
+drawCanvas.addEventListener("pointercancel", endStroke);
+
+function setDrawTool(tool) {
+  draw.tool = tool;
+  paintDrawTools();
+}
+function setDrawSize(size) {
+  draw.size = Math.min(120, Math.max(1, Math.round(size)));
+  paintDrawTools();
+}
+function setDrawColor(color) {
+  draw.color = color;
+  paintDrawTools();
+}
+
+function paintDrawTools() {
+  document.querySelectorAll("[data-draw-tool]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.drawTool === draw.tool)));
+  $("#draw-brush").value = draw.brush;
+  $("#draw-size").value = draw.size;
+  $("#draw-size-value").textContent = `${draw.size} px`;
+  $("#draw-opacity").value = Math.round(draw.opacity * 100);
+  $("#draw-opacity-value").textContent = `${Math.round(draw.opacity * 100)}%`;
+  $("#draw-color").value = draw.color;
+  $("#draw-swatches").replaceChildren(...DRAW_SWATCHES.map((color) => {
+    const swatch = el("button", `draw-swatch${color === draw.color ? " on" : ""}`);
+    swatch.type = "button";
+    swatch.dataset.drawColor = color;
+    swatch.style.setProperty("--swatch", color);
+    swatch.setAttribute("aria-label", `Cor ${color}`);
+    return swatch;
+  }));
+  $("#draw-ref-row").classList.toggle("hidden", !draw.reference);
+  $("#draw-ref-opacity").value = Math.round(draw.referenceOpacity * 100);
+  $("#draw-ref-save").setAttribute("aria-pressed", String(draw.referenceSave));
+}
+
+// As camadas, de cima para baixo (como nos programas de pintura): miniatura, nome, olho, opacidade e mistura da escolhida.
+function paintDrawLayers() {
+  const list = $("#draw-layers");
+  list.replaceChildren(...draw.layers.map((layer, index) => {
+    const row = el("div", `draw-layer${index === draw.active ? " on" : ""}`);
+    row.dataset.drawLayer = String(index);
+    const thumb = document.createElement("canvas");
+    thumb.width = thumb.height = 44;
+    thumb.className = "draw-thumb";
+    thumb.getContext("2d").drawImage(layer.canvas, 0, 0, 44, 44);
+    const eye = el("button", `draw-eye${layer.visible ? "" : " off"}`);
+    eye.type = "button";
+    eye.dataset.drawEye = String(index);
+    eye.title = layer.visible ? "Esconder" : "Mostrar";
+    eye.append(icon(layer.visible ? "eye" : "eye-off"));
+    row.append(thumb, el("span", "draw-layer-name", layer.name), eye);
+    return row;
+  }).reverse());
+  const layer = draw.layers[draw.active];
+  $("#draw-layer-opacity").value = Math.round(layer.opacity * 100);
+  $("#draw-layer-blend").value = layer.blend;
+}
+
+$("#draw-view").addEventListener("click", async (event) => {
+  if (!draw) return;
+  const target = event.target;
+  if (target.closest("#draw-close")) return closeDraw();
+  if (target.closest("#draw-undo")) return undoDraw();
+  if (target.closest("#draw-redo")) return redoDraw();
+  const tool = target.closest("[data-draw-tool]");
+  if (tool) return setDrawTool(tool.dataset.drawTool);
+  const swatch = target.closest("[data-draw-color]");
+  if (swatch) return setDrawColor(swatch.dataset.drawColor);
+  const eye = target.closest("[data-draw-eye]");
+  if (eye) {
+    const layer = draw.layers[Number(eye.dataset.drawEye)];
+    layer.visible = !layer.visible;
+    composeDraw();
+    return paintDrawLayers();
+  }
+  const row = target.closest("[data-draw-layer]");
+  if (row) {
+    draw.active = Number(row.dataset.drawLayer);
+    return paintDrawLayers();
+  }
+  if (target.closest("#draw-layer-add")) {
+    if (draw.layers.length >= 12) return toast("Até 12 camadas.");
+    draw.layers.splice(draw.active + 1, 0, drawLayer(`Camada ${draw.layers.length}`));
+    draw.active += 1;
+    composeDraw();
+    return paintDrawLayers();
+  }
+  if (target.closest("#draw-layer-remove")) {
+    if (draw.layers.length <= 1) return toast("Precisa ficar pelo menos uma camada.");
+    draw.layers.splice(draw.active, 1);
+    draw.undo = draw.undo.filter((step) => step.index !== draw.active).map((step) => ({ ...step, index: step.index > draw.active ? step.index - 1 : step.index }));
+    draw.redo = [];
+    draw.active = Math.max(0, draw.active - 1);
+    composeDraw();
+    return paintDrawLayers();
+  }
+  const move = target.closest("[data-layer-move]");
+  if (move) {
+    const to = draw.active + Number(move.dataset.layerMove);
+    if (to < 0 || to >= draw.layers.length) return;
+    [draw.layers[draw.active], draw.layers[to]] = [draw.layers[to], draw.layers[draw.active]];
+    draw.undo = [];
+    draw.redo = [];
+    draw.active = to;
+    composeDraw();
+    return paintDrawLayers();
+  }
+  if (target.closest("#draw-ref-pick")) return $("#draw-ref-input").click();
+  if (target.closest("#draw-ref-clear")) {
+    draw.reference = null;
+    composeDraw();
+    return paintDrawTools();
+  }
+  if (target.closest("#draw-ref-save")) {
+    draw.referenceSave = !draw.referenceSave;
+    return paintDrawTools();
+  }
+  if (target.closest("#draw-save")) return saveDraw();
+});
+
+$("#draw-view").addEventListener("input", (event) => {
+  if (!draw) return;
+  const target = event.target;
+  if (target.id === "draw-brush") draw.brush = target.value;
+  if (target.id === "draw-size") draw.size = Number(target.value);
+  if (target.id === "draw-opacity") draw.opacity = Number(target.value) / 100;
+  if (target.id === "draw-color") draw.color = target.value;
+  if (target.id === "draw-title") draw.title = target.value;
+  if (target.id === "draw-ref-opacity") {
+    draw.referenceOpacity = Number(target.value) / 100;
+    composeDraw();
+  }
+  if (target.id === "draw-layer-opacity") {
+    draw.layers[draw.active].opacity = Number(target.value) / 100;
+    composeDraw();
+  }
+  if (target.id === "draw-layer-blend") {
+    draw.layers[draw.active].blend = target.value;
+    composeDraw();
+  }
+  if (target.id !== "draw-title") paintDrawTools();
+});
+
+$("#draw-ref-input").addEventListener("change", async () => {
+  const [file] = $("#draw-ref-input").files;
+  $("#draw-ref-input").value = "";
+  if (!file || !draw) return;
+  try {
+    draw.reference = await readImage(file);
+    draw.referenceOpacity = 0.5;
+    composeDraw();
+    paintDrawTools();
+    toast("Imagem por baixo: desenhe numa camada por cima para contornar.", "info", "image");
+  } catch (error) {
+    toast(error.message, "error");
+  }
+});
+
+// Salvar: junta as camadas visíveis (a referência só se estiver marcada) num PNG, sobe e entra na galeria dos dois.
+async function saveDraw() {
+  const button = $("#draw-save");
+  if (button.disabled) return;
+  button.disabled = true;
+  try {
+    const flat = drawLayer("flat").canvas;
+    composeDraw(flat, { forSave: true });
+    const blob = await new Promise((resolve) => flat.toBlob(resolve, "image/png"));
+    if (!blob) throw new Error("Não deu para gerar a imagem.");
+    const uploaded = await uploadBlob(new File([blob], "desenho.png", { type: "image/png" }), "desenho.png", "O desenho não subiu. Tente de novo.");
+    const result = await usCall({ op: "drawing:save", key: uploaded.key, title: draw.title.trim() });
+    if (!result) return;
+    applyNos(result);
+    toast("Desenho salvo para os dois", "ok", "pencil");
+    sound.play("sparkle");
+    closeDraw();
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
 
 // ---- cartinhas ----
 

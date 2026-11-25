@@ -147,7 +147,7 @@
   --field: #00000066; --field-line: #ffffff1f; --glass: #14141499; --backdrop: #000000c2;
   --stage-1: #1c1c1c; --stage-2: #0a0a0a; --tile: #1f1f1f;
 }
-.snow { position: fixed; inset: 0; z-index: 80; width: 100%; height: 100%; pointer-events: none; }
+.snow { position: fixed; inset: 0; z-index: 45; width: 100%; height: 100%; pointer-events: none; }
 /* O gorro: em toda foto de perfil (a especificidade dupla vence o anel da conversa aberta, que usa o mesmo ::before). */
 :root[data-theme="natal"] .avatar.avatar::before {
   content: ""; position: absolute; inset: auto; top: -44%; left: 16%; z-index: 2; width: 82%; height: 74%;
@@ -157,14 +157,17 @@
 /* O pisca-pisca pendurado embaixo do topo (o SVG do app.js), com o brilho de cada lâmpada na cor dela. */
 :root[data-theme="natal"] .topbar { position: relative; }
 .xmas-lights { position: absolute; left: 0; right: 0; top: 100%; z-index: 4; width: 100%; height: 40px; margin-top: -6px; overflow: visible; pointer-events: none; }
-.xmas-lights .wire { fill: none; stroke: #2b2b2b; stroke-width: 1.6; }
-.xmas-lights .bulb { filter: drop-shadow(0 0 5px var(--glow)) drop-shadow(0 0 10px var(--glow)); }
+.xmas-lights .wire { fill: none; stroke: #ffffff24; stroke-width: 1; }
+.xmas-lights .bulb { filter: drop-shadow(0 0 3px var(--glow)) drop-shadow(0 0 8px var(--glow)); }
 /* A árvore no canto da conversa e a neve acumulando no pé (por cima das mensagens, sem pegar os toques). */
 .xmas-tree { position: absolute; right: max(14px, calc((100% - 900px) / 2)); bottom: 4px; z-index: 3; width: clamp(70px, 9vw, 110px); height: auto; pointer-events: none; filter: drop-shadow(0 10px 18px #000a); }
 .xmas-tree .ornament { filter: drop-shadow(0 0 3px currentColor); }
-.xmas-drift { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; width: 100%; height: 34px; pointer-events: none; filter: drop-shadow(0 -2px 6px #ffffff33); }
-@media (max-width: 760px) { .xmas-tree { width: 64px; right: 10px; } .xmas-drift { height: 24px; } }
+.xmas-drift { position: fixed; left: 0; right: 0; bottom: -6px; z-index: 44; width: 100%; height: 44px; pointer-events: none; filter: drop-shadow(0 -3px 8px #ffffff40); }
+@media (max-width: 760px) { .xmas-tree { display: none; } .xmas-drift { height: 30px; } }
 .in-call :is(.xmas-tree, .xmas-drift), .watching :is(.xmas-tree, .xmas-drift, .xmas-lights) { display: none; }
+/* A neve acumulada fica no pé do site: o campo de mensagem e o pé da barra lateral sobem um pouco para não ficarem por baixo dela. */
+:root[data-theme="natal"] :is(.conversation, .sidebar) { padding-bottom: 26px; }
+@media (max-width: 760px) { :root[data-theme="natal"] :is(.conversation, .sidebar) { padding-bottom: 18px; } }
 
 /* No tema claro a chamada continua escura (vídeo fica melhor assim), com as cores do tema escuro. */
 :root[data-theme="claro"] .call-panel {
@@ -1244,24 +1247,6 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
 
 .attach-icon.watch { background: linear-gradient(140deg, #ffb35c, #f0576b); }
 .attach-icon.games { background: linear-gradient(140deg, #5ee0a0, #2f8fe0); }
-/* Contagem regressiva: uma faixa fina embaixo do topo da conversa (some na chamada e na Watch Party). */
-.countdown { flex: none; display: flex; align-items: center; justify-content: center; gap: 6px; margin: 10px max(14px, calc((100% - 760px) / 2)) 0; padding: 4px 6px 4px 18px; border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); border-radius: 999px; background: linear-gradient(100deg, color-mix(in srgb, var(--accent) 22%, var(--surface)), color-mix(in srgb, var(--accent-3) 14%, var(--surface))); color: var(--ink); box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 18%, transparent); text-align: left; transition: transform .2s, box-shadow .2s; }
-.countdown:hover { transform: translateY(-1px); box-shadow: 0 10px 28px color-mix(in srgb, var(--accent) 28%, transparent); }
-.countdown.hidden, .in-call .countdown, .watching .countdown { display: none; }
-:root[data-theme="natal"] .messages { padding-bottom: 44px; }
-.countdown-icon { display: grid; color: var(--accent); animation: countdown-fly 3s ease-in-out infinite; }
-.countdown-icon .icon { width: 22px; height: 22px; }
-.countdown-text { display: grid; min-width: 0; }
-.countdown-text small { overflow: hidden; color: var(--muted); font-size: 11.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.countdown-text strong { font-size: 15px; font-variant-numeric: tabular-nums; letter-spacing: .01em; background: var(--title); -webkit-background-clip: text; background-clip: text; color: transparent; }
-.countdown.today { border-color: #ff7eb6; }
-.countdown.today .countdown-icon { animation: none; }
-@keyframes countdown-fly { 50% { transform: translate(3px, -3px) rotate(-6deg); } }
-@media (max-width: 760px) { .countdown { margin: 8px 10px 0; padding: 6px 14px; } .countdown-text strong { font-size: 14px; } }
-.countdown-main { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 12px; padding: 4px 0; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
-.countdown-edit { flex: none; width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--muted); opacity: .6; transition: opacity .2s, background .2s; }
-.countdown-edit:hover { opacity: 1; background: var(--hover); }
-.countdown-edit .icon { width: 14px; height: 14px; }
 /* A viagem: o mapa escuro, a rota tracejada, o rastro que se desenha atrás do avião e a contagem grande. */
 .trip { position: fixed; inset: 0; z-index: 90; display: grid; place-content: center; justify-items: center; gap: 18px; padding: 24px; background: radial-gradient(120% 90% at 50% 30%, #1d1d1d, #0a0a0a 70%); color: #fff; cursor: pointer; }
 .trip-map { width: min(92vw, 820px); height: auto; overflow: visible; }
@@ -2789,3 +2774,124 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
   .rec-dot, .rec-slide .icon, .rec-lock .icon, .rec-pill, .rec-stop::before, .recording .mic, .typing-mic, .voice-play.loading::after, .letter-flag.new, .spicy-flame, .countdown-icon, .sticker-grid.editing .sticker-item { animation: none !important; }
   .sidebar, .menu-backdrop { transition: none !important; }
 }
+
+/* ---------- Nós: os widgets do casal (como os da tela inicial do celular) ---------- */
+.nos-widgets { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-bottom: 26px; }
+.widget { position: relative; min-height: 168px; overflow: hidden; border-radius: 28px; box-shadow: 0 18px 40px #0007, inset 0 1px 0 #ffffff1a; isolation: isolate; color: #fff; }
+.w-faces { display: flex; }
+.w-face { width: 52px; height: 52px; border: 3px solid #ffffffd9; font-size: 18px; box-shadow: 0 6px 16px #0006; }
+.w-face + .w-face { margin-left: -12px; }
+.avatar.w-face::after, .avatar.avatar.w-face::before { display: none; }
+.w-face.big { width: 62px; height: 62px; }
+/* Dias juntos: vidro escuro, as duas fotos, o número grande e o último desenho ao lado. */
+.w-together { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 14px; background: radial-gradient(120% 120% at 0% 0%, #3a1f2e, #1a1016 70%); }
+.w-together-left { display: grid; place-content: center; justify-items: center; gap: 6px; text-align: center; }
+.w-big { margin-top: 6px; font-size: 26px; font-weight: 800; letter-spacing: -.03em; line-height: 1; }
+.w-sub { color: #ffffffb3; font-size: 13px; font-weight: 600; }
+.w-art { position: relative; display: grid; place-items: center; padding: 0; overflow: hidden; border: 0; border-radius: 20px; background: #ffffff14; color: #ffffffcc; cursor: pointer; transition: transform .25s; }
+.w-art:hover { transform: scale(1.02); }
+.w-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.w-art.empty { gap: 6px; border: 2px dashed #ffffff33; }
+.w-art.empty .icon { width: 26px; height: 26px; }
+.w-caption { position: absolute; left: 8px; right: 8px; bottom: 8px; overflow: hidden; color: #fff; font-size: 12px; font-weight: 700; text-align: left; text-overflow: ellipsis; white-space: nowrap; text-shadow: 0 1px 6px #000c; }
+.w-art.empty .w-caption { position: static; text-align: center; text-shadow: none; }
+/* Distância: o mapa azul-noite, o arco tracejado entre as fotos e os km no meio. */
+.w-distance { min-height: 190px; background: #101a3a; }
+.w-map { position: absolute; inset: 0; z-index: -1; width: 100%; height: 100%; }
+.w-map .road { fill: none; stroke: #2a3a73; stroke-width: 1.4; }
+.w-map .road.big { stroke: #3a4f96; stroke-width: 3; }
+.w-map .w-route { fill: none; stroke: #ffffffd9; stroke-width: 2.4; stroke-dasharray: 3 7; stroke-linecap: round; }
+.w-km { position: absolute; left: 50%; top: 14px; translate: -50% 0; padding: 5px 12px; border-radius: 999px; background: #fff; color: #141414; font-size: 13px; font-weight: 800; box-shadow: 0 6px 16px #0006; }
+.w-person { position: absolute; display: grid; justify-items: center; gap: 6px; }
+.w-person.left { left: 14px; bottom: 12px; justify-items: start; }
+.w-person.right { right: 14px; bottom: 34px; justify-items: end; }
+.w-note { max-width: 150px; padding: 5px 11px; overflow: hidden; border: 0; border-radius: 999px; background: #fff; color: #141414; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; box-shadow: 0 4px 12px #0005; }
+button.w-note { cursor: pointer; }
+.w-note.empty { color: #6b6b6b; }
+.w-locate { position: absolute; left: 50%; bottom: 10px; translate: -50% 0; z-index: 2; padding: 7px 14px; border: 0; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: 12px; font-weight: 700; white-space: nowrap; box-shadow: 0 6px 16px #0006; }
+.w-locate:disabled { background: #ffffff26; color: #fff; cursor: default; }
+/* Contagens: o cartão claro e iridescente, como o da imagem. */
+.w-upcoming { display: grid; align-content: start; gap: 10px; padding: 18px 20px; background: linear-gradient(135deg, #fdf2f8, #e9e4ff 45%, #e2f4ff); color: #1d1d1f; }
+.w-label { color: #6e6e73; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.w-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 10px; font-size: 14.5px; }
+.w-row .icon { width: 18px; height: 18px; color: #3a5bd9; }
+.w-row-title { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.w-row-left { color: #6e6e73; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+/* A galeria de desenhos. */
+.nos-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.drawing-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.drawing-card { display: grid; gap: 6px; padding: 6px; border: 0; border-radius: 18px; background: var(--surface-2); color: var(--muted); font-size: 12px; font-weight: 600; text-align: left; transition: transform .2s; }
+.drawing-card:hover { transform: translateY(-2px); }
+.drawing-card img { width: 100%; aspect-ratio: 1; border-radius: 13px; object-fit: cover; background: #fff; }
+.drawing-big { display: block; width: 100%; max-height: 62vh; border-radius: 16px; object-fit: contain; background: #fff; }
+.drawing-by { display: block; margin-top: 8px; color: var(--muted); }
+
+/* ---------- editor de desenho ---------- */
+.draw-view { position: fixed; inset: 0; z-index: 70; isolation: isolate; display: grid; background: #0b0b0b; color: #e5e5e5; }
+.draw-view.hidden { display: none; }
+.draw-shell { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100vh; height: 100dvh; }
+.draw-top { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid #ffffff14; background: #141414; }
+.draw-top .peer-close { position: static; }
+.draw-title { flex: 1; max-width: 320px; }
+.draw-top .pill { margin-left: auto; }
+.draw-top .rich-button { color: #e5e5e5; }
+.draw-body { display: grid; grid-template-columns: 56px minmax(0, 1fr) 290px; min-height: 0; }
+.draw-tools { display: grid; align-content: start; gap: 6px; padding: 10px 8px; border-right: 1px solid #ffffff14; background: #141414; }
+.draw-tools button { width: 40px; height: 40px; display: grid; place-items: center; border: 0; border-radius: 10px; background: transparent; color: #b3b3b3; }
+.draw-tools button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.draw-tools .icon { width: 19px; height: 19px; }
+.draw-stage { display: grid; place-items: center; min-width: 0; min-height: 0; padding: 16px; background: repeating-conic-gradient(#1a1a1a 0 25%, #151515 0 50%) 0 0 / 24px 24px; }
+.draw-canvas { width: min(100%, calc(100dvh - 110px)); aspect-ratio: 1; border-radius: 6px; box-shadow: 0 20px 60px #000c; touch-action: none; cursor: crosshair; }
+.draw-panel { display: grid; align-content: start; gap: 18px; padding: 14px; overflow-y: auto; border-left: 1px solid #ffffff14; background: #141414; }
+.draw-group { display: grid; gap: 10px; }
+.draw-group h4 { margin: 0; color: #808080; font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.draw-slider { display: grid; gap: 4px; font-size: 12.5px; }
+.draw-slider span { display: flex; justify-content: space-between; }
+.draw-slider input { width: 100%; accent-color: var(--accent); }
+.draw-colors { display: flex; align-items: center; gap: 8px; }
+.draw-colors input[type="color"] { width: 40px; height: 40px; padding: 0; border: 0; border-radius: 10px; background: none; }
+.draw-swatches { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; flex: 1; }
+.draw-swatch { aspect-ratio: 1; border: 2px solid #ffffff26; border-radius: 50%; background: var(--swatch); }
+.draw-swatch.on { border-color: #fff; box-shadow: 0 0 0 2px var(--accent); }
+.draw-ref { display: grid; gap: 6px; }
+.draw-ref.hidden { display: none; }
+.draw-ref .text-button[aria-pressed="true"] { color: var(--accent); }
+.draw-layers { display: grid; gap: 4px; }
+.draw-layer { display: grid; grid-template-columns: 44px minmax(0, 1fr) 32px; align-items: center; gap: 8px; padding: 4px; border-radius: 10px; cursor: pointer; }
+.draw-layer.on { background: #ffffff14; box-shadow: inset 0 0 0 1px var(--accent); }
+.draw-thumb { width: 44px; height: 44px; border-radius: 6px; background: repeating-conic-gradient(#2a2a2a 0 25%, #222 0 50%) 0 0 / 10px 10px; }
+.draw-layer-name { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.draw-eye { width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: #e5e5e5; }
+.draw-eye.off { opacity: .4; }
+.draw-eye .icon { width: 16px; height: 16px; }
+.draw-layer-tools { display: flex; gap: 4px; }
+.draw-panel .rich-button { color: #e5e5e5; }
+.draw-panel .rich-select { max-width: none; width: 100%; }
+@media (max-width: 860px) {
+  .draw-body { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr) minmax(0, 40%); }
+  .draw-tools { display: flex; justify-content: center; border-right: 0; border-bottom: 1px solid #ffffff14; }
+  .draw-canvas { width: min(100%, 52dvh); }
+  .draw-panel { border-left: 0; border-top: 1px solid #ffffff14; }
+}
+
+/* ---------- contagem no topo, ao lado do nome: quadradinhos que rolam (GSAP), sem borda nem fundo ---------- */
+.trip-clock { flex: none; display: flex; align-items: center; gap: 10px; margin-right: auto; margin-left: 18px; padding: 0; border: 0; background: none; color: var(--ink); cursor: pointer; }
+.trip-clock.hidden, .in-call .trip-clock { display: none; }
+.trip-clock > .icon { width: 18px; height: 18px; color: var(--accent); }
+.clock-units { display: flex; align-items: flex-end; gap: 5px; }
+.clock-unit { display: grid; justify-items: center; gap: 2px; }
+.clock-box { position: relative; width: 30px; height: 30px; overflow: hidden; border-radius: 7px; background: color-mix(in srgb, var(--ink) 8%, transparent); }
+.clock-box b { position: absolute; inset: 0; display: grid; place-items: center; font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.clock-unit small { color: var(--faint); font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+.trip-clock.today .clock-units { display: none; }
+.trip-today { display: none; font-size: 13px; font-weight: 800; color: var(--accent); }
+.trip-clock.today .trip-today { display: inline; }
+@media (max-width: 760px) {
+  .trip-clock { gap: 6px; margin-left: 8px; }
+  .trip-clock > .icon, .clock-unit.seconds { display: none; }
+  .clock-box { width: 24px; height: 24px; border-radius: 6px; }
+  .clock-box b { font-size: 12px; }
+  .clock-unit small { font-size: 8px; }
+}
+
+.trip-change { margin-top: 10px; padding: 8px 16px; border: 1px solid #ffffff33; border-radius: 999px; background: transparent; color: #fff; font-size: 13px; font-weight: 600; }

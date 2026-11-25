@@ -309,6 +309,7 @@ function asset(string $file): string
             <button class="side-link" type="button" data-us-open="hoje"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-sun" /></svg></span><span class="side-text"><strong>Rotina do dia</strong><small>Acordar, refeições e hábitos</small></span></button>
             <button class="side-link" type="button" data-us-open="agenda"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-calendar" /></svg></span><span class="side-text"><strong>Agenda</strong><small id="side-agenda">Os compromissos dos dois</small></span></button>
             <button class="side-link" type="button" data-us-open="sonhos"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-sparkles" /></svg></span><span class="side-text"><strong>Sonhos e metas</strong><small>O que vamos realizar juntos</small></span></button>
+            <button class="side-link" type="button" data-us-open="nos"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-heart" /></svg></span><span class="side-text"><strong>Nós</strong><small>Dias juntos, distância e desenhos</small></span></button>
             <button class="side-link" type="button" data-us-open="cartinhas"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-mail" /></svg></span><span class="side-text"><strong>Cartinhas</strong><small>O nosso blog de cartas</small></span><b class="us-count letters-new hidden"></b></button>
             <button class="side-link" type="button" data-us-open="jogos"><span class="side-icon" aria-hidden="true"><svg class="icon"><use href="#i-dice" /></svg></span><span class="side-text"><strong>Jogos</strong><small>Velha, dama, memória, stop…</small></span><b class="us-count games-turn hidden"></b></button>
           </nav>
@@ -336,6 +337,13 @@ function asset(string $file): string
               <p id="peer-status" class="peer-status">Conectando…</p>
             </div>
           </div>
+          <!-- Contagem até o próximo encontro, ao lado do nome: quadradinhos que rolam quando o número muda. Tocar abre a
+               viagem (de lá dá para mudar a data). -->
+          <button id="trip-clock" class="trip-clock hidden" type="button">
+            <svg class="icon"><use href="#i-plane" /></svg>
+            <span class="clock-units" aria-hidden="true"><span class="clock-unit"><span class="clock-box"><b data-clock="d"></b></span><small>dias</small></span><span class="clock-unit"><span class="clock-box"><b data-clock="h"></b></span><small>h</small></span><span class="clock-unit"><span class="clock-box"><b data-clock="m"></b></span><small>min</small></span><span class="clock-unit seconds"><span class="clock-box"><b data-clock="s"></b></span><small>seg</small></span></span>
+            <span class="trip-today">É hoje</span>
+          </button>
           <div class="actions">
             <button id="search-button" class="icon-button" type="button" title="Pesquisar na conversa" aria-label="Pesquisar na conversa" aria-expanded="false" aria-controls="search-panel">
               <svg class="icon"><use href="#i-search" /></svg>
@@ -363,14 +371,6 @@ function asset(string $file): string
           </div>
         </header>
 
-        <!-- Contagem regressiva até o próximo encontro (a mesma para os dois). Tocar muda a data ou desliga. -->
-        <div id="countdown" class="countdown hidden">
-          <button id="countdown-fly" class="countdown-main" type="button" title="Ver a viagem">
-            <span class="countdown-icon" aria-hidden="true"><svg class="icon"><use href="#i-plane" /></svg></span>
-            <span class="countdown-text"><small id="countdown-label"></small><strong id="countdown-time"></strong></span>
-          </button>
-          <button id="countdown-edit" class="countdown-edit" type="button" title="Mudar a contagem" aria-label="Mudar a contagem"><svg class="icon"><use href="#i-pencil" /></svg></button>
-        </div>
         <div id="net-banner" class="net-banner hidden"><span class="spinner"></span><span id="net-text">Reconectando…</span></div>
 
         <div id="available-call" class="available-call hidden" role="region" aria-label="Chamada disponível para reentrar">
@@ -905,6 +905,16 @@ function asset(string $file): string
           </section>
 
           <!-- Cartinhas: o nosso blog. Cada um escreve para o outro; a nova aparece com o selo até ser aberta. -->
+          <!-- Nós: os widgets do casal (como os da tela inicial do celular) e a galeria de desenhos. -->
+          <section class="us-pane" data-pane="nos">
+            <div id="nos-widgets" class="nos-widgets"></div>
+            <div class="nos-head">
+              <h3 class="us-subtitle">Desenhos</h3>
+              <button id="drawing-new" class="pill gold small" type="button"><svg class="icon"><use href="#i-pencil" /></svg>Desenhar</button>
+            </div>
+            <div id="drawing-list" class="drawing-list"></div>
+          </section>
+
           <section class="us-pane" data-pane="cartinhas">
             <div class="pane-head">
               <p class="muted">O nosso blog de cartinhas. Escreva quando quiser; quem recebe vê o selo de nova até abrir.</p>
@@ -1212,6 +1222,67 @@ function asset(string $file): string
           <button id="letter-delete" class="text-button" type="button">Apagar</button>
         </div>
       </article>
+    </div>
+
+    <!-- Editor de desenho: ferramentas à esquerda, a tela no meio e, ao lado, o pincel, as cores, a imagem de referência
+         e as camadas. -->
+    <div id="draw-view" class="draw-view hidden" role="dialog" aria-modal="true" aria-label="Desenhar">
+      <div class="draw-shell">
+        <header class="draw-top">
+          <button id="draw-close" class="peer-close" type="button" title="Fechar sem salvar" aria-label="Fechar"><svg class="icon"><use href="#i-x" /></svg></button>
+          <input id="draw-title" class="field-input draw-title" type="text" maxlength="60" placeholder="Nome do desenho" aria-label="Nome do desenho" />
+          <button id="draw-undo" class="rich-button" type="button" title="Desfazer (Ctrl+Z)" aria-label="Desfazer"><svg class="icon"><use href="#i-undo" /></svg></button>
+          <button id="draw-redo" class="rich-button" type="button" title="Refazer (Ctrl+Y)" aria-label="Refazer"><svg class="icon"><use href="#i-redo" /></svg></button>
+          <button id="draw-save" class="pill gold small" type="button"><svg class="icon"><use href="#i-check" /></svg>Salvar</button>
+        </header>
+        <div class="draw-body">
+          <nav class="draw-tools" aria-label="Ferramentas">
+            <button type="button" data-draw-tool="brush" title="Pincel (B)" aria-label="Pincel"><svg class="icon"><use href="#i-pencil" /></svg></button>
+            <button type="button" data-draw-tool="eraser" title="Borracha (E)" aria-label="Borracha"><svg class="icon"><use href="#i-eraser" /></svg></button>
+            <button type="button" data-draw-tool="fill" title="Balde de tinta (G)" aria-label="Balde de tinta"><svg class="icon"><use href="#i-droplet" /></svg></button>
+            <button type="button" data-draw-tool="picker" title="Conta-gotas (I)" aria-label="Conta-gotas"><svg class="icon"><use href="#i-palette" /></svg></button>
+          </nav>
+          <div class="draw-stage"><canvas id="draw-canvas" class="draw-canvas"></canvas></div>
+          <aside class="draw-panel">
+            <section class="draw-group">
+              <h4>Pincel</h4>
+              <select id="draw-brush" class="rich-select" aria-label="Estilo do pincel">
+                <option value="caneta">Caneta</option><option value="lapis">Lápis</option><option value="marcador">Marcador</option><option value="aerografo">Aerógrafo</option><option value="caligrafia">Caligrafia</option>
+              </select>
+              <label class="draw-slider"><span>Tamanho <b id="draw-size-value"></b></span><input id="draw-size" type="range" min="1" max="120" /></label>
+              <label class="draw-slider"><span>Opacidade <b id="draw-opacity-value"></b></span><input id="draw-opacity" type="range" min="5" max="100" /></label>
+            </section>
+            <section class="draw-group">
+              <h4>Cor</h4>
+              <div class="draw-colors"><input id="draw-color" type="color" aria-label="Escolher a cor" /><div id="draw-swatches" class="draw-swatches"></div></div>
+            </section>
+            <section class="draw-group">
+              <h4>Imagem por baixo</h4>
+              <button id="draw-ref-pick" class="pill ghost small" type="button"><svg class="icon"><use href="#i-image" /></svg>Escolher imagem para contornar</button>
+              <div id="draw-ref-row" class="draw-ref hidden">
+                <label class="draw-slider"><span>Transparência</span><input id="draw-ref-opacity" type="range" min="5" max="100" /></label>
+                <button id="draw-ref-save" class="text-button" type="button" aria-pressed="false">Levar a imagem para o desenho salvo</button>
+                <button id="draw-ref-clear" class="text-button" type="button">Tirar a imagem</button>
+              </div>
+              <input id="draw-ref-input" type="file" accept="image/*" hidden />
+            </section>
+            <section class="draw-group">
+              <h4>Camadas</h4>
+              <div id="draw-layers" class="draw-layers"></div>
+              <div class="draw-layer-tools">
+                <button id="draw-layer-add" class="rich-button" type="button" title="Nova camada" aria-label="Nova camada"><svg class="icon"><use href="#i-plus" /></svg></button>
+                <button class="rich-button" type="button" data-layer-move="1" title="Subir a camada" aria-label="Subir a camada"><svg class="icon"><use href="#i-chevron-up" /></svg></button>
+                <button class="rich-button" type="button" data-layer-move="-1" title="Descer a camada" aria-label="Descer a camada"><svg class="icon"><use href="#i-chevron-down" /></svg></button>
+                <button id="draw-layer-remove" class="rich-button" type="button" title="Apagar a camada" aria-label="Apagar a camada"><svg class="icon"><use href="#i-trash" /></svg></button>
+              </div>
+              <label class="draw-slider"><span>Opacidade da camada</span><input id="draw-layer-opacity" type="range" min="0" max="100" /></label>
+              <select id="draw-layer-blend" class="rich-select" aria-label="Como a camada se mistura com as de baixo">
+                <option value="source-over">Normal</option><option value="multiply">Multiplicar</option><option value="overlay">Sobrepor</option><option value="screen">Clarear</option><option value="darken">Escurecer</option>
+              </select>
+            </section>
+          </aside>
+        </div>
+      </div>
     </div>
 
     <!-- Mesinha de jogo (velha, dama, memória e stop): o tabuleiro de uma partida da conversa, ao vivo para os dois. -->
