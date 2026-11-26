@@ -156,7 +156,7 @@
   -webkit-mask: none; mask: none; animation: none; rotate: -14deg; pointer-events: none; filter: drop-shadow(0 2px 2px #0006);
 }
 /* O pisca-pisca pendurado embaixo do topo (o SVG do app.js), com o brilho de cada lâmpada na cor dela. */
-:root[data-theme="natal"] .topbar { position: relative; }
+:root[data-theme="natal"] .topbar { position: relative; z-index: 6; } /* o pisca-pisca (filho do topo) fica na frente das mensagens */
 .xmas-lights { position: absolute; left: 0; right: 0; top: 100%; z-index: 4; width: 100%; height: 40px; margin-top: -6px; overflow: visible; pointer-events: none; }
 .xmas-lights .wire { fill: none; stroke: #ffffff24; stroke-width: 1; }
 .xmas-lights .bulb { filter: drop-shadow(0 0 3px var(--glow)) drop-shadow(0 0 8px var(--glow)); }
