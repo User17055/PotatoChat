@@ -3034,17 +3034,19 @@ button.w-note { cursor: pointer; }
 .letter-composer .sheet-body > [data-field="body"] .letter-page { height: auto; min-height: max(520px, calc(100dvh - 250px)); overflow: visible; }
 .letter-composer .sheet-body > [data-field="body"] .letter-rich { min-height: max(490px, calc(100dvh - 280px)); }
 
-/* Celular: a contagem ganha uma faixa própria embaixo do nome e dos botões (tamanho normal, com os segundos), em vez de
-   espremer tudo numa linha só. */
+/* Celular: tudo numa linha só; a contagem vira uma pílula pequena ao lado do nome ("15d 14h 13m"), sem os segundos. */
 @media (max-width: 760px) {
-  .topbar { flex-wrap: wrap; row-gap: 8px; }
-  .topbar > .trip-clock { order: 5; width: 100%; justify-content: center; gap: 10px; margin: 0; padding: 8px 0 2px; border-top: 1px solid var(--line); }
-  .topbar > .trip-clock > .icon { display: block; width: 16px; height: 16px; }
-  .topbar > .trip-clock .clock-units { gap: 6px; }
-  .topbar > .trip-clock .clock-box { width: 32px; height: 30px; border-radius: 8px; }
-  .topbar > .trip-clock .clock-box b { font-size: 14px; }
-  .topbar > .trip-clock .clock-unit small { font-size: 8.5px; }
-  .topbar > .trip-clock .clock-unit { display: grid; }
+  .topbar > .trip-clock { gap: 6px; margin: 0 auto 0 2px; padding: 5px 9px; border-radius: 999px; background: color-mix(in srgb, var(--ink) 7%, transparent); }
+  .topbar > .trip-clock > .icon { display: block; width: 13px; height: 13px; }
+  .topbar > .trip-clock .clock-units { align-items: center; gap: 5px; }
+  .topbar > .trip-clock .clock-unit { display: flex; align-items: center; gap: 1px; }
+  .topbar > .trip-clock .clock-unit.seconds, .topbar > .trip-clock .clock-unit small { display: none; }
+  .topbar > .trip-clock .clock-box { width: 17px; height: 18px; border-radius: 0; background: none; }
+  .topbar > .trip-clock .clock-box b { font-size: 13px; }
+  .topbar > .trip-clock .clock-unit::after { color: var(--faint); font-size: 10px; font-weight: 700; }
+  .topbar > .trip-clock .clock-unit:nth-child(1)::after { content: "d"; }
+  .topbar > .trip-clock .clock-unit:nth-child(2)::after { content: "h"; }
+  .topbar > .trip-clock .clock-unit:nth-child(3)::after { content: "m"; }
 }
 
 /* Cartinha em páginas, como no Canva: cada página tem a proporção de uma folha A4; a folha cresce de página em página
