@@ -238,7 +238,7 @@ svg { flex: none; }
 
 .login-panel { width: min(100%, 440px); margin: auto; padding: clamp(16px, 2.8vh, 30px) clamp(20px, 4vw, 32px); text-align: center; border-radius: 28px; background: linear-gradient(180deg, var(--hover), transparent 45%), var(--glass); backdrop-filter: blur(26px) saturate(1.3); -webkit-backdrop-filter: blur(26px) saturate(1.3); box-shadow: 0 30px 80px #0007; }
 .hero-potato { display: block; width: clamp(96px, 19vh, 170px); margin: 0 auto; padding: 0; border: 0; background: none; }
-.hero-potato img { display: block; width: 100%; height: auto; aspect-ratio: 1; object-fit: contain; overflow: visible; filter: drop-shadow(0 18px 30px color-mix(in srgb, var(--accent) 13%, transparent)); }
+.hero-potato svg { display: block; width: 100%; height: auto; aspect-ratio: 142 / 100; overflow: visible; filter: drop-shadow(0 18px 30px color-mix(in srgb, var(--accent) 13%, transparent)); }
 .eyebrow { margin: clamp(6px, 1.6vh, 16px) 0 8px; color: var(--accent); font-size: 11px; font-weight: 600; letter-spacing: .2em; text-transform: uppercase; }
 h1 { margin: 0; font-size: clamp(28px, min(7.5vw, 6vh), 48px); font-weight: 700; line-height: 1.08; letter-spacing: -.035em; }
 h1 .line { display: block; }
@@ -1094,7 +1094,7 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
 .app-shell.watching .watch-button { border-color: #a78bfa; color: #a78bfa; }
 .watch-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #0e0d14; color: #fff; }
 .watch-badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: linear-gradient(120deg, #7c3aed, #ef4444); font-size: 12.5px; font-weight: 700; letter-spacing: .03em; }
-.watch-badge .potato-mark { width: 22px; height: 22px; object-fit: contain; }
+.watch-badge .potato-mark { width: 24px; height: 17px; }
 .watch-who { flex: 1; min-width: 0; overflow: hidden; color: #ffffffa6; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
 .watch-head .watch-btn { background: #ffffff14; color: #fff; }
 .watch-head .watch-btn:hover { background: #ffffff26; }
@@ -1107,7 +1107,7 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
 /* "safe center": se não couber (celular deitado), começa do topo e rola, em vez de cortar em cima. */
 .watch-home, .watch-launch { flex: 1; min-height: 0; display: grid; place-content: center; place-content: safe center; justify-items: center; gap: 10px; padding: 24px; overflow: hidden; }
 .watch-picker-icon { width: 72px; height: 72px; display: grid; place-items: center; border-radius: 22px; background: linear-gradient(140deg, #7c3aed, #ef4444); box-shadow: 0 14px 40px #7c3aed55; }
-.watch-picker-icon img { width: 58px; height: 58px; object-fit: contain; filter: drop-shadow(0 4px 8px #0006); }
+.watch-picker-icon svg { width: 52px; filter: drop-shadow(0 4px 8px #0006); }
 .watch-home > strong, .watch-launch > strong { font-size: 20px; }
 /* A outra pessoa escolhendo agora ("Ana está escolhendo na Netflix…"). */
 .watch-browsing { display: inline-flex; align-items: center; gap: 8px; margin: 0; padding: 6px 12px; border-radius: 999px; background: #ffffff14; color: #ffffffd9; font-size: 12.5px; font-weight: 600; }
@@ -1635,6 +1635,7 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
 .side-link[data-us-open="sonhos"] .side-icon { --tone: #b38dff; }
 .side-link[data-us-open="cartinhas"] .side-icon { --tone: #ff7eb6; }
 .side-link[data-us-open="jogos"] .side-icon { --tone: #5ee0a0; }
+.side-link[data-us-open="nos"] .side-icon { --tone: #ff8c8c; }
 .side-link:hover .side-icon, .side-link.active .side-icon { transform: rotate(-6deg) scale(1.06); }
 .side-link.active .side-icon { background: color-mix(in srgb, var(--tone) 24%, var(--surface-3)); box-shadow: inset 0 0 0 1.5px var(--tone); }
 .side-text { flex: 1; min-width: 0; display: grid; }
@@ -2973,13 +2974,6 @@ button.w-note { cursor: pointer; }
 :is(.sticker-item, .gif-item) img { -webkit-user-drag: none; -webkit-touch-callout: none; user-select: none; }
 
 /* O botão de entretenimento no topo: no computador, com o nome do lado (é o lugar de tudo); no celular, só o ícone. */
-.hub-label { display: none; }
-.hub-card .watch-source[data-us-open="jogos"] { --brand: #2fbf71; }
-.hub-card .watch-source[data-us-open="nos"] { --brand: #ff7eb6; }
-.hub-card .watch-source[data-us-open="cartinhas"] { --brand: #ff8c1a; }
-.hub-card .watch-source[data-us-open="hoje"] { --brand: #ffd23f; }
-.hub-card .watch-source[data-us-open="agenda"] { --brand: #3fa9ff; }
-.hub-card .watch-source[data-us-open="sonhos"] { --brand: #8b5cf6; }
 
 /* No celular, a tela de entretenimento mostra todas as opções em grade (3 por linha), sem esconder nada para o lado, e
    fica mais alta, com rolagem, enquanto nada está passando. */
@@ -3000,38 +2994,14 @@ button.w-note { cursor: pointer; }
 .watch-recent { width: 100%; margin-top: 18px; }
 .watch-recent .watch-row { max-width: 100%; overflow-x: auto; }
 
-/* A tela do Entretenimento: um cartão escuro com as fileiras de opções (no celular, a tela toda). */
-.hub-view { z-index: 55; }
-.hub-card { width: min(100%, 760px); max-height: calc(100dvh - 40px); overflow-y: auto; padding: 22px 22px 26px; border: 1px solid #ffffff14; border-radius: 28px; background: radial-gradient(circle at 50% 0%, #2a1f45, #0c0b10 70%); color: #fff; box-shadow: 0 30px 80px #000c; text-align: center; }
-.hub-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
-.hub-head h2 { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -.02em; }
-.hub-head .peer-close { position: static; }
-.hub-card .watch-more-title { margin: 20px 0 6px; }
-.hub-card .watch-sources.watch-more { margin: 0 auto; padding: 4px 0 0; }
-.hub-card .watch-source { --brand: #e50914; }
-.hub-card #share-screen { --brand: #8b5cf6; }
-@media (max-width: 760px) {
-  .hub-view { padding: 0; }
-  .hub-card { width: 100%; height: 100dvh; max-height: none; border-radius: 0; padding-top: max(18px, var(--safe-top, 0px)); }
-}
-
 /* Barra lateral: as conversas rolam em cima e o seu perfil fica fixo no pé (nunca desce junto). */
 .sidebar { overflow: hidden; }
 .sidebar-top { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; scrollbar-width: none; }
 .sidebar-top::-webkit-scrollbar { display: none; }
 .sidebar-bottom { flex: none; }
 /* No Entretenimento: os números (cartinha nova, sua vez no jogo), o próximo compromisso e o pontinho do botão. */
-.hub-card .watch-source { position: relative; }
-.hub-card .us-count { position: absolute; top: 6px; right: 6px; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--live); color: #fff; font-size: 11px; font-weight: 800; line-height: 20px; }
-.hub-card .us-count.hidden { display: none; }
-.hub-next { max-width: 100%; overflow: hidden; color: #ffffff99; font-size: 10px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.hub-next:empty { display: none; }
-.hub-button { position: relative; }
-.hub-dot { position: absolute; top: 3px; right: 3px; width: 10px; height: 10px; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 2px var(--bg); }
-.hub-dot.hidden { display: none; }
 
 /* Com a sala aberta, o Entretenimento fica só na barra da sala (sem repetir no topo da conversa). */
-.app-shell.watching .hub-button { display: none; }
 
 /* Tela cheia da Watch Party: fora do cinema (botão Tela), a conversa aparece do lado (no celular, embaixo); no cinema,
    só a sala. */
@@ -3063,3 +3033,42 @@ button.w-note { cursor: pointer; }
 .letter-composer .sheet-body > [data-field="body"] .rich-bar { position: sticky; top: 0; z-index: 6; }
 .letter-composer .sheet-body > [data-field="body"] .letter-page { height: auto; min-height: max(520px, calc(100dvh - 250px)); overflow: visible; }
 .letter-composer .sheet-body > [data-field="body"] .letter-rich { min-height: max(490px, calc(100dvh - 280px)); }
+
+/* Celular: a contagem ganha uma faixa própria embaixo do nome e dos botões (tamanho normal, com os segundos), em vez de
+   espremer tudo numa linha só. */
+@media (max-width: 760px) {
+  .topbar { flex-wrap: wrap; row-gap: 8px; }
+  .topbar > .trip-clock { order: 5; width: 100%; justify-content: center; gap: 10px; margin: 0; padding: 8px 0 2px; border-top: 1px solid var(--line); }
+  .topbar > .trip-clock > .icon { display: block; width: 16px; height: 16px; }
+  .topbar > .trip-clock .clock-units { gap: 6px; }
+  .topbar > .trip-clock .clock-box { width: 32px; height: 30px; border-radius: 8px; }
+  .topbar > .trip-clock .clock-box b { font-size: 14px; }
+  .topbar > .trip-clock .clock-unit small { font-size: 8.5px; }
+  .topbar > .trip-clock .clock-unit { display: grid; }
+}
+
+/* Cartinha em páginas, como no Canva: cada página tem a proporção de uma folha A4; a folha cresce de página em página
+   (pelo botão ou sozinha, quando o texto passa) e uma linha fina marca onde uma página acaba. Tudo cabe sem rolar para
+   o lado: a barra de formatação quebra em linhas e as opções do papel ficam num painel ao lado (no celular, embaixo). */
+.letter-page.paged { --pages: 1; aspect-ratio: 1 / calc(1.414 * var(--pages)); height: auto !important; min-height: auto !important; overflow: visible !important; }
+.letter-page.paged .letter-rich { min-height: 100% !important; }
+.letter-page-view.paged { --pages: 1; aspect-ratio: 1 / calc(1.414 * var(--pages)); }
+.letter-page.paged::after, .letter-page-view.paged::after { content: ""; position: absolute; inset: 0 0 3px; z-index: 0; pointer-events: none; background: linear-gradient(to bottom, transparent calc(100% - 2px), color-mix(in srgb, var(--paper-ink, #000) 22%, transparent) 0) 0 0 / 100% calc(100% / var(--pages)) repeat-y; }
+.letter-add-page { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; max-width: 820px; margin: 2px auto 0; padding: 14px; border: 1.5px dashed var(--line); border-radius: 16px; background: transparent; color: var(--muted); font-weight: 700; transition: background .2s, color .2s, border-color .2s; }
+.letter-add-page:hover:not(:disabled) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--ink); }
+.letter-add-page:disabled { opacity: .45; }
+.letter-add-page .icon { width: 18px; height: 18px; }
+.letter-composer .rich-bar { flex-wrap: wrap; overflow: visible; }
+.letter-composer .letter-style-tools { order: 10; flex-wrap: wrap; gap: 14px 18px; overflow: visible; padding: 14px 2px 4px; border-bottom: 0; border-top: 1px solid var(--line); }
+.letter-composer .letter-style-tools > [data-field] { flex: 1 1 260px; width: auto; }
+.letter-composer .letter-style-tools .chips, .letter-composer .letter-style-tools .photos-field { flex-wrap: wrap; }
+@media (min-width: 1100px) {
+  .letter-composer .sheet-body > [data-field="title"] { max-width: 1120px; }
+  .letter-composer .sheet-body > [data-field="body"] { grid-template-columns: minmax(0, 820px) 280px; justify-content: center; column-gap: 20px; }
+  .letter-composer .sheet-body > [data-field="body"] > :not(.letter-style-tools) { grid-column: 1; }
+  .letter-composer .letter-style-tools { order: 0; grid-column: 2; grid-row: 1 / span 4; align-self: start; position: sticky; top: 0; flex-direction: column; flex-wrap: nowrap; max-height: calc(100dvh - 200px); overflow-y: auto; padding: 14px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface-2); }
+  .letter-composer .letter-style-tools > [data-field] { flex: none; }
+}
+/* A janela da cartinha tem a altura da tela (o 100% não resolvia dentro do modal e ela esticava do tamanho do texto,
+   sem rolar): assim a área da folha rola por dentro. */
+.letter-composer > .sheet-card { height: 100vh !important; height: 100dvh !important; max-height: none !important; }

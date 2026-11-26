@@ -857,12 +857,12 @@ try {
   // e continuar ficam marcados um pouco à frente, para os dois players saírem juntos (sem contagem na tela).
   const netflix = await withAck(dj1, "watch", { op: "start", query: "Stranger Things", service: "netflix" });
   assert.deepEqual([netflix.state.now.source, netflix.state.now.title, netflix.state.now.url], ["netflix", "Stranger Things", "https://www.netflix.com/search?q=Stranger%20Things"]);
-  assert.ok(netflix.state.updatedAt >= netflix.state.serverNow + 4000, "começam juntos daqui a uns segundos");
+  assert.ok(netflix.state.updatedAt <= netflix.state.serverNow, "começa na hora, no segundo informado pelo player");
   assert.equal((await withAck(dj2, "watch", { op: "countdown" })).error, "Comando desconhecido.");
   const reported = await withAck(dj2, "watch", { op: "pause", position: 754.2, duration: 3200 });
   assert.deepEqual([reported.state.playing, reported.state.position, reported.state.now.duration], [false, 754.2, 3200]);
   const resumedTogether = await withAck(dj1, "watch", { op: "resume", position: 754.2 });
-  assert.ok(resumedTogether.state.playing && resumedTogether.state.updatedAt >= resumedTogether.state.serverNow + 1000, "continuam juntos");
+  assert.ok(resumedTogether.state.playing && resumedTogether.state.updatedAt <= resumedTogether.state.serverNow, "continuam na hora");
   await withAck(dj1, "watch", { op: "pause", position: 754.2 });
   const hbo = await withAck(dj1, "watch", { op: "start", query: "https://play.max.com/video/watch/abc-1/def-2" });
   assert.deepEqual([hbo.state.now.source, hbo.state.now.url], ["max", "https://play.max.com/video/watch/abc-1/def-2"]);

@@ -306,6 +306,19 @@ function asset(string $file): string
           <div class="brand-row"><strong><span class="brand-initial">P</span>otato</strong></div>
           <div class="room-label">Conversas</div>
           <div id="people" class="people"></div>
+          <div class="room-label couple-only">Nosso cantinho</div>
+          <nav class="side-nav couple-only" aria-label="Nosso cantinho">
+            <button type="button" class="side-link" data-us-open="jogos"><span class="side-icon"><svg class="icon"><use href="#i-gamepad" /></svg></span><span class="side-text"><strong>Jogos</strong></span><b class="us-count games-turn hidden"></b></button>
+            <button type="button" class="side-link" data-us-open="nos"><span class="side-icon"><svg class="icon"><use href="#i-heart" /></svg></span><span class="side-text"><strong>Nós e desenhos</strong></span></button>
+            <button type="button" class="side-link" data-us-open="cartinhas"><span class="side-icon"><svg class="icon"><use href="#i-mail" /></svg></span><span class="side-text"><strong>Cartinhas</strong></span><b class="us-count letters-new hidden"></b></button>
+            <button type="button" class="side-link" data-us-open="hoje"><span class="side-icon"><svg class="icon"><use href="#i-sun" /></svg></span><span class="side-text"><strong>Rotina do dia</strong></span></button>
+            <button type="button" class="side-link" data-us-open="agenda"><span class="side-icon"><svg class="icon"><use href="#i-calendar" /></svg></span><span class="side-text"><strong>Agenda</strong><small id="side-agenda"></small></span></button>
+            <button type="button" class="side-link" data-us-open="sonhos"><span class="side-icon"><svg class="icon"><use href="#i-sparkles" /></svg></span><span class="side-text"><strong>Sonhos e metas</strong></span></button>
+          </nav>
+          <!-- Vídeo e tela ficam na ligação (o telefone do topo); estes, escondidos, servem aos atalhos (o perfil da pessoa). -->
+          <button id="audio-call" type="button" hidden title="Chamada de voz" data-title="Chamada de voz"></button>
+          <button id="video-call" type="button" hidden title="Chamada de vídeo" data-title="Chamada de vídeo"></button>
+          <button id="share-screen" type="button" hidden title="Transmitir tela" data-title="Transmitir tela"></button>
         </div>
         <!-- Seu perfil: foto, tema, notificações, sons e sair ficam todos na aba Perfil. -->
         <div class="sidebar-bottom">
@@ -348,11 +361,6 @@ function asset(string $file): string
             <button id="watch-button" class="icon-button watch-button" type="button" title="Batata Watch Party" aria-label="Abrir a Batata Watch Party" aria-pressed="false">
               <svg class="icon"><use href="#i-tv" /></svg>
               <span class="watch-dot" aria-hidden="true"></span>
-            </button>
-            <button id="hub-button" class="icon-button hub-button" type="button" title="Entretenimento" aria-label="Abrir o entretenimento: jogos, desenhos, cartinhas e mais" aria-haspopup="dialog" aria-controls="hub-view">
-              <svg class="icon"><use href="#i-apps" /></svg>
-              <span class="hub-label">Entretenimento</span>
-              <i class="hub-dot hidden" aria-hidden="true"></i>
             </button>
             <button id="music-button" class="icon-button music-button hidden" type="button" title="Música tocando" aria-label="Abrir o tocador de música" aria-expanded="false" aria-controls="music-panel">
               <span id="music-mini-art" class="mini-art" aria-hidden="true"></span>
@@ -829,11 +837,10 @@ function asset(string $file): string
         <header class="profile-top us-top">
           <button class="menu-button" type="button" data-menu title="Menu" aria-label="Abrir o menu" aria-controls="sidebar" aria-expanded="false"><svg class="icon"><use href="#i-menu" /></svg><i class="menu-dot hidden" aria-hidden="true"></i></button>
           <h2 id="us-title"><span class="us-title-icon" aria-hidden="true"><svg class="icon"><use id="us-title-icon" href="#i-sun" /></svg></span><span id="us-title-text">Rotina do dia</span></h2>
-          <!-- Os mesmos botões do topo da conversa (menos a lupa): ligar, Watch Party e o Entretenimento, para trocar de opção. -->
+          <!-- Os mesmos botões do topo da conversa (menos a lupa): ligar e a Watch Party. -->
           <div class="us-actions">
             <button class="icon-button" type="button" data-proxy="#call-button" title="Ligar por voz" aria-label="Ligar por voz"><svg class="icon"><use href="#i-phone" /></svg></button>
             <button class="icon-button" type="button" data-proxy="#watch-button" title="Batata Watch Party" aria-label="Abrir a Batata Watch Party"><svg class="icon"><use href="#i-tv" /></svg></button>
-            <button class="icon-button us-hub" type="button" data-open-hub title="Entretenimento" aria-label="Abrir o entretenimento"><svg class="icon"><use href="#i-apps" /></svg></button>
           </div>
         </header>
         <div id="us-scroll" class="us-scroll">
@@ -1222,28 +1229,6 @@ function asset(string $file): string
     </div>
 
     <!-- Entretenimento: uma tela própria com tudo o que é para fazer junto (fora a Watch Party, que é a TV). -->
-    <div id="hub-view" class="modal hub-view hidden" role="dialog" aria-modal="true" aria-labelledby="hub-title">
-      <div class="hub-card">
-        <header class="hub-head">
-          <h2 id="hub-title">Entretenimento</h2>
-          <button id="hub-close" class="peer-close" type="button" title="Fechar" aria-label="Fechar"><svg class="icon"><use href="#i-x" /></svg></button>
-        </header>
-                <!-- Vídeo e tela ficam na ligação (o telefone do topo); estes, escondidos, servem aos atalhos (o perfil da pessoa). -->
-                <button id="audio-call" type="button" hidden title="Chamada de voz" data-title="Chamada de voz"></button>
-                <button id="video-call" type="button" hidden title="Chamada de vídeo" data-title="Chamada de vídeo"></button>
-                <button id="share-screen" type="button" hidden title="Transmitir tela" data-title="Transmitir tela"></button>
-                <p class="watch-more-title">Nosso cantinho</p>
-                <div class="watch-sources watch-more" aria-label="Nosso cantinho">
-                  <button type="button" class="watch-source hub" data-hub-go data-us-open="jogos"><svg class="icon"><use href="#i-gamepad" /></svg><span>Jogos</span><b class="us-count games-turn hidden"></b></button>
-                  <button type="button" class="watch-source hub" data-hub-go data-us-open="nos"><svg class="icon"><use href="#i-heart" /></svg><span>Nós e desenhos</span></button>
-                  <button type="button" class="watch-source hub" data-hub-go data-us-open="cartinhas"><svg class="icon"><use href="#i-mail" /></svg><span>Cartinhas</span><b class="us-count letters-new hidden"></b></button>
-                  <button type="button" class="watch-source hub" data-hub-go data-us-open="hoje"><svg class="icon"><use href="#i-sun" /></svg><span>Rotina do dia</span></button>
-                  <button type="button" class="watch-source hub" data-hub-go data-us-open="agenda"><svg class="icon"><use href="#i-calendar" /></svg><span>Agenda</span><small id="side-agenda" class="hub-next"></small></button>
-                  <button type="button" class="watch-source hub" data-hub-go data-us-open="sonhos"><svg class="icon"><use href="#i-sparkles" /></svg><span>Sonhos e metas</span></button>
-                </div>
-      </div>
-    </div>
-
     <!-- Editor de desenho: ferramentas à esquerda, a tela no meio e, ao lado, o pincel, as cores, a imagem de referência
          e as camadas. -->
     <div id="draw-view" class="draw-view hidden" role="dialog" aria-modal="true" aria-label="Desenhar">

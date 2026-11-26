@@ -5816,7 +5816,7 @@ peopleEl.addEventListener("click", (event) => {
   if (event.target.closest("[data-add-person]")) return openAddPerson();
   const row = event.target.closest("[data-room]");
   if (!row) return;
-  setSidebarVisible(false);
+  closeDrawer();
   openRoom(row.dataset.room).then((opened) => { if (opened) showTab("chat"); });
 });
 
@@ -5860,7 +5860,7 @@ const addSheet = $("#add-person");
 let pendingInvite = "";
 
 function openAddPerson() {
-  setSidebarVisible(false);
+  closeDrawer();
   $("#invite-link").value = "";
   $("#invite-code").value = "";
   $("#invite-state").textContent = "Criando o link…";
@@ -6403,7 +6403,7 @@ async function returnToCall() {
   if (call !== active) return;
   active.minimized = false;
   showTab("chat");
-  setSidebarVisible(false);
+  closeDrawer();
   paintCallDock();
   $("#call-minimize").focus({ preventScroll: true });
 }
@@ -7292,37 +7292,11 @@ shareSheet.addEventListener("click", (event) => {
 
 // O botão do topo inicia logo uma chamada de voz; vídeo e tela ficam nos controles da chamada.
 $("#call-button").addEventListener("click", () => call ? returnToCall() : startCall("audio"));
-// Entretenimento: a tela com todas as opções (jogos, desenhos, cartinhas, rotina, agenda, sonhos, vídeo e tela). Escolher
-// fecha a tela (e a Watch Party, se estiver aberta) e a opção abre no lugar dela (o clique segue para ela).
-const hubView = $("#hub-view");
-function closeHub() {
-  hubView.classList.add("hidden");
-  document.removeEventListener("keydown", onHubKey, true);
-}
-function onHubKey(event) {
-  if (event.key !== "Escape") return;
-  event.stopPropagation();
-  closeHub();
-}
-// O mesmo Entretenimento no topo do Nosso cantinho (para trocar de opção sem voltar para a conversa).
+// Os botões do topo do Nosso cantinho fazem o mesmo que os do topo da conversa.
 document.addEventListener("click", (event) => {
-  if (event.target.closest("[data-open-hub]")) $("#hub-button").click();
-  // Os botões do topo do Nosso cantinho fazem o mesmo que os do topo da conversa.
   const proxy = event.target.closest("[data-proxy]");
   if (proxy && proxy.dataset.proxy === "#watch-button" && tab !== "chat") showTab("chat");
   if (proxy) $(proxy.dataset.proxy).click();
-});
-$("#hub-button").addEventListener("click", () => {
-  fx.press($("#hub-button"));
-  fx.show(hubView, { scale: 0.97 });
-  document.addEventListener("keydown", onHubKey, true);
-  sound.play("tap");
-});
-hubView.addEventListener("click", (event) => {
-  if (event.target === hubView || event.target.closest("#hub-close")) return closeHub();
-  if (!event.target.closest("[data-hub-go]")) return;
-  closeHub();
-  if (watchRoom) setWatchRoom(false);
 });
 $("#audio-call").addEventListener("click", () => startCall("audio"));
 $("#video-call").addEventListener("click", () => startCall("video"));
@@ -7598,8 +7572,6 @@ function paintUsBadge() {
     });
   }
   usNews = letters + turns + (tab === "us" ? 0 : usUnseen);
-  // O botão Entretenimento (onde ficam as cartinhas e os jogos) ganha o pontinho quando tem novidade lá.
-  $(".hub-dot").classList.toggle("hidden", !usNews);
   paintMenuDot();
   paintSideAgenda();
 }
@@ -7625,6 +7597,11 @@ document.querySelectorAll("[data-menu]").forEach((button) => {
   button.setAttribute("aria-label", visible ? "Ocultar menu" : "Abrir menu");
   button.title = visible ? "Ocultar menu" : "Abrir menu";
 });
+
+// Só a gaveta do celular fecha sozinha ao escolher algo; no computador, a barra lateral só abre e fecha pelo menu.
+function closeDrawer() {
+  if (!matchMedia("(min-width: 761px)").matches) setSidebarVisible(false);
+}
 
 function setSidebarVisible(visible) {
   if (matchMedia("(min-width: 761px)").matches) {
@@ -7661,7 +7638,7 @@ document.addEventListener("click", (event) => {
     return setSidebarVisible(desktop ? !desktopSidebarOpen : !chatView.classList.contains("menu-open"));
   }
   if (event.target.closest("#menu-backdrop")) return setSidebarVisible(false);
-  if (event.target.closest(".sidebar [data-tab-target], .sidebar [data-us-open]") && !matchMedia("(min-width: 761px)").matches) setSidebarVisible(false);
+  if (event.target.closest(".sidebar [data-tab-target], .sidebar [data-us-open]")) closeDrawer();
 });
 
 window.addEventListener("keydown", (event) => {
@@ -7711,6 +7688,7 @@ document.addEventListener("click", (event) => {
   const open = event.target.closest("[data-us-open]");
   if (!open) return;
   closeAttach();
+  if (watchRoom) setWatchRoom(false);
   const changed = tab === "us" && open.dataset.usOpen !== us.section;
   goUs(open.dataset.usOpen);
   if (!changed) return;
@@ -9587,6 +9565,8 @@ function paintLetter(letter) {
   $("#letter-body").classList.toggle("loading", letter.body == null);
   $("#letter-decor").replaceChildren(...(letter.decor || []).map((piece) => decorNode(piece)));
   $("#letter-page").classList.toggle("has-decor", Boolean(letter.decor?.length));
+  $("#letter-page").classList.toggle("paged", Boolean(letter.pages));
+  $("#letter-page").style.setProperty("--pages", letter.pages || 1);
   $("#letter-sign").textContent = `Com amor, ${letter.owner}`;
   const read = mine ? (letter.readAt ? ` · lida em ${longDate(letter.readAt)} às ${time(letter.readAt)}` : " · ainda não lida") : "";
   $("#letter-state").textContent = `${longDate(letter.createdAt)}${letter.edited ? " · editada" : ""}${read}`;
@@ -9631,7 +9611,7 @@ function writeLetter(letter = null) {
     submit: letter ? "Salvar" : "Enviar",
     fields: [
       { name: "title", type: "text", label: "Título", value: letter?.title ?? draft?.title, placeholder: "Para o meu amor", max: 120 },
-      { name: "body", type: "rich", value: { html: startHtml, decor: letter?.decor || [] }, style, onPaperColor: (color) => { style.paperColor = color; paintEditorPaper(); } },
+      { name: "body", type: "rich", value: { html: startHtml, decor: letter?.decor || [], pages: letter?.pages || draft?.pages || 1 }, style, onPaperColor: (color) => { style.paperColor = color; paintEditorPaper(); } },
       { name: "paper", type: "chips", label: "Papel", value: style.paper, options: PAPERS.map(([value, label]) => [value, label, `paper-${value}`]), onPick: restyle("paper") },
       { name: "pattern", type: "chips", label: "Fundo", value: style.pattern, options: LETTER_PATTERNS.map(([value, label]) => [value, label]), onPick: restyle("pattern") },
       { name: "border", type: "chips", label: "Borda", value: style.border, options: LETTER_BORDERS.map(([value, label]) => [value, label]), onPick: restyle("border") },
@@ -9641,7 +9621,7 @@ function writeLetter(letter = null) {
     ],
     // O rascunho (o texto formatado e o papel; sem as fotos, os áudios e as imagens soltas, que ainda não subiram) fica
     // guardado neste aparelho até a cartinha ser enviada.
-    onChange: letter ? null : ({ photos, audios, body, ...values }) => store.set("localStorage", LETTER_DRAFT_KEY, { ...values, paperColor: style.paperColor, html: body.html }),
+    onChange: letter ? null : ({ photos, audios, body, ...values }) => store.set("localStorage", LETTER_DRAFT_KEY, { ...values, paperColor: style.paperColor, html: body.html, pages: body.pages }),
     onSubmit: async ({ photos, audios, body, ...values }) => {
       if (sheetForm.querySelector('[data-field="audios"]')?.rec) throw new Error("Pare a gravação antes de enviar.");
       if (!body.text && !photos.length && !audios.length && !body.decor.length) throw new Error("Escreva alguma coisa na cartinha.");
@@ -9662,6 +9642,7 @@ function writeLetter(letter = null) {
         ...values,
         paperColor: style.paperColor,
         html: body.html,
+        pages: body.pages,
         decor: body.decor.map(({ type, key, url, x, y, w, rot, z, frame }) => ({ type, key, url, x, y, w, rot, z, frame })),
         photos: photos.map(({ key }) => ({ key })),
         audios: audios.map(({ key, duration, peaks, voice }) => ({ key, duration, peaks, voice }))
@@ -9810,6 +9791,10 @@ function paintRichState(wrap) {
   }
 }
 
+// Página da cartinha: altura = largura × 1,414 (a proporção de uma folha A4). Até 10 páginas (o servidor também limita).
+const PAGE_RATIO = 1.414;
+const LETTER_PAGES = 10;
+
 function richField(wrap, field) {
   wrap.decor = (field.value.decor || []).map((piece) => ({ ...piece }));
   wrap.picked = -1;
@@ -9880,8 +9865,29 @@ function richField(wrap, field) {
     group(button("image", "Imagem solta no papel", "photo"), button("sticker", "Figurinha no papel", "sticker"), photoInput),
     group(button("undo", "Desfazer", "undo"), button("redo", "Refazer", "redo"))
   );
-  const page = el("div", `letter-page ${paperClasses(field.style)}`);
+  const page = el("div", `letter-page paged ${paperClasses(field.style)}`);
   paintPaperColor(page, field.style.paperColor);
+  // Páginas, como no Canva: a folha tem a proporção de uma página e cresce de página em página. As imagens soltas
+  // guardam a posição em fração da altura, então a conta é refeita para elas não andarem quando a folha cresce.
+  const setPages = (count) => {
+    const before = page.offsetHeight;
+    wrap.pages = Math.max(1, Math.min(LETTER_PAGES, count));
+    page.style.setProperty("--pages", wrap.pages);
+    const after = page.offsetHeight;
+    if (before && after && before !== after) {
+      wrap.decor.forEach((piece) => { piece.y *= before / after; });
+      paintDecor(wrap);
+    }
+    addPage.disabled = wrap.pages >= LETTER_PAGES;
+  };
+  const addPage = el("button", "letter-add-page");
+  addPage.type = "button";
+  addPage.append(icon("plus"), el("span", "", "Adicionar página"));
+  addPage.addEventListener("click", () => {
+    setPages(wrap.pages + 1);
+    page.lastElementChild?.scrollIntoView?.({ block: "end", behavior: "smooth" });
+    sound.play("tap");
+  });
   const editor = el("div", "letter-rich");
   editor.contentEditable = "true";
   editor.setAttribute("role", "textbox");
@@ -9903,6 +9909,9 @@ function richField(wrap, field) {
   };
   editor.addEventListener("input", () => {
     liftImages();
+    // O texto passou do fim da última página: entra mais uma.
+    const pageHeight = page.offsetWidth * PAGE_RATIO;
+    if (pageHeight && page.offsetHeight > wrap.pages * pageHeight + 2) setPages(Math.ceil(page.offsetHeight / pageHeight));
     // Apagou tudo: sem o <br> que sobra, o "Escreva com o coração…" volta.
     if (!editor.textContent.trim() && !editor.querySelector("li")) editor.innerHTML = "";
   });
@@ -9930,7 +9939,9 @@ function richField(wrap, field) {
   const decor = el("div", "letter-decor editing");
   page.append(editor, decor);
   const stickerPicker = el("div", "decor-stickers hidden");
-  wrap.append(bar, stickerPicker, page);
+  wrap.append(bar, stickerPicker, page, addPage);
+  wrap.pages = 1;
+  setPages(field.value.pages || 1);
   paintDecor(wrap);
   liftImages();
 
@@ -10634,7 +10645,7 @@ function readSheet() {
         break;
       case "rich": {
         const editor = wrap.querySelector(".letter-rich");
-        values[field.name] = { html: editor.innerHTML, text: editor.innerText.trim(), decor: wrap.decor };
+        values[field.name] = { html: editor.innerHTML, text: editor.innerText.trim(), decor: wrap.decor, pages: wrap.pages };
         break;
       }
       case "audios":
@@ -11897,7 +11908,7 @@ window.addEventListener("message", (event) => {
 
 // ---------- início ----------
 
-document.querySelectorAll(".hero-potato, .potato-mini").forEach((potato) => potato.addEventListener("click", () => {
+document.querySelectorAll(".hero-potato").forEach((potato) => potato.addEventListener("click", () => {
   fx.squish(potato.querySelector("svg") || potato);
   sound.play("whoosh");
 }));
