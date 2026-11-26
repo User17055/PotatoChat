@@ -3034,19 +3034,14 @@ button.w-note { cursor: pointer; }
 .letter-composer .sheet-body > [data-field="body"] .letter-page { height: auto; min-height: max(520px, calc(100dvh - 250px)); overflow: visible; }
 .letter-composer .sheet-body > [data-field="body"] .letter-rich { min-height: max(490px, calc(100dvh - 280px)); }
 
-/* Celular: tudo numa linha só; a contagem vira uma pílula pequena ao lado do nome ("15d 14h 13m"), sem os segundos. */
+/* Celular: tudo numa linha só, com os quadradinhos (dias, horas e minutos; sem o avião e os segundos, para caber). */
 @media (max-width: 760px) {
-  .topbar > .trip-clock { gap: 6px; margin: 0 auto 0 2px; padding: 5px 9px; border-radius: 999px; background: color-mix(in srgb, var(--ink) 7%, transparent); }
-  .topbar > .trip-clock > .icon { display: block; width: 13px; height: 13px; }
-  .topbar > .trip-clock .clock-units { align-items: center; gap: 5px; }
-  .topbar > .trip-clock .clock-unit { display: flex; align-items: center; gap: 1px; }
-  .topbar > .trip-clock .clock-unit.seconds, .topbar > .trip-clock .clock-unit small { display: none; }
-  .topbar > .trip-clock .clock-box { width: 17px; height: 18px; border-radius: 0; background: none; }
-  .topbar > .trip-clock .clock-box b { font-size: 13px; }
-  .topbar > .trip-clock .clock-unit::after { color: var(--faint); font-size: 10px; font-weight: 700; }
-  .topbar > .trip-clock .clock-unit:nth-child(1)::after { content: "d"; }
-  .topbar > .trip-clock .clock-unit:nth-child(2)::after { content: "h"; }
-  .topbar > .trip-clock .clock-unit:nth-child(3)::after { content: "m"; }
+  .topbar > .trip-clock { gap: 0; margin: 0 auto 0 4px; }
+  .topbar > .trip-clock > .icon, .topbar > .trip-clock .clock-unit.seconds { display: none; }
+  .topbar > .trip-clock .clock-units { gap: 4px; }
+  .topbar > .trip-clock .clock-box { width: 26px; height: 26px; border-radius: 7px; }
+  .topbar > .trip-clock .clock-box b { font-size: 12.5px; }
+  .topbar > .trip-clock .clock-unit small { font-size: 7.5px; }
 }
 
 /* Cartinha em páginas, como no Canva: cada página tem a proporção de uma folha A4; a folha cresce de página em página
