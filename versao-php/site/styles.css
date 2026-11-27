@@ -2893,6 +2893,7 @@ button.w-note { cursor: pointer; }
 .w-label { color: #6e6e73; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .w-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 10px; font-size: 14.5px; }
 .w-row .icon { width: 18px; height: 18px; color: #3a5bd9; }
+button.w-row { padding: 0; border: 0; background: none; text-align: left; text-decoration: underline; text-underline-offset: 3px; }
 .w-row-title { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .w-row-left { color: #6e6e73; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
 /* A galeria de desenhos. */

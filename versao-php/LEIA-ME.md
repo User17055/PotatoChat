@@ -188,7 +188,7 @@ Os filmes da Netflix e da HBO Max são protegidos contra cópia: só tocam no si
 
 ## Contagem regressiva
 
-Uma faixa no topo da conversa conta os dias, horas, minutos e segundos até o próximo encontro, igual para os dois (no horário de cada aparelho). Começa marcada para **12 de dezembro de 2026**, "Até a gente se ver". Tocar nela muda o texto, o dia e a hora (se quiser) ou desliga; a mudança aparece na hora para a outra pessoa. No dia, vira "É hoje! 💛"; depois, some. Fica na tabela `potato_settings` (nome `countdown`) e some durante a chamada e a Watch Party.
+Uma faixa no topo da conversa conta os dias, horas, minutos e segundos até o próximo encontro, igual para os dois (no horário de cada aparelho). Começa marcada para **12 de dezembro de 2026**, "Até a gente se ver". Tocar nela muda o texto, o dia e a hora (se quiser) ou desliga (desligada, liga de novo em Nós, no card Próximos); a mudança aparece na hora para a outra pessoa. No dia, vira "É hoje! 💛"; depois, some. Fica na tabela `potato_settings` (nome `countdown`) e some durante a chamada e a Watch Party.
 
 ## Nosso cantinho
 

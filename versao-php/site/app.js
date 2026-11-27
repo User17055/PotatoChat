@@ -3644,6 +3644,7 @@ function paintCountdown() {
 function setCountdown(next) {
   countdown = next || null;
   paintCountdown();
+  if (tab === "us" && us.section === "nos" && nos.loaded) paintNos();
 }
 
 $("#trip-clock").addEventListener("click", () => flyToTrip());
@@ -8965,6 +8966,8 @@ function upcomingWidget() {
   const rows = [];
   const target = countdownTarget();
   if (target && target > Date.now()) rows.push(["plane", countdown.label, spanLabel(target - Date.now())]);
+  // Desligada, a contagem some do topo (o único caminho até a edição): aqui dá para ligar de novo.
+  if (!countdown) rows.push(["plane", "Ligar a contagem até o encontro", "", true]);
   const today = todayKey();
   for (let offset = 0; offset < 180 && rows.length < 4; offset += 1) {
     const day = shiftDay(today, offset);
@@ -8976,8 +8979,12 @@ function upcomingWidget() {
     }
   }
   if (!rows.length) rows.push(["calendar", "Nada marcado ainda", ""]);
-  for (const [iconName, title, left] of rows) {
-    const row = el("div", "w-row");
+  for (const [iconName, title, left, edit] of rows) {
+    const row = el(edit ? "button" : "div", "w-row");
+    if (edit) {
+      row.type = "button";
+      row.dataset.countdownEdit = "";
+    }
     row.append(icon(iconName), el("span", "w-row-title", title), el("span", "w-row-left", left));
     card.append(row);
   }
@@ -8987,6 +8994,7 @@ function upcomingWidget() {
 usView.addEventListener("click", (event) => {
   if (us.section !== "nos") return;
   if (event.target.closest("[data-nos-locate]")) return locateMe();
+  if (event.target.closest("[data-countdown-edit]")) return editCountdown();
   if (event.target.closest("[data-nos-note]")) {
     return openSheet({
       title: "Recadinho do widget",
