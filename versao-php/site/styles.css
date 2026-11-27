@@ -2654,9 +2654,16 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
   .watching .topbar { display: none; }
   .watching .conversation { height: 100dvh; min-height: 0; overflow: hidden; }
   .watching.watch-cinema .conversation > :is(.messages-wrap, .typing, .reply-bar) { display: none; }
-  .watching.watch-cinema .conversation > .composer { position: fixed; left: 50%; bottom: max(14px, var(--safe-bottom)); z-index: 70; display: flex !important; width: min(760px, calc(100vw - 32px)); margin: 0; transform: translateX(-50%); }
-  .watching.watch-cinema .watch-chat-overlay { bottom: 86px; left: 16px; }
+  /* A caixa de mensagem fica embaixo da sala, e não flutuando por cima: assim ela não tampa o play, o Tela e o fechar. */
+  .watching.watch-cinema .conversation > .composer { display: flex !important; }
   .watching.watch-cinema .watch-panel { flex: 1; display: flex; flex-direction: column; }
+  /* Barra do vídeo no celular: o título e a linha do tempo numa linha inteira em cima; os botões e o volume embaixo. */
+  .watch-bar { flex-wrap: wrap; row-gap: 8px; }
+  .watch-info { order: -1; flex-basis: 100%; }
+  .watch-volume { flex: 1; width: auto; }
+  .watch-volume input { flex: 1; width: auto; min-width: 0; }
+  /* Campos com letra menor que 16px fazem o iPhone dar zoom na página ao tocar neles (e a tela fica grande). */
+  :is(.composer textarea, .catalog-search input, .watch-form input) { font-size: 16px; }
   .watching.watch-cinema .watch-stage { flex: 1; max-height: none; aspect-ratio: auto; }
   .watching .watch-panel { margin: 0; border: 0; border-radius: 0; }
   .watching .watch-panel:not(.has-video) .watch-stage { aspect-ratio: auto; min-height: 380px; }
@@ -2975,12 +2982,8 @@ button.w-note { cursor: pointer; }
 
 /* O botão de entretenimento no topo: no computador, com o nome do lado (é o lugar de tudo); no celular, só o ícone. */
 
-/* No celular, a tela de entretenimento mostra todas as opções em grade (3 por linha), sem esconder nada para o lado, e
-   fica mais alta, com rolagem, enquanto nada está passando. */
+/* No celular, a tela de escolher rola por dentro quando não cabe (a altura vem da regra da sala no celular, lá em cima). */
 @media (max-width: 760px) {
-  .watch-sources.watch-more { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; margin-inline: 0; padding-inline: 14px; overflow: visible; -webkit-mask-image: none; mask-image: none; }
-  .watch-more .watch-source { width: auto; }
-  .watching .watch-panel:not(.has-video) .watch-stage { min-height: min(76dvh, 680px); }
   .watching .watch-panel:not(.has-video) .watch-picker { overflow-y: auto; overscroll-behavior: contain; }
 }
 
