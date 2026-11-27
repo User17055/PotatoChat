@@ -5497,7 +5497,25 @@ function paintWatch() {
   toggle.classList.toggle("is-off", !watch.playing || watchBlocked);
   toggle.title = watchBlocked ? "Assistir junto" : watch.playing ? "Pausar para os dois" : "Tocar para os dois";
   toggle.setAttribute("aria-label", toggle.title);
+  $("[data-watch-play]").classList.toggle("is-off", !watch.playing || watchBlocked);
   paintWatchTime();
+}
+
+// Controles por cima do vídeo: somem sozinhos 3 s depois, como no YouTube; com o vídeo pausado, ficam na tela.
+let watchTapTimer = 0;
+let watchTapAt = 0;
+let watchTapSide = 0;
+function showWatchControls(on = true) {
+  clearTimeout(watchTapTimer);
+  watchPanel.classList.toggle("controls", on);
+  const hide = () => (watch.playing ? watchPanel.classList.remove("controls") : (watchTapTimer = setTimeout(hide, 3000)));
+  if (on) watchTapTimer = setTimeout(hide, 3000);
+}
+
+function skipWatch(seconds) {
+  if (!watch.now || watchPlayer.live) return;
+  const length = watchPlayer.duration() || watch.now.duration || 0;
+  watchCommand("seek", { position: Math.max(0, Math.min(watchAt() + seconds, length ? length - 1 : Infinity)) });
 }
 
 function paintWatchTime() {
@@ -5710,7 +5728,26 @@ watchPanel.addEventListener("click", async (event) => {
   if (target.closest("#watch-unblock")) return watchListen();
   if (target.closest("#watch-upload-cancel")) return cancelWatchUpload();
   if (target.closest("#watch-full")) return setWatchExpanded(!watchPanel.classList.contains("expanded"));
-  if (target.closest("#watch-toggle")) {
+  const skip = target.closest("[data-watch-skip]");
+  if (skip) {
+    showWatchControls();
+    return skipWatch(Number(skip.dataset.watchSkip));
+  }
+  // Toque no vídeo: mostra ou esconde os controles. Dois toques seguidos no terço da esquerda ou da direita: 10 s.
+  if (target.closest("#watch-tap") && !target.closest("[data-watch-play]")) {
+    const box = watchStage.getBoundingClientRect();
+    const side = event.clientX < box.left + box.width / 3 ? -10 : event.clientX > box.right - box.width / 3 ? 10 : 0;
+    const twice = side && side === watchTapSide && Date.now() - watchTapAt < 350;
+    watchTapAt = Date.now();
+    watchTapSide = side;
+    if (twice) {
+      showWatchControls();
+      return skipWatch(side);
+    }
+    return showWatchControls(!watchPanel.classList.contains("controls"));
+  }
+  if (target.closest("[data-watch-play]")) showWatchControls();
+  if (target.closest("#watch-toggle, [data-watch-play]")) {
     if (watchBlocked) return watchListen();
     if (Date.now() - watchUnblockedAt < 1000) return;
     return watchCommand(watch.playing ? "pause" : "resume");

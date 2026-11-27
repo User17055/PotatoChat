@@ -1210,6 +1210,21 @@ button.add-person:hover .avatar.add-avatar { background: color-mix(in srgb, var(
 .watch-chat-message.leaving { opacity: 0; transform: translateY(8px); transition: opacity .35s, transform .35s; }
 @keyframes watch-chat-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 .watch-host video { object-fit: contain; background: #000; }
+/* Controles por cima do vídeo (como no YouTube do Android): voltar 10 s, play/pause e passar 10 s. Escondidos até um
+   toque; com o som barrado, somem para o toque chegar ao próprio player (no iPhone, tem que ser nele). */
+.watch-tap { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; gap: clamp(28px, 12vw, 80px); transition: background .2s; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.watch-panel.controls .watch-tap { background: #0000008c; }
+.watch-tap-btn { position: relative; width: 52px; height: 52px; display: grid; place-items: center; border: 0; border-radius: 50%; background: #0000004d; color: #fff; opacity: 0; pointer-events: none; transition: opacity .2s, transform .15s; }
+.watch-panel.controls .watch-tap-btn { opacity: 1; pointer-events: auto; }
+.watch-tap-btn:active { transform: scale(.9); }
+.watch-tap-btn .icon { width: 28px; height: 28px; }
+.watch-tap-btn .flip { transform: scaleX(-1); }
+.watch-tap-btn small { position: absolute; inset: 0; display: grid; place-items: center; font-size: 9.5px; font-weight: 800; }
+.watch-tap-btn.big { width: 68px; height: 68px; }
+.watch-tap-btn.big .icon { width: 34px; height: 34px; }
+.watch-tap-btn.big.is-off .when-off { margin-left: 4px; }
+.watch-panel.live [data-watch-skip] { visibility: hidden; }
+.watch-panel:not(.has-video) .watch-tap, .watch-panel:is([data-source="netflix"], [data-source="max"]) .watch-tap, .watch-stage.blocked .watch-tap { display: none; }
 /* Os controles são os nossos (iguais para os dois); o player só recebe toque quando o navegador exige. */
 .watch-host iframe { pointer-events: none; }
 .app-shell.watching { height: 100dvh; min-height: 0; overflow: hidden; }
@@ -2650,25 +2665,22 @@ textarea.field-input { line-height: 1.5; resize: vertical; }
   .music-button.has-art { gap: 7px; padding: 0 11px 0 4px; }
   .mini-art { width: 26px; height: 26px; }
   .music-empty { margin-top: 14vh; }
-  /* Sala no celular: o vídeo em cima, a conversa embaixo. No modo cinema, só o vídeo (a conversa some). */
+  /* Sala no celular: sempre o vídeo em cima e a conversa embaixo (também no cinema e na tela cheia). Com o celular em
+     pé, o vídeo não cresce mais que a largura, então o botão Tela e as mensagens por cima do vídeo não servem aqui. */
   .watching .topbar { display: none; }
   .watching .conversation { height: 100dvh; min-height: 0; overflow: hidden; }
-  .watching.watch-cinema .conversation > :is(.messages-wrap, .typing, .reply-bar) { display: none; }
-  /* A caixa de mensagem fica embaixo da sala, e não flutuando por cima: assim ela não tampa o play, o Tela e o fechar. */
-  .watching.watch-cinema .conversation > .composer { display: flex !important; }
-  .watching.watch-cinema .watch-panel { flex: 1; display: flex; flex-direction: column; }
-  /* Barra do vídeo no celular: o título e a linha do tempo numa linha inteira em cima; os botões e o volume embaixo. */
+  :is(#watch-view, .watch-chat-overlay) { display: none; }
+  /* Barra do vídeo no celular: o título e a linha do tempo numa linha inteira em cima; embaixo o play, um volume
+     pequeno e o fechar no canto. */
   .watch-bar { flex-wrap: wrap; row-gap: 8px; }
   .watch-info { order: -1; flex-basis: 100%; }
-  .watch-volume { flex: 1; width: auto; }
-  .watch-volume input { flex: 1; width: auto; min-width: 0; }
+  .watch-volume { width: auto; margin-right: auto; }
+  .watch-volume input { width: 72px; }
   /* Campos com letra menor que 16px fazem o iPhone dar zoom na página ao tocar neles (e a tela fica grande). */
   :is(.composer textarea, .catalog-search input, .watch-form input) { font-size: 16px; }
-  .watching.watch-cinema .watch-stage { flex: 1; max-height: none; aspect-ratio: auto; }
   .watching .watch-panel { margin: 0; border: 0; border-radius: 0; }
-  .watching .watch-panel:not(.has-video) .watch-stage { aspect-ratio: auto; min-height: 380px; }
-  .watching .watch-panel.browsing:not(.has-video) .watch-stage { min-height: min(66dvh, 560px); }
-  .watching.watch-cinema .watch-panel:not(.has-video) .watch-stage { min-height: 0; }
+  /* Escolhendo (os serviços ou o catálogo do YouTube): metade da tela; a outra metade fica para a conversa. */
+  .watching .watch-panel:not(.has-video) .watch-stage { aspect-ratio: auto; min-height: 50dvh; }
   .catalog-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 10px; padding-inline: 12px; }
   .catalog-head { padding-inline: 12px; }
   .catalog-shelves { padding-inline: 12px; }
@@ -3006,12 +3018,12 @@ button.w-note { cursor: pointer; }
 
 /* Com a sala aberta, o Entretenimento fica só na barra da sala (sem repetir no topo da conversa). */
 
-/* Tela cheia da Watch Party: fora do cinema (botão Tela), a conversa aparece do lado (no celular, embaixo); no cinema,
-   só a sala. */
-.app-shell.watching:not(.watch-cinema) .watch-panel.expanded { right: 380px; }
+/* Tela cheia da Watch Party: no computador, fora do cinema (botão Tela), a conversa aparece do lado; no cinema, só a
+   sala. No celular, a conversa aparece sempre embaixo. */
+@media (min-width: 761px) { .app-shell.watching:not(.watch-cinema) .watch-panel.expanded { right: 380px; } }
 @media (max-width: 760px) {
-  .app-shell.watching:not(.watch-cinema) .watch-panel.expanded { right: 0; bottom: 48%; }
-  .app-shell.watching:not(.watch-cinema):has(.watch-panel.expanded) .conversation { padding-top: 52dvh; }
+  .app-shell.watching .watch-panel.expanded { bottom: 48%; }
+  .app-shell.watching:has(.watch-panel.expanded) .conversation { padding-top: 52dvh; }
 }
 
 /* Os botões do topo do Nosso cantinho (ligar, Watch Party e Entretenimento), no canto direito. */

@@ -469,6 +469,15 @@ function asset(string $file): string
           <div id="watch-stage" class="watch-stage">
             <div id="watch-host" class="watch-host"></div>
             <div id="watch-chat-overlay" class="watch-chat-overlay" aria-live="polite" aria-label="Mensagens recentes"></div>
+            <!-- Como no YouTube do Android: um toque no vídeo mostra os controles; dois toques num lado voltam ou passam 10 s. -->
+            <div id="watch-tap" class="watch-tap">
+              <button type="button" class="watch-tap-btn" data-watch-skip="-10" title="Voltar 10 segundos" aria-label="Voltar 10 segundos"><svg class="icon"><use href="#i-rotate-ccw" /></svg><small>10</small></button>
+              <button type="button" class="watch-tap-btn big swap" data-watch-play title="Tocar ou pausar" aria-label="Tocar ou pausar">
+                <svg class="icon when-on"><use href="#i-pause" /></svg>
+                <svg class="icon when-off"><use href="#i-play" /></svg>
+              </button>
+              <button type="button" class="watch-tap-btn" data-watch-skip="10" title="Passar 10 segundos" aria-label="Passar 10 segundos"><svg class="icon flip"><use href="#i-rotate-ccw" /></svg><small>10</small></button>
+            </div>
             <!-- Nada passando: o catálogo, como no Rave. Primeiro os serviços; cada um abre a tela dele. -->
             <div id="watch-picker" class="watch-picker hidden">
               <div id="watch-home" class="watch-home">
