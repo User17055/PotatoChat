@@ -5251,7 +5251,8 @@ function openWatchService(source) {
 // (android/app/src/main/assets/stream-sync.js) faz o player seguir a sala e conta o que a pessoa faz no player. Este lado
 // só faz a ponte, como a extensão faz no computador: o estado da sala vai para o app, e o que vem de lá vira comando da
 // sala. Os dois começam, pausam e continuam juntos, sem contagem.
-const nativeStream = () => inAndroid && Boolean(window.__potatoNativeStream && window.PotatoAndroid);
+// O app do computador (desktop/) usa a mesma ponte, com a Netflix e a HBO Max numa janela dele.
+const nativeStream = () => (inAndroid || /PotatoChatDesktop/.test(navigator.userAgent)) && Boolean(window.__potatoNativeStream && window.PotatoAndroid);
 const tellStream = (message) => {
   try { window.PotatoAndroid.postMessage(JSON.stringify(message)); } catch {}
 };

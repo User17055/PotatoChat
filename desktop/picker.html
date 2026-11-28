@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Transmitir a tela</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 20px; background: #16161a; color: #f3f1ec; font: 14px system-ui, sans-serif; }
+  h1 { margin: 0 0 4px; font-size: 18px; }
+  p { margin: 0 0 16px; color: #a9a6a0; }
+  h2 { margin: 18px 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: #a9a6a0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+  button.source { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 2px solid transparent; border-radius: 10px; background: #222228; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  button.source:hover, button.source:focus-visible { border-color: #f5c04f; outline: none; }
+  button.source img { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #000; border-radius: 6px; }
+  button.source span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .cancel { position: fixed; top: 16px; right: 20px; padding: 8px 14px; border: 0; border-radius: 8px; background: #2e2e36; color: inherit; font: inherit; cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>O que você quer mostrar?</h1>
+<p>Escolha uma tela inteira ou uma janela.</p>
+<button class="cancel" type="button" onclick="window.close()">Cancelar</button>
+<h2>Telas</h2><div class="grid" id="screens"></div>
+<h2>Janelas</h2><div class="grid" id="windows"></div>
+<script>
+  // A lista vem do app (main.js); a escolha volta pelo # do endereço.
+  function show(sources) {
+    for (const source of sources) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "source";
+      const img = document.createElement("img");
+      img.src = source.thumb;
+      img.alt = "";
+      const name = document.createElement("span");
+      name.textContent = source.name;
+      button.append(img, name);
+      button.addEventListener("click", () => { location.hash = encodeURIComponent(source.id); });
+      document.getElementById(source.screen ? "screens" : "windows").append(button);
+    }
+    document.querySelector("button.source")?.focus();
+  }
+  addEventListener("keydown", (event) => { if (event.key === "Escape") window.close(); });
+</script>
+</body>
+</html>

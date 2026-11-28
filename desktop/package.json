@@ -1,0 +1,47 @@
+{
+  "name": "potato-chat-desktop",
+  "productName": "Potato Chat",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Potato Chat para o computador: o mesmo site, com transmissão de tela com som e Netflix e HBO Max sincronizadas.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "check": "node --check main.js && node --check preload-site.js && node --check preload-stream.js && node --check vmp-sign.js && node --check test.js",
+    "sign-dev": "python -m castlabs_evs.vmp sign-pkg node_modules/electron/dist",
+    "dist": "electron-builder --win",
+    "test": "electron test.js"
+  },
+  "devDependencies": {
+    "electron": "https://github.com/castlabs/electron-releases#v45.2.1+wvcus",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "com.potatochat.desktop",
+    "productName": "Potato Chat",
+    "electronDownload": {
+      "mirror": "https://github.com/castlabs/electron-releases/releases/download/"
+    },
+    "files": [
+      "main.js",
+      "preload-site.js",
+      "preload-stream.js",
+      "picker.html",
+      "icon.png"
+    ],
+    "extraResources": [
+      {
+        "from": "../android/app/src/main/assets/stream-sync.js",
+        "to": "stream-sync.js"
+      }
+    ],
+    "afterPack": "./vmp-sign.js",
+    "win": {
+      "target": "nsis",
+      "icon": "icon.png"
+    },
+    "nsis": {
+      "oneClick": true
+    }
+  }
+}

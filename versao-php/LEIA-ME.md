@@ -181,6 +181,7 @@ Os filmes da Netflix e da HBO Max são protegidos contra cópia: só tocam no si
 - **Mesma conta ou uma para cada:** cada um assiste na própria tela, logado na Netflix ou na HBO Max. Pode ser a mesma conta nos dois aparelhos (cada um no seu perfil; o plano precisa permitir 2 telas ao mesmo tempo) ou contas diferentes: o tempo é sincronizado pela sala, não pela conta. Se vocês moram em casas diferentes, a Netflix e a HBO Max podem pedir verificação ou cobrar à parte pelo uso fora de casa.
 - **Transmitir a tela da Netflix numa chamada não funciona:** a proteção deles deixa o vídeo preto para quem assiste.
 - **No computador, com a extensão do Chrome (versão 2.2.0):** toque na Netflix (ou na HBO Max) no catálogo da sala; ela abre numa aba. Escolha o filme ou o episódio e dê o play: a sala começa sozinha para os dois, com o nome do que está passando. A aba da Netflix da outra pessoa vai junto para o mesmo título (se não estiver aberta, o botão **Abrir na Netflix** da sala abre ele). Depois, o player de cada um segue a sala (play, pause e o mesmo segundo), e o play, o pause ou o avanço dado lá vale para os dois. No próximo episódio, a sala e a outra aba vão junto.
+- **No app do computador** (veja [App do computador](#app-do-computador-windows)): igual à extensão, sem precisar dela. A Netflix e a HBO Max abrem numa janela do próprio app, com a conta de cada um, e seguem a sala do mesmo jeito.
 - Assistindo sozinho, sem ter aberto pela sala, a extensão não mexe em nada.
 - **No celular:** os apps da Netflix e da HBO Max não deixam nenhum outro app mandar no player nem dizer o que está passando. Escolha no app, volte para a sala e toque em **Começar a sessão**; depois, use a **Contagem 3, 2, 1**, que aparece nos dois aparelhos no mesmo instante, para darem o play juntos. Quando alguém pausa, o outro recebe o aviso para pausar também.
 - A sala mostra o título, o relógio da sessão (igual para os dois) e o botão **Abrir na Netflix** / **Abrir na HBO Max**.
@@ -275,6 +276,34 @@ O botão de telefone no topo da conversa abre o menu: chamada de voz, de vídeo 
 - **Enquadramento:** cada câmera aparece no formato dela (celular em pé fica em pé), sem cortar o rosto.
 
 **Requisitos:** PHP 7.4 ou superior com a extensão `pdo_mysql` (vem ativa em praticamente todas as hospedagens), e MySQL 5.6+ ou MariaDB 10.1+.
+
+## App do computador (Windows)
+
+A pasta `desktop/`, na raiz do repositório, tem o Potato Chat como programa do Windows. A janela abre o próprio site (`https://potato.andrejrs.com.br/`), então é tudo igual e cada atualização do site já vale no app, sem reinstalar. O que o app acrescenta:
+
+- **Transmitir a tela com som**, com um seletor de telas e janelas (com miniatura). O som que vai junto é o do computador inteiro: se a outra pessoa ouvir eco da própria voz durante a chamada, transmita sem o som.
+- **Netflix e HBO Max dentro do app, como no Rave:** na Batata Watch Party, tocar na Netflix ou na HBO Max abre uma janela do app com o serviço (o login é feito uma vez e fica guardado neste computador; nenhuma senha passa pelo Potato). O player segue a sala do mesmo jeito que a extensão e o app do Android. Por baixo, é a mesma ponte do Android (`android/app/src/main/assets/stream-sync.js`).
+- Abrir o app de novo só traz a janela que já está aberta para a frente; links de fora abrem no navegador.
+
+**Testar e gerar o instalador** (Node 22+):
+
+```
+cd desktop
+npm install
+npm test        # abre o site de verdade e confere a transmissão, a ponte da Watch Party e o Widevine
+npm start       # abre o app
+npm run dist    # gera o instalador em desktop/dist/
+```
+
+**Assinatura para a Netflix e a HBO Max (uma vez por computador):** elas só tocam num app com a assinatura VMP do Widevine. O app usa o Electron da castLabs, que tem o Widevine, e a assinatura é feita de graça pela conta EVS da castLabs:
+
+```
+python -m pip install --upgrade castlabs-evs
+python -m castlabs_evs.account signup     # cria a conta (pede e-mail e senha)
+npm run sign-dev                          # só para testar com npm start
+```
+
+O `npm run dist` assina o app sozinho depois de montar (e falha com aviso se a conta não existir). Sem a assinatura, o resto do app funciona, mas a Netflix e a HBO Max podem recusar o vídeo; nesse caso, a extensão do Chrome continua valendo.
 
 ## Extensão do Chrome
 
